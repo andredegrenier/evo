@@ -17,6 +17,8 @@ pub struct EvoApp {
     show_thumbnails: bool,
     flatten_on_save: bool,
     temp_print_files: Vec<PathBuf>,
+    /// OS blur-behind is active; panels use translucent fills.
+    glass: bool,
 }
 
 const ZOOM_STEP: f32 = 1.25;
@@ -24,17 +26,25 @@ const ZOOM_STEP: f32 = 1.25;
 impl EvoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
+        let glass = apply_window_effects(cc);
+        crate::ui::theme::apply(&cc.egui_ctx, glass);
         let mut app = Self {
             dc: None,
             error: None,
             show_thumbnails: true,
             flatten_on_save: false,
             temp_print_files: Vec::new(),
+            glass,
         };
         if let Some(path) = initial_file {
             app.open_path(path, &cc.egui_ctx);
         }
         app
+    }
+
+    fn set_glass(&mut self, ctx: &egui::Context, glass: bool) {
+        self.glass = glass;
+        crate::ui::theme::apply(ctx, glass);
     }
 
     fn open_path(&mut self, path: PathBuf, ctx: &egui::Context) {
@@ -428,6 +438,14 @@ impl EvoApp {
                 }
                 ui.separator();
                 ui.checkbox(&mut self.show_thumbnails, "Show Thumbnails");
+                let mut solid = !self.glass;
+                if ui
+                    .checkbox(&mut solid, "Solid Background")
+                    .on_hover_text("Disable window translucency")
+                    .changed()
+                {
+                    self.set_glass(ctx, !solid);
+                }
             });
         });
     }
@@ -466,6 +484,16 @@ impl EvoApp {
 }
 
 impl eframe::App for EvoApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        if self.glass {
+            [0.0, 0.0, 0.0, 0.0]
+        } else if _visuals.dark_mode {
+            egui::Color32::from_gray(24).to_normalized_gamma_f32()
+        } else {
+            egui::Color32::from_gray(240).to_normalized_gamma_f32()
+        }
+    }
+
     fn on_exit(&mut self) {
         for path in self.temp_print_files.drain(..) {
             let _ = std::fs::remove_file(path);
@@ -524,8 +552,9 @@ impl eframe::App for EvoApp {
                 .show(ui, |ui| {
                     ui::inspector::show(ui, dc);
                 });
+            let fill = ui::theme::canvas_fill(ctx, self.glass);
             egui::CentralPanel::default_margins()
-                .frame(egui::Frame::default().fill(egui::Color32::from_gray(60)))
+                .frame(egui::Frame::default().fill(fill))
                 .show(ui, |ui| {
                     ui::canvas::show(ui, dc);
                 });
@@ -553,6 +582,31 @@ impl eframe::App for EvoApp {
                     }
                 });
         }
+    }
+}
+
+/// Try to enable OS blur-behind. Returns whether it took effect.
+fn apply_window_effects(cc: &eframe::CreationContext<'_>) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use window_vibrancy::{NSVisualEffectMaterial, apply_vibrancy};
+        apply_vibrancy(
+            cc,
+            NSVisualEffectMaterial::UnderWindowBackground,
+            None,
+            None,
+        )
+        .is_ok()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use window_vibrancy::{apply_acrylic, apply_mica};
+        apply_mica(cc, None).is_ok() || apply_acrylic(cc, Some((24, 24, 28, 130))).is_ok()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = cc;
+        false
     }
 }
 

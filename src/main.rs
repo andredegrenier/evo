@@ -31,7 +31,8 @@ fn main() -> eframe::Result {
             .with_inner_size([1200.0, 850.0])
             .with_min_inner_size([700.0, 500.0])
             .with_title("evo")
-            .with_icon(load_icon()),
+            .with_icon(load_icon())
+            .with_transparent(true),
         ..Default::default()
     };
 

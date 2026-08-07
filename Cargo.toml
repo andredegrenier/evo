@@ -17,6 +17,7 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 lopdf = "0.44"
 rfd = "0.17"
 thiserror = "2"
+window-vibrancy = "0.8.0"
 
 [profile.release]
 lto = "thin"
