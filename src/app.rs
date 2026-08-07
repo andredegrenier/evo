@@ -1,12 +1,15 @@
 //! Top-level application: window layout, menus, keyboard shortcuts, and
 //! open/save orchestration.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 
 use crate::doc::Document;
 use crate::doc::history::Command;
+use crate::export::pdf::OcrLine;
+use crate::library::extract::TextSource;
 use crate::state::DocState;
 use crate::tools::{self, ActiveTool};
 use crate::ui;
@@ -17,6 +20,8 @@ pub struct EvoApp {
     error: Option<String>,
     show_thumbnails: bool,
     flatten_on_save: bool,
+    /// Write the ⌘F OCR text into exports as an invisible text layer.
+    embed_ocr_on_save: bool,
     temp_print_files: Vec<PathBuf>,
     /// OS blur-behind is active; panels use translucent fills.
     glass: bool,
@@ -58,6 +63,7 @@ impl EvoApp {
             error: None,
             show_thumbnails: true,
             flatten_on_save: false,
+            embed_ocr_on_save: false,
             temp_print_files: Vec::new(),
             glass,
             theme,
@@ -166,6 +172,15 @@ impl EvoApp {
         }
     }
 
+    /// Whether the ⌘F cache holds OCR text that could be embedded on save.
+    fn has_ocr_text(&self) -> bool {
+        self.dc.as_ref().is_some_and(|dc| {
+            dc.page_text
+                .values()
+                .any(|page| page.source == Some(TextSource::Ocr))
+        })
+    }
+
     fn save_pdf_as(&mut self) {
         let Some(dc) = &self.dc else { return };
         let default_name = dc
@@ -184,6 +199,7 @@ impl EvoApp {
         };
         let options = crate::export::pdf::ExportOptions {
             flatten: self.flatten_on_save,
+            ocr_layers: self.embed_ocr_on_save.then(|| ocr_layers(dc)).flatten(),
         };
         if let Err(e) =
             crate::export::pdf::export_pdf(&dc.doc, &dc.pages, &dc.store, options, &path)
@@ -503,12 +519,27 @@ impl EvoApp {
                     self.save_pdf_as();
                     ui.close();
                 }
+                let has_ocr = self.has_ocr_text();
                 ui.add_enabled_ui(has_doc, |ui| {
                     ui.checkbox(&mut self.flatten_on_save, "Flatten markup on save")
                         .on_hover_text(
                             "Bake markup into the page content instead of keeping \
                              editable annotations",
                         );
+                    let ocr = ui.add_enabled(
+                        has_ocr,
+                        egui::Checkbox::new(&mut self.embed_ocr_on_save, "Embed OCR text layer"),
+                    );
+                    if has_ocr {
+                        ocr.on_hover_text(
+                            "Write the recognized text invisibly over scanned pages so \
+                             the exported PDF is selectable and searchable",
+                        );
+                    } else {
+                        ocr.on_disabled_hover_text(
+                            "Open Find (⌘F) once to run OCR on scanned pages",
+                        );
+                    }
                 });
                 if ui
                     .add_enabled(has_doc, egui::Button::new("Export SVG…"))
@@ -889,6 +920,38 @@ impl eframe::App for EvoApp {
                 });
         }
     }
+}
+
+/// Collect the OCR text the ⌘F cache holds, keyed by source page, as export
+/// layers. Pages whose text came from the PDF itself are skipped: they are
+/// already selectable.
+fn ocr_layers(dc: &DocState) -> Option<HashMap<usize, Vec<OcrLine>>> {
+    let mut layers: HashMap<usize, Vec<OcrLine>> = HashMap::new();
+    for (&page, layout) in &dc.page_text {
+        if layout.source != Some(TextSource::Ocr) {
+            continue;
+        }
+        let lines: Vec<OcrLine> = layout
+            .lines
+            .iter()
+            .filter(|line| !line.text.trim().is_empty())
+            .filter_map(|line| {
+                let rect = line
+                    .chars
+                    .iter()
+                    .map(|c| c.rect)
+                    .reduce(|acc, r| acc.union(r))?;
+                Some(OcrLine {
+                    text: line.text.clone(),
+                    rect,
+                })
+            })
+            .collect();
+        if !lines.is_empty() {
+            layers.insert(page, lines);
+        }
+    }
+    (!layers.is_empty()).then_some(layers)
 }
 
 /// Try to enable OS blur-behind. Returns whether it took effect.

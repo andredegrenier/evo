@@ -3,21 +3,33 @@
 //! every viewer shows them identically), or flattened into the page content.
 //! Page rotate/delete/reorder are applied here too.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use lopdf::{Dictionary, Document as LoDocument, Object, ObjectId, Stream, dictionary};
 
 use crate::doc::annotation::{Annotation, AnnotationKind, Color, TextAlign};
-use crate::doc::geometry::PdfPoint;
+use crate::doc::geometry::{PdfPoint, PdfRect};
 use crate::doc::page_ops::PageList;
 use crate::doc::store::AnnotationStore;
 use crate::doc::{Document, PageInfo};
 
-#[derive(Clone, Copy, Default)]
+/// One line of OCR text to write invisibly over a scanned page, in display
+/// space (PDF points, y-up).
+#[derive(Clone, Debug)]
+pub struct OcrLine {
+    pub text: String,
+    pub rect: PdfRect,
+}
+
+#[derive(Clone, Default)]
 pub struct ExportOptions {
     /// Bake markup into the page content stream instead of writing
     /// editable annotation objects.
     pub flatten: bool,
+    /// Invisible text to overlay on scanned pages, keyed by *source* page,
+    /// so the exported file is selectable and searchable.
+    pub ocr_layers: Option<HashMap<usize, Vec<OcrLine>>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -72,9 +84,17 @@ pub fn export_pdf_bytes(
         slot_ids.push((logical, id));
     }
 
-    // Markup + rotation, per display slot.
+    // Markup + OCR text layer + rotation, per display slot.
     for &(logical, page_id) in &slot_ids {
-        let info = doc.pages[pages.source_of(logical)];
+        let source = pages.source_of(logical);
+        let info = doc.pages[source];
+
+        if let Some(layers) = &options.ocr_layers
+            && let Some(lines) = layers.get(&source)
+        {
+            append_ocr_text_layer(&mut lo, page_id, &info, lines)?;
+        }
+
         let annotations: Vec<Annotation> = store.on_page(logical).cloned().collect();
         if !annotations.is_empty() {
             if options.flatten {
@@ -552,6 +572,74 @@ fn text_ops_local(
     ops
 }
 
+// ---------------------------------------------------------------------------
+// Invisible OCR text layer
+// ---------------------------------------------------------------------------
+
+/// Bounds for the synthesized font size of an OCR line, in points.
+const OCR_MIN_SIZE: f32 = 4.0;
+const OCR_MAX_SIZE: f32 = 72.0;
+/// The baseline sits this fraction of the font size above the line box bottom.
+const OCR_BASELINE_LIFT: f32 = 0.2;
+
+/// Draw `lines` into the page's content in text rendering mode 3 (invisible),
+/// so selection and search in other viewers land on the OCR text while the
+/// scanned image is what's actually seen.
+fn append_ocr_text_layer(
+    lo: &mut LoDocument,
+    page_id: ObjectId,
+    info: &PageInfo,
+    lines: &[OcrLine],
+) -> Result<(), ExportError> {
+    // Basis vectors for the page's intrinsic rotation, as in
+    // `text_ops_user_space`: the text has to read along the displayed page.
+    let (c, s) = match info.intrinsic_rotation.rem_euclid(360) {
+        90 => (0.0f32, 1.0f32),
+        180 => (-1.0, 0.0),
+        270 => (0.0, -1.0),
+        _ => (1.0, 0.0),
+    };
+
+    let mut body = String::new();
+    for line in lines {
+        let text = line.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let size = line.rect.height().clamp(OCR_MIN_SIZE, OCR_MAX_SIZE);
+        let anchor = PdfPoint::new(line.rect.min.x, line.rect.min.y + OCR_BASELINE_LIFT * size);
+        let (x, y) = display_to_user(info, anchor);
+        // Stretch the standard-font glyphs to cover the recognized box, so a
+        // selection rectangle in the viewer matches what's on the page.
+        let natural: f32 = text.chars().map(|ch| char_width(ch, size)).sum();
+        let tz = if natural > 0.0 {
+            (line.rect.width() / natural * 100.0).clamp(10.0, 500.0)
+        } else {
+            100.0
+        };
+        body.push_str(&format!(
+            "/EvoHelv {} Tf\n{} Tz\n{} {} {} {} {} {} Tm\n({}) Tj\n",
+            fmt(size),
+            fmt(tz),
+            fmt(c),
+            fmt(s),
+            fmt(-s),
+            fmt(c),
+            fmt(x),
+            fmt(y),
+            escape_pdf_string(text)
+        ));
+    }
+    if body.is_empty() {
+        return Ok(());
+    }
+
+    materialize_resources(lo, page_id, true, false)?;
+    let ops = format!("q\nBT\n3 Tr\n{body}ET\nQ\n");
+    let stream_id = lo.add_object(Stream::new(Dictionary::new(), ops.into_bytes()));
+    append_content_stream(lo, page_id, stream_id)
+}
+
 fn helvetica_font_dict() -> Dictionary {
     dictionary! {
         "Type" => "Font",
@@ -1018,8 +1106,16 @@ mod tests {
         let mut store = AnnotationStore::default();
         sample_annotations(&mut store);
 
-        let bytes =
-            export_pdf_bytes(&doc, &pages, &store, ExportOptions { flatten: true }).unwrap();
+        let bytes = export_pdf_bytes(
+            &doc,
+            &pages,
+            &store,
+            ExportOptions {
+                flatten: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         if let Ok(dir) = std::env::var("EVO_DUMP") {
             std::fs::write(std::path::Path::new(&dir).join("export-flat.pdf"), &bytes).unwrap();
         }
@@ -1081,6 +1177,70 @@ mod tests {
         assert_eq!(second.get(b"Rotate").unwrap().as_i64().unwrap(), 90);
         // And they are different objects.
         assert_ne!(page_map[&1], page_map[&2]);
+    }
+
+    /// The OCR layer is written as real (invisible) page text, so any reader
+    /// — including hayro, which is how evo indexes text — can select it.
+    #[test]
+    fn exports_invisible_ocr_text_layer() {
+        let doc = fixture();
+        let pages = PageList::new(doc.pages.len());
+        let store = AnnotationStore::default();
+
+        // Down near the bottom of the page, clear of the fixture's own text.
+        let mut layers = HashMap::new();
+        layers.insert(
+            0,
+            vec![OcrLine {
+                text: "scannedmarker".into(),
+                rect: PdfRect::from_points(PdfPoint::new(72.0, 100.0), PdfPoint::new(300.0, 114.0)),
+            }],
+        );
+        let bytes = export_pdf_bytes(
+            &doc,
+            &pages,
+            &store,
+            ExportOptions {
+                ocr_layers: Some(layers),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        if let Ok(dir) = std::env::var("EVO_DUMP") {
+            std::fs::write(std::path::Path::new(&dir).join("export-ocr.pdf"), &bytes).unwrap();
+        }
+
+        let lo = LoDocument::load_mem(&bytes).unwrap();
+        let page1 = lo.get_pages()[&1];
+        let content = String::from_utf8_lossy(&lo.get_page_content(page1)).into_owned();
+        assert!(
+            content.contains("3 Tr"),
+            "no invisible text mode: {content}"
+        );
+        assert!(content.contains("(scannedmarker) Tj"), "{content}");
+
+        // The font is registered on the page's own resources.
+        let resources = lo.get_dictionary(page1).unwrap().get(b"Resources").unwrap();
+        let fonts = resources
+            .as_dict()
+            .unwrap()
+            .get(b"Font")
+            .unwrap()
+            .as_dict()
+            .unwrap();
+        assert!(fonts.get(b"EvoHelv").is_ok());
+
+        // And it round-trips back out through text extraction.
+        let pdf = hayro::hayro_syntax::Pdf::new(bytes).unwrap();
+        let extracted = crate::library::extract::extract_page_text(
+            &pdf.pages()[0],
+            &hayro::hayro_interpret::InterpreterSettings::default(),
+        );
+        assert!(
+            extracted.text.contains("scannedmarker"),
+            "got: {}",
+            extracted.text
+        );
     }
 
     #[test]

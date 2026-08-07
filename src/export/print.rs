@@ -63,7 +63,16 @@ pub fn print_via_system_viewer(
     store: &AnnotationStore,
 ) -> Result<PathBuf, PrintError> {
     let path = temp_pdf(doc);
-    export_pdf(doc, pages, store, ExportOptions { flatten: true }, &path)?;
+    export_pdf(
+        doc,
+        pages,
+        store,
+        ExportOptions {
+            flatten: true,
+            ..Default::default()
+        },
+        &path,
+    )?;
     open_with_default_app(&path).map_err(PrintError::Launch)?;
     Ok(path)
 }
@@ -76,7 +85,16 @@ pub fn print_direct(
     store: &AnnotationStore,
 ) -> Result<PathBuf, PrintError> {
     let path = temp_pdf(doc);
-    export_pdf(doc, pages, store, ExportOptions { flatten: true }, &path)?;
+    export_pdf(
+        doc,
+        pages,
+        store,
+        ExportOptions {
+            flatten: true,
+            ..Default::default()
+        },
+        &path,
+    )?;
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
