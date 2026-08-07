@@ -63,6 +63,19 @@ impl BlobStore for LocalBlobStore {
     }
 }
 
+/// How the searchable text for one page was obtained.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PageTextStatus {
+    /// Not indexed yet, or queued for OCR.
+    Pending,
+    /// Text came from the PDF's own text layer.
+    Embedded,
+    /// Text was recovered by OCR.
+    Ocr,
+    /// Extraction and OCR both failed; see `DocMeta::index_error`.
+    Failed,
+}
+
 /// Metadata for one library document.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DocMeta {
@@ -76,6 +89,13 @@ pub struct DocMeta {
     pub file_size: u64,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Per-page indexing state, one entry per source page. Empty for records
+    /// written before v0.3 (they get re-indexed once on first launch).
+    #[serde(default)]
+    pub text_status: Vec<PageTextStatus>,
+    /// Why the last indexing attempt failed, if it did.
+    #[serde(default)]
+    pub index_error: Option<String>,
 }
 
 /// The persisted markup layer for one library document.
@@ -99,7 +119,9 @@ pub enum LibraryError {
 pub struct Library {
     pub root: PathBuf,
     pub blobs: Arc<dyn BlobStore>,
-    db: store::MetaDb,
+    /// Shared with the indexer thread: redb permits only one `Database` per
+    /// file, so this handle is the only one that ever exists.
+    db: Arc<store::MetaDb>,
     indexer: Option<indexer::Indexer>,
     search_index: std::sync::OnceLock<search::SearchIndex>,
 }
@@ -118,7 +140,7 @@ impl Library {
     pub fn open_at(root: PathBuf) -> Result<Self, LibraryError> {
         std::fs::create_dir_all(root.join("thumbs"))?;
         let blobs = Arc::new(LocalBlobStore::new(root.join("docs"))?);
-        let db = store::MetaDb::open(&root.join("meta.redb"))?;
+        let db = Arc::new(store::MetaDb::open(&root.join("meta.redb"))?);
         Ok(Self {
             root,
             blobs,
@@ -134,21 +156,43 @@ impl Library {
         if self.indexer.is_some() {
             return;
         }
-        let known: Vec<(String, String)> = self
-            .list()
-            .map(|docs| docs.into_iter().map(|d| (d.id, d.title)).collect())
-            .unwrap_or_default();
+        let known = self.list().unwrap_or_default();
         self.indexer = Some(indexer::Indexer::spawn(
             self.root.join("index"),
             self.root.join("models"),
             self.blobs.clone(),
             known,
+            self.db.clone(),
             ctx.clone(),
         ));
     }
 
     pub fn index_status(&self) -> Option<indexer::IndexStatus> {
         self.indexer.as_ref().map(|i| i.status())
+    }
+
+    /// Dismiss the indexer's last error banner.
+    pub fn clear_index_error(&self) {
+        if let Some(indexer) = &self.indexer {
+            indexer.clear_error();
+        }
+    }
+
+    /// Re-run extraction and OCR for one document from scratch.
+    pub fn reindex(&self, id: &str) -> Result<(), LibraryError> {
+        let Some(mut meta) = self.db.get_doc(id)? else {
+            return Ok(());
+        };
+        meta.text_status = vec![PageTextStatus::Pending; meta.page_count];
+        meta.index_error = None;
+        self.db.put_doc(&meta)?;
+        if let Some(indexer) = &self.indexer {
+            indexer.submit(indexer::IndexJob::Index {
+                id: meta.id,
+                title: meta.title,
+            });
+        }
+        Ok(())
     }
 
     /// Full-text search over indexed documents.
@@ -201,6 +245,8 @@ impl Library {
             page_count: doc.pages.len(),
             file_size: bytes.len() as u64,
             tags: Vec::new(),
+            text_status: vec![PageTextStatus::Pending; doc.pages.len()],
+            index_error: None,
         };
         self.db.put_doc(&meta)?;
         if let Some(indexer) = &self.indexer {
@@ -325,6 +371,58 @@ mod tests {
 
         lib.delete(&meta.id).unwrap();
         assert!(lib.list().unwrap().is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// v0.2 wrote DocMeta without `text_status`/`index_error`; those records
+    /// must still load (the indexer back-fills them on first launch).
+    #[test]
+    fn doc_meta_reads_v0_2_records() {
+        let v0_2 = r#"{
+            "id": "deadbeef",
+            "title": "Old Document",
+            "original_filename": "old.pdf",
+            "imported_at": 1700000000,
+            "page_count": 3,
+            "file_size": 4096,
+            "tags": ["invoice"]
+        }"#;
+        let meta: DocMeta = serde_json::from_str(v0_2).unwrap();
+        assert_eq!(meta.title, "Old Document");
+        assert_eq!(meta.page_count, 3);
+        assert_eq!(meta.tags, vec!["invoice".to_string()]);
+        assert!(meta.text_status.is_empty());
+        assert!(meta.index_error.is_none());
+        assert!(indexer::needs_reindex(&meta, true));
+    }
+
+    #[test]
+    fn import_seeds_pending_status_and_reindex_resets_it() {
+        let (lib, dir) = temp_library("status");
+        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        assert_eq!(
+            meta.text_status,
+            vec![PageTextStatus::Pending; meta.page_count]
+        );
+
+        lib.db
+            .update_text_status(
+                &meta.id,
+                &[PageTextStatus::Embedded, PageTextStatus::Failed],
+                Some("boom"),
+            )
+            .unwrap();
+        let stored = lib.db.get_doc(&meta.id).unwrap().unwrap();
+        assert_eq!(stored.text_status[1], PageTextStatus::Failed);
+        assert_eq!(stored.index_error.as_deref(), Some("boom"));
+
+        lib.reindex(&meta.id).unwrap();
+        let reset = lib.db.get_doc(&meta.id).unwrap().unwrap();
+        assert_eq!(
+            reset.text_status,
+            vec![PageTextStatus::Pending; meta.page_count]
+        );
+        assert!(reset.index_error.is_none());
         std::fs::remove_dir_all(dir).ok();
     }
 

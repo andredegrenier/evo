@@ -7,11 +7,14 @@ use eframe::egui::{self, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind,
 
 use egui_phosphor::regular as icon;
 
-use crate::library::{DocMeta, Library, spawn_thumbnail_job};
+use crate::library::indexer::IndexStatus;
+use crate::library::{DocMeta, Library, PageTextStatus, spawn_thumbnail_job};
 use crate::ui::theme::ACCENT;
 
 const CARD_W: f32 = 168.0;
 const THUMB_H: f32 = 190.0;
+/// How often to re-poll the indexer while it has work outstanding.
+const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(600);
 
 #[derive(Default)]
 pub struct LibraryViewState {
@@ -23,6 +26,9 @@ pub struct LibraryViewState {
     thumbs: HashMap<String, egui::TextureHandle>,
     /// Thumbnails we've already kicked off background renders for.
     requested: HashMap<String, ()>,
+    /// Last observed indexer queue depth; a change means the stored per-page
+    /// statuses moved on and the card metadata needs re-reading.
+    last_pending: Option<usize>,
 }
 
 impl LibraryViewState {
@@ -44,6 +50,17 @@ pub fn show(
     state: &mut LibraryViewState,
 ) -> Option<LibraryAction> {
     let mut action = None;
+
+    let status = library.index_status();
+    if let Some(st) = &status {
+        if st.pending > 0 || st.ocr_pending > 0 {
+            ui.ctx().request_repaint_after(POLL_INTERVAL);
+        }
+        if state.last_pending != Some(st.pending) {
+            state.last_pending = Some(st.pending);
+            state.mark_dirty();
+        }
+    }
 
     if !state.loaded {
         match library.list() {
@@ -81,14 +98,8 @@ pub fn show(
             }
             state.mark_dirty();
         }
-        if let Some(status) = library.index_status()
-            && status.pending > 0
-        {
-            ui.weak(format!(
-                "Indexing {} document{}…",
-                status.pending,
-                if status.pending == 1 { "" } else { "s" }
-            ));
+        if let Some(st) = &status {
+            index_activity(ui, library, st);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(12.0);
@@ -141,7 +152,7 @@ pub fn show(
                 ui.spacing_mut().item_spacing = Vec2::new(16.0, 20.0);
                 ui.add_space(12.0);
                 for meta in &visible {
-                    if let Some(a) = doc_card(ui, library, state, meta) {
+                    if let Some(a) = doc_card(ui, library, state, meta, status.as_ref()) {
                         action = Some(a);
                     }
                 }
@@ -151,14 +162,94 @@ pub fn show(
     action
 }
 
+/// What the indexer is doing right now, plus a dismissible error banner.
+fn index_activity(ui: &mut egui::Ui, library: &Library, status: &IndexStatus) {
+    if let Some(current) = &status.current {
+        ui.add(egui::Spinner::new().size(14.0));
+        if status.ocr_total > 0 {
+            ui.weak(format!(
+                "{current} ({}/{} pages)",
+                status.ocr_done, status.ocr_total
+            ));
+        } else {
+            ui.weak(current);
+        }
+    } else if status.pending > 0 {
+        ui.add(egui::Spinner::new().size(14.0));
+        ui.weak(format!(
+            "Indexing {} document{}…",
+            status.pending,
+            if status.pending == 1 { "" } else { "s" }
+        ));
+    }
+    if let Some(error) = &status.last_error {
+        ui.label(
+            egui::RichText::new(format!("{} indexing problem", icon::WARNING_CIRCLE))
+                .color(ui.visuals().warn_fg_color),
+        )
+        .on_hover_text(error);
+        if ui
+            .small_button(icon::X)
+            .on_hover_text("Dismiss this message")
+            .clicked()
+        {
+            library.clear_index_error();
+        }
+    }
+}
+
+/// Per-document indexing badges, derived from the stored per-page statuses.
+fn card_badges(ui: &mut egui::Ui, meta: &DocMeta, status: Option<&IndexStatus>) {
+    let has = |want: PageTextStatus| meta.text_status.contains(&want);
+    let (pending, failed, ocr) = (
+        has(PageTextStatus::Pending),
+        has(PageTextStatus::Failed),
+        has(PageTextStatus::Ocr),
+    );
+    if !(pending || failed || ocr) {
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if pending {
+            ui.add(egui::Spinner::new().size(11.0));
+            let current = status
+                .filter(|s| s.current_id.as_deref() == Some(meta.id.as_str()))
+                .filter(|s| s.ocr_total > 0);
+            let label = match current {
+                Some(s) => format!("OCR {}/{}…", s.ocr_done, s.ocr_total),
+                None => "Indexing…".to_owned(),
+            };
+            ui.weak(egui::RichText::new(label).size(11.0));
+        }
+        if failed {
+            ui.label(
+                egui::RichText::new(icon::WARNING_CIRCLE)
+                    .size(13.0)
+                    .color(ui.visuals().warn_fg_color),
+            )
+            .on_hover_text(
+                meta.index_error
+                    .as_deref()
+                    .unwrap_or("some pages could not be indexed"),
+            );
+        }
+        if ocr && !pending {
+            ui.weak(egui::RichText::new("OCR").size(10.0))
+                .on_hover_text("Text on scanned pages was recovered by OCR; it is searchable.");
+        }
+    });
+}
+
 fn doc_card(
     ui: &mut egui::Ui,
     library: &Library,
     state: &mut LibraryViewState,
     meta: &DocMeta,
+    status: Option<&IndexStatus>,
 ) -> Option<LibraryAction> {
     let mut action = None;
-    ui.allocate_ui(Vec2::new(CARD_W, THUMB_H + 44.0), |ui| {
+    ui.allocate_ui(Vec2::new(CARD_W, THUMB_H + 64.0), |ui| {
         ui.vertical(|ui| {
             let (rect, response) =
                 ui.allocate_exact_size(Vec2::new(CARD_W, THUMB_H), Sense::click());
@@ -203,6 +294,16 @@ fn doc_card(
                     action = Some(LibraryAction::Open(meta.id.clone()));
                     ui.close();
                 }
+                if ui
+                    .button(format!("{} Re-index (repeat OCR)", icon::ARROW_CLOCKWISE))
+                    .clicked()
+                {
+                    if let Err(e) = library.reindex(&meta.id) {
+                        action = Some(LibraryAction::Error(e.to_string()));
+                    }
+                    state.mark_dirty();
+                    ui.close();
+                }
                 ui.separator();
                 if ui
                     .button(format!("{} Delete from Library", icon::TRASH))
@@ -225,6 +326,7 @@ fn doc_card(
                     meta.page_count,
                     if meta.page_count == 1 { "" } else { "s" }
                 ));
+                card_badges(ui, meta, status);
             });
         });
     });

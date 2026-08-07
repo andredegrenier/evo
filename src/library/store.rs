@@ -4,7 +4,7 @@ use std::path::Path;
 
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 
-use super::{DocMeta, LibraryError, SavedMarkup};
+use super::{DocMeta, LibraryError, PageTextStatus, SavedMarkup};
 
 const DOCS: TableDefinition<&str, &[u8]> = TableDefinition::new("docs");
 const ANNOTS: TableDefinition<&str, &[u8]> = TableDefinition::new("annots");
@@ -58,6 +58,33 @@ impl MetaDb {
             return Ok(None);
         };
         Ok(Some(serde_json::from_slice(guard.value()).map_err(db_err)?))
+    }
+
+    /// Read-modify-write the indexing state of one document in a single write
+    /// transaction. A missing document is not an error (it may have been
+    /// deleted while the indexer was working on it).
+    pub fn update_text_status(
+        &self,
+        id: &str,
+        statuses: &[PageTextStatus],
+        error: Option<&str>,
+    ) -> Result<(), LibraryError> {
+        let tx = self.db.begin_write().map_err(db_err)?;
+        {
+            let mut table = tx.open_table(DOCS).map_err(db_err)?;
+            let current: Option<DocMeta> = match table.get(id).map_err(db_err)? {
+                Some(guard) => Some(serde_json::from_slice(guard.value()).map_err(db_err)?),
+                None => None,
+            };
+            if let Some(mut meta) = current {
+                meta.text_status = statuses.to_vec();
+                meta.index_error = error.map(str::to_owned);
+                let json = serde_json::to_vec(&meta).map_err(db_err)?;
+                table.insert(id, json.as_slice()).map_err(db_err)?;
+            }
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(())
     }
 
     pub fn list_docs(&self) -> Result<Vec<DocMeta>, LibraryError> {
