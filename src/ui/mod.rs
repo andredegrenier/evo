@@ -1,5 +1,6 @@
 pub mod canvas;
 pub mod inspector;
+pub mod library_view;
 pub mod theme;
 pub mod thumbnails;
 pub mod toolbar;

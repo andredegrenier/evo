@@ -41,6 +41,11 @@ pub struct DocState {
     /// Set when the underlying source bytes differ from the file on disk
     /// (e.g. after Insert Pages), independent of markup/page-list changes.
     pub force_modified: bool,
+    /// When the document came from the library: its content id, for sidecar
+    /// markup persistence.
+    pub library_id: Option<String>,
+    /// Display title when there is no filesystem path (library/untitled docs).
+    pub title_override: Option<String>,
 }
 
 /// Page-rail multi-selection (display positions).
@@ -99,6 +104,8 @@ impl DocState {
             rail: RailSelection::default(),
             page_clipboard: Vec::new(),
             force_modified: false,
+            library_id: None,
+            title_override: None,
         }
     }
 
@@ -116,7 +123,15 @@ impl DocState {
         new.current_font_size = old.current_font_size;
         new.selection = old.selection;
         new.force_modified = true;
+        new.library_id = old.library_id;
+        new.title_override = old.title_override;
         new
+    }
+
+    pub fn title(&self) -> String {
+        self.title_override
+            .clone()
+            .unwrap_or_else(|| self.doc.title())
     }
 
     /// True when there is anything to save (markup or page changes).

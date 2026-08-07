@@ -48,4 +48,18 @@ impl AnnotationStore {
     pub fn is_empty(&self) -> bool {
         self.annotations.is_empty()
     }
+
+    /// Snapshot for sidecar persistence.
+    pub fn to_vec(&self) -> Vec<Annotation> {
+        self.annotations.clone()
+    }
+
+    /// Rebuild from a persisted snapshot, keeping id allocation consistent.
+    pub fn restore(annotations: Vec<Annotation>) -> Self {
+        let next_id = annotations.iter().map(|a| a.id).max().unwrap_or(0);
+        Self {
+            annotations,
+            next_id,
+        }
+    }
 }

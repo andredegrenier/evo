@@ -19,6 +19,8 @@ pub struct EvoApp {
     temp_print_files: Vec<PathBuf>,
     /// OS blur-behind is active; panels use translucent fills.
     glass: bool,
+    library: Option<crate::library::Library>,
+    lib_view: ui::library_view::LibraryViewState,
 }
 
 const ZOOM_STEP: f32 = 1.25;
@@ -28,6 +30,13 @@ impl EvoApp {
         install_fonts(&cc.egui_ctx);
         let glass = apply_window_effects(cc);
         crate::ui::theme::apply(&cc.egui_ctx, glass);
+        let library = match crate::library::Library::open_default() {
+            Ok(lib) => Some(lib),
+            Err(e) => {
+                eprintln!("library unavailable: {e}");
+                None
+            }
+        };
         let mut app = Self {
             dc: None,
             error: None,
@@ -35,6 +44,8 @@ impl EvoApp {
             flatten_on_save: false,
             temp_print_files: Vec::new(),
             glass,
+            library,
+            lib_view: ui::library_view::LibraryViewState::default(),
         };
         if let Some(path) = initial_file {
             app.open_path(path, &cc.egui_ctx);
@@ -47,9 +58,66 @@ impl EvoApp {
         crate::ui::theme::apply(ctx, glass);
     }
 
+    /// Persist the markup sidecar for a library document.
+    fn save_sidecar(&mut self) {
+        if let Some(dc) = &self.dc
+            && let Some(id) = &dc.library_id
+            && let Some(lib) = &self.library
+        {
+            let markup = crate::library::SavedMarkup {
+                version: 1,
+                annotations: dc.store.to_vec(),
+                pages: dc.pages.clone(),
+            };
+            if let Err(e) = lib.save_markup(id, &markup) {
+                self.error = Some(format!("Could not save markup to library: {e}"));
+            }
+        }
+    }
+
+    /// Close the current document, autosaving library markup first.
+    fn close_document(&mut self) {
+        self.save_sidecar();
+        self.dc = None;
+    }
+
+    fn open_library_doc(&mut self, id: &str, ctx: &egui::Context) {
+        let Some(lib) = &self.library else { return };
+        let result = lib
+            .load_bytes(id)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| Document::load_bytes(bytes, None).map_err(|e| e.to_string()));
+        match result {
+            Ok(doc) => {
+                self.close_document();
+                let title = self.library.as_ref().and_then(|lib| {
+                    lib.list()
+                        .ok()
+                        .and_then(|docs| docs.into_iter().find(|d| d.id == id).map(|d| d.title))
+                });
+                let mut dc = DocState::new(doc, ctx);
+                dc.library_id = Some(id.to_owned());
+                dc.title_override = title;
+                if let Some(lib) = &self.library
+                    && let Ok(Some(markup)) = lib.load_markup(id)
+                {
+                    dc.store = crate::doc::store::AnnotationStore::restore(markup.annotations);
+                    // Guard against a stale sidecar from a different blob.
+                    if markup.pages.source_of.len() >= dc.doc.pages.len() {
+                        dc.pages = markup.pages;
+                    }
+                }
+                self.dc = Some(dc);
+                self.error = None;
+            }
+            Err(e) => self.error = Some(format!("Could not open library document: {e}")),
+        }
+    }
+
     fn open_path(&mut self, path: PathBuf, ctx: &egui::Context) {
         match Document::load_path(path) {
             Ok(doc) => {
+                self.close_document();
                 self.dc = Some(DocState::new(doc, ctx));
                 self.error = None;
             }
@@ -212,7 +280,11 @@ impl EvoApp {
             self.open_dialog(ctx);
         }
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::S))) {
-            self.save_pdf_as();
+            if self.dc.as_ref().is_some_and(|d| d.library_id.is_some()) {
+                self.save_sidecar();
+            } else {
+                self.save_pdf_as();
+            }
         }
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::P))) {
             self.print();
@@ -223,7 +295,7 @@ impl EvoApp {
         };
 
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::W))) {
-            self.dc = None;
+            self.close_document();
             return;
         }
 
@@ -427,7 +499,7 @@ impl EvoApp {
                     )
                     .clicked()
                 {
-                    self.dc = None;
+                    self.close_document();
                     ui.close();
                 }
             });
@@ -551,9 +623,9 @@ impl EvoApp {
         ui.horizontal(|ui| {
             if let Some(dc) = &self.dc {
                 let title = if dc.is_modified() {
-                    format!("{} — edited", dc.doc.title())
+                    format!("{} — edited", dc.title())
                 } else {
-                    dc.doc.title()
+                    dc.title()
                 };
                 ui.label(title);
                 ui.separator();
@@ -592,6 +664,7 @@ impl eframe::App for EvoApp {
     }
 
     fn on_exit(&mut self) {
+        self.save_sidecar();
         for path in self.temp_print_files.drain(..) {
             let _ = std::fs::remove_file(path);
         }
@@ -614,10 +687,29 @@ impl eframe::App for EvoApp {
             .collect();
         match (dropped_pdfs.len(), self.dc.is_some()) {
             (0, _) => {}
+            // Dropping onto the library home imports into the library.
+            (_, false) if self.library.is_some() => {
+                let lib = self.library.as_ref().unwrap();
+                for path in &dropped_pdfs {
+                    match lib.import(path) {
+                        Ok(meta) => {
+                            if let Ok(bytes) = lib.load_bytes(&meta.id) {
+                                crate::library::spawn_thumbnail_job(
+                                    std::sync::Arc::new(bytes),
+                                    lib.thumb_path(&meta.id),
+                                    ctx.clone(),
+                                );
+                            }
+                        }
+                        Err(e) => self.error = Some(e.to_string()),
+                    }
+                }
+                self.lib_view.mark_dirty();
+            }
             (1, _) => self.open_path(dropped_pdfs.into_iter().next().unwrap(), ctx),
             // Several files onto an open document: insert them as pages.
             (_, true) => self.insert_files(ctx, dropped_pdfs),
-            // Several files with nothing open: combine into one document.
+            // Several files with nothing open (no library): combine.
             (_, false) => self.combine_files(ctx, dropped_pdfs),
         }
 
@@ -674,15 +766,27 @@ impl eframe::App for EvoApp {
                     ui::canvas::show(ui, dc);
                 });
         } else {
+            let mut lib_action = None;
             egui::CentralPanel::default_margins().show(ui, |ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.heading(format!(
-                        "evo — drop a PDF here or press {}",
-                        ui.ctx()
-                            .format_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::O))
-                    ));
-                });
+                if let Some(lib) = &self.library {
+                    lib_action = ui::library_view::show(ui, lib, &mut self.lib_view);
+                } else {
+                    ui.centered_and_justified(|ui| {
+                        ui.heading(format!(
+                            "evo — drop a PDF here or press {}",
+                            ui.ctx().format_shortcut(&KeyboardShortcut::new(
+                                Modifiers::COMMAND,
+                                Key::O
+                            ))
+                        ));
+                    });
+                }
             });
+            match lib_action {
+                Some(ui::library_view::LibraryAction::Open(id)) => self.open_library_doc(&id, ctx),
+                Some(ui::library_view::LibraryAction::Error(msg)) => self.error = Some(msg),
+                None => {}
+            }
         }
 
         if let Some(path) = pending_temp_file {
