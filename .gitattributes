@@ -1,0 +1,5 @@
+# Never let git mangle line endings in binary assets — PDF xref tables are
+# byte-offset based and break under CRLF conversion on Windows checkouts.
+*.pdf binary
+*.ttf binary
+*.png binary
