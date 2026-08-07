@@ -9,6 +9,7 @@ use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 use crate::doc::Document;
 use crate::doc::history::Command;
 use crate::export::pdf::OcrLine;
+use crate::keymap::{Action, Keymap, StoredKeymap};
 use crate::library::extract::TextSource;
 use crate::state::DocState;
 use crate::tools::{self, ActiveTool};
@@ -31,20 +32,42 @@ pub struct EvoApp {
     applied: Option<(ThemeChoice, egui::Theme, bool)>,
     library: Option<crate::library::Library>,
     lib_view: ui::library_view::LibraryViewState,
+    keymap: Keymap,
+    prefs: ui::preferences::PreferencesState,
 }
 
 const ZOOM_STEP: f32 = 1.25;
+
+/// Tool actions and the tool each selects.
+const TOOL_ACTIONS: [(Action, ActiveTool); 9] = [
+    (Action::ToolSelect, ActiveTool::Select),
+    (Action::ToolPan, ActiveTool::Pan),
+    (Action::ToolHighlight, ActiveTool::Highlight),
+    (Action::ToolText, ActiveTool::Text),
+    (Action::ToolRect, ActiveTool::Rect),
+    (Action::ToolEllipse, ActiveTool::Ellipse),
+    (Action::ToolLine, ActiveTool::Line),
+    (Action::ToolArrow, ActiveTool::Arrow),
+    (Action::ToolPen, ActiveTool::Pen),
+];
+
+fn cmd() -> Modifiers {
+    Modifiers::COMMAND
+}
 
 impl EvoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
         let vibrancy = apply_window_effects(cc);
-        let (theme, glass_pref) = match cc.storage {
+        let (theme, glass_pref, keymap) = match cc.storage {
             Some(storage) => (
                 eframe::get_value(storage, "theme").unwrap_or_default(),
                 eframe::get_value(storage, "glass").unwrap_or(true),
+                Keymap::from_stored(
+                    eframe::get_value::<StoredKeymap>(storage, "keymap").unwrap_or_default(),
+                ),
             ),
-            None => (ThemeChoice::default(), true),
+            None => (ThemeChoice::default(), true, Keymap::default()),
         };
         let glass = glass_pref && vibrancy;
         crate::ui::theme::apply(&cc.egui_ctx, theme, glass);
@@ -70,6 +93,8 @@ impl EvoApp {
             applied: Some((theme, cc.egui_ctx.theme(), glass)),
             library,
             lib_view: ui::library_view::LibraryViewState::default(),
+            keymap,
+            prefs: ui::preferences::PreferencesState::default(),
         };
         if let Some(path) = initial_file {
             app.open_path(path, &cc.egui_ctx);
@@ -326,25 +351,32 @@ impl EvoApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        let cmd = Modifiers::COMMAND;
+        // While Preferences is recording a binding it owns the keyboard;
+        // otherwise recording ⌘S would also save the document.
+        if self.prefs.is_capturing() {
+            return;
+        }
 
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::O))) {
+        if self.keymap.consume(ctx, Action::Open) {
             self.open_dialog(ctx);
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::S))) {
+        if self.keymap.consume(ctx, Action::Preferences) {
+            self.prefs.open();
+        }
+        if self.keymap.consume(ctx, Action::Save) {
             if self.dc.as_ref().is_some_and(|d| d.library_id.is_some()) {
                 self.save_sidecar();
             } else {
                 self.save_pdf_as();
             }
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::P))) {
+        if self.keymap.consume(ctx, Action::Print) {
             self.print();
         }
 
         // Find: in a document it opens the find bar, on the library home it
         // jumps to the search field.
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::F))) {
+        if self.keymap.consume(ctx, Action::Find) {
             match &mut self.dc {
                 Some(dc) => {
                     dc.find.open = true;
@@ -354,71 +386,72 @@ impl EvoApp {
             }
         }
 
-        let Some(dc) = &mut self.dc else {
+        if self.dc.is_none() {
             return;
-        };
+        }
 
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::W))) {
+        if self.keymap.consume(ctx, Action::CloseDocument) {
             self.close_document();
             return;
         }
 
-        // Undo / redo.
-        if ctx.input_mut(|i| {
-            i.consume_shortcut(&KeyboardShortcut::new(cmd | Modifiers::SHIFT, Key::Z))
-        }) {
+        // Redo before undo: with the default bindings ⇧⌘Z would otherwise also
+        // satisfy ⌘Z.
+        let redo = self.keymap.consume(ctx, Action::Redo);
+        let undo = !redo && self.keymap.consume(ctx, Action::Undo);
+        let zoom_in = self.keymap.consume(ctx, Action::ZoomIn)
+            // ⌘+ and ⌘= are the same key to a user, and which one the OS
+            // reports depends on the layout.
+            || ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd(), Key::Plus)));
+        let zoom_out = self.keymap.consume(ctx, Action::ZoomOut);
+        let zoom_actual = self.keymap.consume(ctx, Action::ZoomActual);
+        let fit_width = self.keymap.consume(ctx, Action::ZoomFitWidth);
+        let delete = self.keymap.consume(ctx, Action::DeleteSelection)
+            // Backspace is the other delete key; it isn't separately bindable.
+            || (!ctx.egui_wants_keyboard_input()
+                && ctx.input_mut(|i| i.key_pressed(Key::Backspace)));
+
+        let tools_pressed: Vec<ActiveTool> = TOOL_ACTIONS
+            .iter()
+            .filter(|(action, _)| self.keymap.consume(ctx, *action))
+            .map(|(_, tool)| *tool)
+            .collect();
+
+        let escape =
+            !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.key_pressed(Key::Escape));
+
+        let Some(dc) = &mut self.dc else {
+            return;
+        };
+
+        if redo {
             dc.history.redo(&mut dc.store, &mut dc.pages);
-        } else if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::Z))) {
-            if dc.editing_text.is_some() {
-                // Let the text field's own undo take precedence; commit instead.
-            } else {
-                dc.history.undo(&mut dc.store, &mut dc.pages);
-            }
+        } else if undo && dc.editing_text.is_none() {
+            // While editing text, let the text field's own undo take precedence.
+            dc.history.undo(&mut dc.store, &mut dc.pages);
         }
 
-        // Zoom.
-        if ctx.input_mut(|i| {
-            i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::Equals))
-                || i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::Plus))
-        }) {
+        if zoom_in {
             let z = dc.viewport.zoom * ZOOM_STEP;
             dc.viewport.set_zoom(z);
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::Minus))) {
+        if zoom_out {
             let z = dc.viewport.zoom / ZOOM_STEP;
             dc.viewport.set_zoom(z);
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::Num0))) {
+        if zoom_actual {
             dc.viewport.set_zoom(1.0);
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::Num9))) {
+        if fit_width {
             dc.viewport.fit_width = true;
         }
 
-        // The rest only applies when not typing in a text field.
-        if ctx.egui_wants_keyboard_input() {
-            return;
-        }
-
-        // Tool shortcuts.
-        let tool_keys = [
-            (Key::V, ActiveTool::Select),
-            (Key::H, ActiveTool::Highlight),
-            (Key::T, ActiveTool::Text),
-            (Key::R, ActiveTool::Rect),
-            (Key::O, ActiveTool::Ellipse),
-            (Key::L, ActiveTool::Line),
-            (Key::A, ActiveTool::Arrow),
-            (Key::P, ActiveTool::Pen),
-        ];
-        for (key, tool) in tool_keys {
-            if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, key))) {
-                dc.tool = tool;
-            }
+        for tool in tools_pressed {
+            dc.tool = tool;
         }
 
         // Escape: cancel gesture / deselect / back to select tool.
-        if ctx.input_mut(|i| i.key_pressed(Key::Escape)) {
+        if escape {
             tools::cancel(dc);
             if dc.selection.is_some() {
                 dc.selection = None;
@@ -427,13 +460,17 @@ impl EvoApp {
             }
         }
 
-        // Delete selection.
-        if ctx.input_mut(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace))
+        if delete
             && let Some(id) = dc.selection
             && let Some(removed) = dc.store.remove(id)
         {
             dc.history.record(Command::RemoveAnnotation(removed));
             dc.selection = None;
+        }
+
+        // The rest only applies when not typing in a text field.
+        if ctx.egui_wants_keyboard_input() {
+            return;
         }
 
         // Arrow-key nudge: 1pt, shift = 10pt.
@@ -466,22 +503,16 @@ impl EvoApp {
         }
     }
 
-    /// Platform-aware menu label, e.g. "Open…\t⌘O" on macOS,
-    /// "Open…\tCtrl+O" elsewhere.
-    fn label(ctx: &egui::Context, text: &str, modifiers: Modifiers, key: Key) -> String {
-        format!(
-            "{text}\t{}",
-            ctx.format_shortcut(&KeyboardShortcut::new(modifiers, key))
-        )
+    /// Platform-aware menu label carrying the action's current binding, e.g.
+    /// "Open…\t⌘O" on macOS, "Open…\tCtrl+O" elsewhere.
+    fn label(&self, ctx: &egui::Context, text: &str, action: Action) -> String {
+        self.keymap.menu_label(ctx, text, action)
     }
 
     fn menu_bar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui
-                    .button(Self::label(ctx, "Open…", Modifiers::COMMAND, Key::O))
-                    .clicked()
-                {
+                if ui.button(self.label(ctx, "Open…", Action::Open)).clicked() {
                     self.open_dialog(ctx);
                     ui.close();
                 }
@@ -511,12 +542,7 @@ impl EvoApp {
                 if ui
                     .add_enabled(
                         has_doc,
-                        egui::Button::new(Self::label(
-                            ctx,
-                            "Save As PDF…",
-                            Modifiers::COMMAND,
-                            Key::S,
-                        )),
+                        egui::Button::new(self.label(ctx, "Save As PDF…", Action::Save)),
                     )
                     .clicked()
                 {
@@ -556,7 +582,7 @@ impl EvoApp {
                 if ui
                     .add_enabled(
                         has_doc,
-                        egui::Button::new(Self::label(ctx, "Print…", Modifiers::COMMAND, Key::P)),
+                        egui::Button::new(self.label(ctx, "Print…", Action::Print)),
                     )
                     .clicked()
                 {
@@ -574,7 +600,7 @@ impl EvoApp {
                 if ui
                     .add_enabled(
                         has_doc,
-                        egui::Button::new(Self::label(ctx, "Close", Modifiers::COMMAND, Key::W)),
+                        egui::Button::new(self.label(ctx, "Close", Action::CloseDocument)),
                     )
                     .clicked()
                 {
@@ -591,7 +617,7 @@ impl EvoApp {
                 if ui
                     .add_enabled(
                         can_undo,
-                        egui::Button::new(Self::label(ctx, "Undo", Modifiers::COMMAND, Key::Z)),
+                        egui::Button::new(self.label(ctx, "Undo", Action::Undo)),
                     )
                     .clicked()
                     && let Some(dc) = &mut self.dc
@@ -602,17 +628,20 @@ impl EvoApp {
                 if ui
                     .add_enabled(
                         can_redo,
-                        egui::Button::new(Self::label(
-                            ctx,
-                            "Redo",
-                            Modifiers::COMMAND | Modifiers::SHIFT,
-                            Key::Z,
-                        )),
+                        egui::Button::new(self.label(ctx, "Redo", Action::Redo)),
                     )
                     .clicked()
                     && let Some(dc) = &mut self.dc
                 {
                     dc.history.redo(&mut dc.store, &mut dc.pages);
+                    ui.close();
+                }
+                ui.separator();
+                if ui
+                    .button(self.label(ctx, "Preferences…", Action::Preferences))
+                    .clicked()
+                {
+                    self.prefs.open();
                     ui.close();
                 }
             });
@@ -621,12 +650,7 @@ impl EvoApp {
                 if ui
                     .add_enabled(
                         has_doc,
-                        egui::Button::new(Self::label(
-                            ctx,
-                            "Zoom In",
-                            Modifiers::COMMAND,
-                            Key::Plus,
-                        )),
+                        egui::Button::new(self.label(ctx, "Zoom In", Action::ZoomIn)),
                     )
                     .clicked()
                     && let Some(dc) = &mut self.dc
@@ -638,12 +662,7 @@ impl EvoApp {
                 if ui
                     .add_enabled(
                         has_doc,
-                        egui::Button::new(Self::label(
-                            ctx,
-                            "Zoom Out",
-                            Modifiers::COMMAND,
-                            Key::Minus,
-                        )),
+                        egui::Button::new(self.label(ctx, "Zoom Out", Action::ZoomOut)),
                     )
                     .clicked()
                     && let Some(dc) = &mut self.dc
@@ -655,12 +674,7 @@ impl EvoApp {
                 if ui
                     .add_enabled(
                         has_doc,
-                        egui::Button::new(Self::label(
-                            ctx,
-                            "Actual Size",
-                            Modifiers::COMMAND,
-                            Key::Num0,
-                        )),
+                        egui::Button::new(self.label(ctx, "Actual Size", Action::ZoomActual)),
                     )
                     .clicked()
                     && let Some(dc) = &mut self.dc
@@ -671,12 +685,7 @@ impl EvoApp {
                 if ui
                     .add_enabled(
                         has_doc,
-                        egui::Button::new(Self::label(
-                            ctx,
-                            "Fit Width",
-                            Modifiers::COMMAND,
-                            Key::Num9,
-                        )),
+                        egui::Button::new(self.label(ctx, "Fit Width", Action::ZoomFitWidth)),
                     )
                     .clicked()
                     && let Some(dc) = &mut self.dc
@@ -753,6 +762,7 @@ impl eframe::App for EvoApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "theme", &self.theme);
         eframe::set_value(storage, "glass", &self.glass);
+        eframe::set_value(storage, "keymap", &self.keymap.to_stored());
     }
 
     fn on_exit(&mut self) {
@@ -825,10 +835,13 @@ impl eframe::App for EvoApp {
         });
 
         if let Some(dc) = &mut self.dc {
+            let keymap = &self.keymap;
             egui::Panel::top("toolbar").show(ui, |ui| {
-                ui::toolbar::show(ui, dc);
+                ui::toolbar::show(ui, dc, keymap);
             });
         }
+
+        ui::preferences::show(ctx, &mut self.prefs, &mut self.keymap);
 
         egui::Panel::bottom("status").show(ui, |ui| {
             self.status_bar(ui);

@@ -3,6 +3,7 @@
 mod app;
 mod doc;
 mod export;
+mod keymap;
 mod library;
 mod render;
 mod state;
