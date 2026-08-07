@@ -2,6 +2,9 @@
 //! metadata store, under the platform data directory. Markup made on library
 //! documents persists as a sidecar record — the PDF blob itself is immutable.
 
+pub mod extract;
+pub mod indexer;
+pub mod search;
 pub mod store;
 
 use std::io;
@@ -96,6 +99,8 @@ pub struct Library {
     pub root: PathBuf,
     pub blobs: Arc<dyn BlobStore>,
     db: store::MetaDb,
+    indexer: Option<indexer::Indexer>,
+    search_index: std::sync::OnceLock<search::SearchIndex>,
 }
 
 impl Library {
@@ -113,7 +118,48 @@ impl Library {
         std::fs::create_dir_all(root.join("thumbs"))?;
         let blobs = Arc::new(LocalBlobStore::new(root.join("docs"))?);
         let db = store::MetaDb::open(&root.join("meta.redb"))?;
-        Ok(Self { root, blobs, db })
+        Ok(Self {
+            root,
+            blobs,
+            db,
+            indexer: None,
+            search_index: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// Start the background text-extraction/indexing worker. Documents from
+    /// previous sessions that were never indexed get picked up here.
+    pub fn start_indexer(&mut self, ctx: &eframe::egui::Context) {
+        if self.indexer.is_some() {
+            return;
+        }
+        let known = self
+            .list()
+            .map(|docs| docs.into_iter().map(|d| (d.id, d.title)).collect())
+            .unwrap_or_default();
+        self.indexer = Some(indexer::Indexer::spawn(
+            self.root.join("index"),
+            self.blobs.clone(),
+            known,
+            ctx.clone(),
+        ));
+    }
+
+    pub fn index_status(&self) -> Option<indexer::IndexStatus> {
+        self.indexer.as_ref().map(|i| i.status())
+    }
+
+    /// Full-text search over indexed documents.
+    pub fn search(&self, query: &str) -> Result<Vec<search::SearchHit>, LibraryError> {
+        let index = match self.search_index.get() {
+            Some(index) => index,
+            None => {
+                let index = search::SearchIndex::open_or_create(&self.root.join("index"))?;
+                let _ = self.search_index.set(index);
+                self.search_index.get().unwrap()
+            }
+        };
+        index.search(query, 50)
     }
 
     pub fn thumb_path(&self, id: &str) -> PathBuf {
@@ -155,6 +201,12 @@ impl Library {
             tags: Vec::new(),
         };
         self.db.put_doc(&meta)?;
+        if let Some(indexer) = &self.indexer {
+            indexer.submit(indexer::IndexJob::Index {
+                id: meta.id.clone(),
+                title: meta.title.clone(),
+            });
+        }
         Ok(meta)
     }
 
@@ -166,6 +218,9 @@ impl Library {
     }
 
     pub fn delete(&self, id: &str) -> Result<(), LibraryError> {
+        if let Some(indexer) = &self.indexer {
+            indexer.submit(indexer::IndexJob::Delete { id: id.to_owned() });
+        }
         self.db.delete_doc(id)?;
         self.blobs.delete(id)?;
         let _ = std::fs::remove_file(self.thumb_path(id));

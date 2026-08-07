@@ -16,6 +16,8 @@ pub struct LibraryViewState {
     docs: Vec<DocMeta>,
     loaded: bool,
     pub query: String,
+    /// Full-text results for the current query (None = show the card grid).
+    search_hits: Option<Vec<crate::library::search::SearchHit>>,
     thumbs: HashMap<String, egui::TextureHandle>,
     /// Thumbnails we've already kicked off background renders for.
     requested: HashMap<String, ()>,
@@ -29,6 +31,8 @@ impl LibraryViewState {
 
 pub enum LibraryAction {
     Open(String),
+    /// Open a document and scroll to a source page (from a search result).
+    OpenAtPage(String, usize),
     Error(String),
 }
 
@@ -75,13 +79,29 @@ pub fn show(
             }
             state.mark_dirty();
         }
+        if let Some(status) = library.index_status()
+            && status.pending > 0
+        {
+            ui.weak(format!(
+                "Indexing {} document{}…",
+                status.pending,
+                if status.pending == 1 { "" } else { "s" }
+            ));
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(12.0);
-            ui.add(
+            let resp = ui.add(
                 egui::TextEdit::singleline(&mut state.query)
-                    .hint_text("🔍 Filter by title…")
+                    .hint_text("🔍 Search titles and contents…")
                     .desired_width(240.0),
             );
+            if resp.changed() {
+                state.search_hits = if state.query.trim().is_empty() {
+                    None
+                } else {
+                    library.search(state.query.trim()).ok()
+                };
+            }
         });
     });
     ui.add_space(8.0);
@@ -91,6 +111,12 @@ pub fn show(
         ui.centered_and_justified(|ui| {
             ui.weak("No documents yet. Import PDFs or drop them here.");
         });
+        return action;
+    }
+
+    if state.search_hits.is_some() {
+        let hits = state.search_hits.clone().unwrap_or_default();
+        show_search_results(ui, &hits, &mut action);
         return action;
     }
 
@@ -230,4 +256,77 @@ fn thumb_texture(
         }
         None
     }
+}
+
+fn show_search_results(
+    ui: &mut egui::Ui,
+    hits: &[crate::library::search::SearchHit],
+    action: &mut Option<LibraryAction>,
+) {
+    use eframe::egui::text::LayoutJob;
+    use eframe::egui::{FontId, TextFormat};
+
+    if hits.is_empty() {
+        ui.centered_and_justified(|ui| {
+            ui.weak("No matches. Documents still being indexed will appear once ready.");
+        });
+        return;
+    }
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            ui.add_space(8.0);
+            for hit in hits {
+                let response = egui::Frame::group(ui.style())
+                    .corner_radius(8)
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width() - 24.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(&hit.title).strong());
+                            ui.weak(format!("p. {}", hit.page + 1));
+                        });
+                        // Snippet with highlighted match ranges.
+                        let mut job = LayoutJob::default();
+                        let normal = TextFormat {
+                            font_id: FontId::proportional(12.5),
+                            color: ui.visuals().text_color(),
+                            ..Default::default()
+                        };
+                        let highlight = TextFormat {
+                            font_id: FontId::proportional(12.5),
+                            color: ui.visuals().strong_text_color(),
+                            background: ACCENT.gamma_multiply(0.35),
+                            ..Default::default()
+                        };
+                        let text = &hit.snippet;
+                        let mut cursor = 0;
+                        for range in &hit.highlights {
+                            let (start, end) =
+                                (range.start.min(text.len()), range.end.min(text.len()));
+                            if start > cursor
+                                && text.is_char_boundary(cursor)
+                                && text.is_char_boundary(start)
+                            {
+                                job.append(&text[cursor..start], 0.0, normal.clone());
+                            }
+                            if end > start
+                                && text.is_char_boundary(start)
+                                && text.is_char_boundary(end)
+                            {
+                                job.append(&text[start..end], 0.0, highlight.clone());
+                            }
+                            cursor = end.max(cursor);
+                        }
+                        if cursor < text.len() && text.is_char_boundary(cursor) {
+                            job.append(&text[cursor..], 0.0, normal);
+                        }
+                        ui.label(job);
+                    })
+                    .response;
+                if response.interact(egui::Sense::click()).clicked() {
+                    *action = Some(LibraryAction::OpenAtPage(hit.doc_id.clone(), hit.page));
+                }
+                ui.add_space(6.0);
+            }
+        });
 }

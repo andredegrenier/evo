@@ -31,7 +31,10 @@ impl EvoApp {
         let glass = apply_window_effects(cc);
         crate::ui::theme::apply(&cc.egui_ctx, glass);
         let library = match crate::library::Library::open_default() {
-            Ok(lib) => Some(lib),
+            Ok(mut lib) => {
+                lib.start_indexer(&cc.egui_ctx);
+                Some(lib)
+            }
             Err(e) => {
                 eprintln!("library unavailable: {e}");
                 None
@@ -82,6 +85,10 @@ impl EvoApp {
     }
 
     fn open_library_doc(&mut self, id: &str, ctx: &egui::Context) {
+        self.open_library_doc_at(id, None, ctx);
+    }
+
+    fn open_library_doc_at(&mut self, id: &str, source_page: Option<usize>, ctx: &egui::Context) {
         let Some(lib) = &self.library else { return };
         let result = lib
             .load_bytes(id)
@@ -106,6 +113,15 @@ impl EvoApp {
                     if markup.pages.source_of.len() >= dc.doc.pages.len() {
                         dc.pages = markup.pages;
                     }
+                }
+                if let Some(page) = source_page {
+                    // Find the display position showing that source page.
+                    let position = dc
+                        .pages
+                        .order
+                        .iter()
+                        .position(|&logical| dc.pages.source_of(logical) == page);
+                    dc.viewport.scroll_to_page = position;
                 }
                 self.dc = Some(dc);
                 self.error = None;
@@ -784,6 +800,9 @@ impl eframe::App for EvoApp {
             });
             match lib_action {
                 Some(ui::library_view::LibraryAction::Open(id)) => self.open_library_doc(&id, ctx),
+                Some(ui::library_view::LibraryAction::OpenAtPage(id, page)) => {
+                    self.open_library_doc_at(&id, Some(page), ctx)
+                }
                 Some(ui::library_view::LibraryAction::Error(msg)) => self.error = Some(msg),
                 None => {}
             }
