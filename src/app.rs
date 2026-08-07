@@ -244,17 +244,37 @@ impl EvoApp {
         }
     }
 
+    /// Platform-aware menu label, e.g. "Open…\t⌘O" on macOS,
+    /// "Open…\tCtrl+O" elsewhere.
+    fn label(ctx: &egui::Context, text: &str, modifiers: Modifiers, key: Key) -> String {
+        format!(
+            "{text}\t{}",
+            ctx.format_shortcut(&KeyboardShortcut::new(modifiers, key))
+        )
+    }
+
     fn menu_bar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui.button("Open…\t⌘O").clicked() {
+                if ui
+                    .button(Self::label(ctx, "Open…", Modifiers::COMMAND, Key::O))
+                    .clicked()
+                {
                     self.open_dialog(ctx);
                     ui.close();
                 }
                 let has_doc = self.dc.is_some();
                 ui.separator();
                 if ui
-                    .add_enabled(has_doc, egui::Button::new("Save As PDF…\t⌘S"))
+                    .add_enabled(
+                        has_doc,
+                        egui::Button::new(Self::label(
+                            ctx,
+                            "Save As PDF…",
+                            Modifiers::COMMAND,
+                            Key::S,
+                        )),
+                    )
                     .clicked()
                 {
                     self.save_pdf_as();
@@ -276,7 +296,10 @@ impl EvoApp {
                 }
                 ui.separator();
                 if ui
-                    .add_enabled(has_doc, egui::Button::new("Print…\t⌘P"))
+                    .add_enabled(
+                        has_doc,
+                        egui::Button::new(Self::label(ctx, "Print…", Modifiers::COMMAND, Key::P)),
+                    )
                     .clicked()
                 {
                     self.print();
@@ -291,7 +314,10 @@ impl EvoApp {
                 }
                 ui.separator();
                 if ui
-                    .add_enabled(has_doc, egui::Button::new("Close\t⌘W"))
+                    .add_enabled(
+                        has_doc,
+                        egui::Button::new(Self::label(ctx, "Close", Modifiers::COMMAND, Key::W)),
+                    )
                     .clicked()
                 {
                     self.dc = None;
@@ -305,7 +331,10 @@ impl EvoApp {
                     .map(|d| (d.history.can_undo(), d.history.can_redo()))
                     .unwrap_or((false, false));
                 if ui
-                    .add_enabled(can_undo, egui::Button::new("Undo\t⌘Z"))
+                    .add_enabled(
+                        can_undo,
+                        egui::Button::new(Self::label(ctx, "Undo", Modifiers::COMMAND, Key::Z)),
+                    )
                     .clicked()
                     && let Some(dc) = &mut self.dc
                 {
@@ -313,7 +342,15 @@ impl EvoApp {
                     ui.close();
                 }
                 if ui
-                    .add_enabled(can_redo, egui::Button::new("Redo\t⇧⌘Z"))
+                    .add_enabled(
+                        can_redo,
+                        egui::Button::new(Self::label(
+                            ctx,
+                            "Redo",
+                            Modifiers::COMMAND | Modifiers::SHIFT,
+                            Key::Z,
+                        )),
+                    )
                     .clicked()
                     && let Some(dc) = &mut self.dc
                 {
@@ -324,7 +361,15 @@ impl EvoApp {
             ui.menu_button("View", |ui| {
                 let has_doc = self.dc.is_some();
                 if ui
-                    .add_enabled(has_doc, egui::Button::new("Zoom In\t⌘+"))
+                    .add_enabled(
+                        has_doc,
+                        egui::Button::new(Self::label(
+                            ctx,
+                            "Zoom In",
+                            Modifiers::COMMAND,
+                            Key::Plus,
+                        )),
+                    )
                     .clicked()
                     && let Some(dc) = &mut self.dc
                 {
@@ -333,7 +378,15 @@ impl EvoApp {
                     ui.close();
                 }
                 if ui
-                    .add_enabled(has_doc, egui::Button::new("Zoom Out\t⌘-"))
+                    .add_enabled(
+                        has_doc,
+                        egui::Button::new(Self::label(
+                            ctx,
+                            "Zoom Out",
+                            Modifiers::COMMAND,
+                            Key::Minus,
+                        )),
+                    )
                     .clicked()
                     && let Some(dc) = &mut self.dc
                 {
@@ -342,7 +395,15 @@ impl EvoApp {
                     ui.close();
                 }
                 if ui
-                    .add_enabled(has_doc, egui::Button::new("Actual Size\t⌘0"))
+                    .add_enabled(
+                        has_doc,
+                        egui::Button::new(Self::label(
+                            ctx,
+                            "Actual Size",
+                            Modifiers::COMMAND,
+                            Key::Num0,
+                        )),
+                    )
                     .clicked()
                     && let Some(dc) = &mut self.dc
                 {
@@ -350,7 +411,15 @@ impl EvoApp {
                     ui.close();
                 }
                 if ui
-                    .add_enabled(has_doc, egui::Button::new("Fit Width\t⌘9"))
+                    .add_enabled(
+                        has_doc,
+                        egui::Button::new(Self::label(
+                            ctx,
+                            "Fit Width",
+                            Modifiers::COMMAND,
+                            Key::Num9,
+                        )),
+                    )
                     .clicked()
                     && let Some(dc) = &mut self.dc
                 {
@@ -386,7 +455,11 @@ impl EvoApp {
                     ui.label(dc.tool.label());
                 });
             } else {
-                ui.label("Open a PDF to get started (⌘O, or drop a file here)");
+                ui.label(format!(
+                    "Open a PDF to get started ({}, or drop a file here)",
+                    ui.ctx()
+                        .format_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::O))
+                ));
             }
         });
     }
@@ -459,7 +532,11 @@ impl eframe::App for EvoApp {
         } else {
             egui::CentralPanel::default_margins().show(ui, |ui| {
                 ui.centered_and_justified(|ui| {
-                    ui.heading("evo — drop a PDF here or press ⌘O");
+                    ui.heading(format!(
+                        "evo — drop a PDF here or press {}",
+                        ui.ctx()
+                            .format_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::O))
+                    ));
                 });
             });
         }

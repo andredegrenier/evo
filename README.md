@@ -58,8 +58,10 @@ cargo run --release            # then ⌘O or drop a PDF on the window
 cargo run --release -- some.pdf
 ```
 
-Developed on macOS; the code is cross-platform (egui/winit) but only macOS is
-exercised regularly.
+Cross-platform: macOS, Windows, and Linux (egui/winit). Prebuilt binaries for
+all three are attached to [GitHub releases](https://github.com/andredegrenier/evo/releases);
+CI builds and tests every platform. Keyboard shortcuts use ⌘ on macOS and
+Ctrl elsewhere.
 
 ## Known limitations
 
