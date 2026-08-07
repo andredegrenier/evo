@@ -2,6 +2,7 @@ pub mod canvas;
 pub mod findbar;
 pub mod inspector;
 pub mod library_view;
+pub mod merge_wizard;
 pub mod preferences;
 pub mod theme;
 pub mod thumbnails;

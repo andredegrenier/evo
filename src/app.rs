@@ -34,6 +34,7 @@ pub struct EvoApp {
     lib_view: ui::library_view::LibraryViewState,
     keymap: Keymap,
     prefs: ui::preferences::PreferencesState,
+    wizard: ui::merge_wizard::MergeWizardState,
 }
 
 const ZOOM_STEP: f32 = 1.25;
@@ -53,6 +54,18 @@ const TOOL_ACTIONS: [(Action, ActiveTool); 9] = [
 
 fn cmd() -> Modifiers {
     Modifiers::COMMAND
+}
+
+/// Read every file, naming the one that failed. `merge_pdfs` reports errors
+/// per batch, so without this the user is told the merge failed but not which
+/// file caused it.
+fn read_all(files: &[PathBuf]) -> Result<Vec<Vec<u8>>, String> {
+    files
+        .iter()
+        .map(|path| {
+            std::fs::read(path).map_err(|e| format!("Could not read {}: {e}", path.display()))
+        })
+        .collect()
 }
 
 impl EvoApp {
@@ -95,6 +108,7 @@ impl EvoApp {
             lib_view: ui::library_view::LibraryViewState::default(),
             keymap,
             prefs: ui::preferences::PreferencesState::default(),
+            wizard: ui::merge_wizard::MergeWizardState::default(),
         };
         if let Some(path) = initial_file {
             app.open_path(path, &cc.egui_ctx);
@@ -275,17 +289,14 @@ impl EvoApp {
     /// markup and history stay valid.
     fn insert_files(&mut self, ctx: &egui::Context, files: Vec<PathBuf>) {
         let Some(dc) = self.dc.take() else { return };
-        let mut loaded: Vec<Vec<u8>> = Vec::new();
-        for path in &files {
-            match std::fs::read(path) {
-                Ok(bytes) => loaded.push(bytes),
-                Err(e) => {
-                    self.error = Some(format!("Could not read {}: {e}", path.display()));
-                    self.dc = Some(dc);
-                    return;
-                }
+        let loaded = match read_all(&files) {
+            Ok(loaded) => loaded,
+            Err(e) => {
+                self.error = Some(e);
+                self.dc = Some(dc);
+                return;
             }
-        }
+        };
         let mut sources: Vec<&[u8]> = vec![&dc.doc.source];
         sources.extend(loaded.iter().map(|b| b.as_slice()));
         let merged = match crate::export::merge::merge_pdfs(&sources) {
@@ -322,16 +333,13 @@ impl EvoApp {
 
     /// Combine several PDFs into a brand-new untitled document.
     fn combine_files(&mut self, ctx: &egui::Context, files: Vec<PathBuf>) {
-        let mut loaded: Vec<Vec<u8>> = Vec::new();
-        for path in &files {
-            match std::fs::read(path) {
-                Ok(bytes) => loaded.push(bytes),
-                Err(e) => {
-                    self.error = Some(format!("Could not read {}: {e}", path.display()));
-                    return;
-                }
+        let loaded = match read_all(&files) {
+            Ok(loaded) => loaded,
+            Err(e) => {
+                self.error = Some(e);
+                return;
             }
-        }
+        };
         let sources: Vec<&[u8]> = loaded.iter().map(|b| b.as_slice()).collect();
         match crate::export::merge::merge_pdfs(&sources)
             .map_err(|e| e.to_string())
@@ -517,25 +525,8 @@ impl EvoApp {
                     ui.close();
                 }
                 let has_doc = self.dc.is_some();
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Insert Pages from PDF…"))
-                    .clicked()
-                {
-                    if let Some(files) = rfd::FileDialog::new()
-                        .add_filter("PDF documents", &["pdf"])
-                        .pick_files()
-                    {
-                        self.insert_files(ctx, files);
-                    }
-                    ui.close();
-                }
-                if ui.button("Combine PDFs…").clicked() {
-                    if let Some(files) = rfd::FileDialog::new()
-                        .add_filter("PDF documents", &["pdf"])
-                        .pick_files()
-                    {
-                        self.combine_files(ctx, files);
-                    }
+                if ui.button("Combine / Insert PDFs…").clicked() {
+                    self.wizard.open_for(has_doc);
                     ui.close();
                 }
                 ui.separator();
@@ -798,6 +789,8 @@ impl eframe::App for EvoApp {
             .collect();
         match (dropped_pdfs.len(), self.dc.is_some()) {
             (0, _) => {}
+            // Dropping onto the open wizard adds to its list.
+            _ if self.wizard.open => self.wizard.add_files(dropped_pdfs),
             // Dropping onto the library home imports into the library.
             (_, false) if self.library.is_some() => {
                 let lib = self.library.as_ref().unwrap();
@@ -818,10 +811,12 @@ impl eframe::App for EvoApp {
                 self.lib_view.mark_dirty();
             }
             (1, _) => self.open_path(dropped_pdfs.into_iter().next().unwrap(), ctx),
-            // Several files onto an open document: insert them as pages.
-            (_, true) => self.insert_files(ctx, dropped_pdfs),
-            // Several files with nothing open (no library): combine.
-            (_, false) => self.combine_files(ctx, dropped_pdfs),
+            // Several files at once: show them in the wizard rather than
+            // merging on the spot in whatever order they arrived.
+            (_, has_doc) => {
+                self.wizard.open_for(has_doc);
+                self.wizard.add_files(dropped_pdfs);
+            }
         }
 
         self.handle_shortcuts(ctx);
@@ -842,6 +837,27 @@ impl eframe::App for EvoApp {
         }
 
         ui::preferences::show(ctx, &mut self.prefs, &mut self.keymap);
+
+        let (wizard_title, wizard_pages) = match &self.dc {
+            Some(dc) => (Some(dc.title()), dc.pages.len()),
+            None => (None, 0),
+        };
+        if let Some(confirm) = ui::merge_wizard::show(
+            ctx,
+            &mut self.wizard,
+            self.dc.is_some(),
+            wizard_title.as_deref(),
+            wizard_pages,
+        ) {
+            match confirm.dest {
+                ui::merge_wizard::Destination::AppendToCurrent => {
+                    self.insert_files(ctx, confirm.files)
+                }
+                ui::merge_wizard::Destination::NewDocument => {
+                    self.combine_files(ctx, confirm.files)
+                }
+            }
+        }
 
         egui::Panel::bottom("status").show(ui, |ui| {
             self.status_bar(ui);
