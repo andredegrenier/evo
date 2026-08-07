@@ -5,6 +5,8 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Vec2};
 
+use egui_phosphor::regular as icon;
+
 use crate::library::{DocMeta, Library, spawn_thumbnail_job};
 use crate::ui::theme::ACCENT;
 
@@ -58,7 +60,7 @@ pub fn show(
         ui.add_space(12.0);
         ui.heading("Library");
         ui.add_space(12.0);
-        if ui.button("＋ Import PDFs…").clicked()
+        if ui.button(format!("{} Import PDFs…", icon::PLUS)).clicked()
             && let Some(files) = rfd::FileDialog::new()
                 .add_filter("PDF documents", &["pdf"])
                 .pick_files()
@@ -92,7 +94,10 @@ pub fn show(
             ui.add_space(12.0);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut state.query)
-                    .hint_text("🔍 Search titles and contents…")
+                    .hint_text(format!(
+                        "{} Search titles and contents…",
+                        icon::MAGNIFYING_GLASS
+                    ))
                     .desired_width(240.0),
             );
             if resp.changed() {
@@ -177,7 +182,7 @@ fn doc_card(
                     painter.text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        "📄",
+                        icon::FILE_PDF,
                         egui::FontId::proportional(40.0),
                         Color32::from_gray(150),
                     );
@@ -199,7 +204,10 @@ fn doc_card(
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Delete from Library").clicked() {
+                if ui
+                    .button(format!("{} Delete from Library", icon::TRASH))
+                    .clicked()
+                {
                     if let Err(e) = library.delete(&meta.id) {
                         action = Some(LibraryAction::Error(e.to_string()));
                     }

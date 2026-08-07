@@ -10,8 +10,10 @@ categories = ["gui", "graphics"]
 keywords = ["pdf", "editor", "markup", "annotation"]
 
 [dependencies]
+catppuccin = "2.8"
 directories = "6.0.0"
-eframe = "0.35"
+eframe = { version = "0.35", features = ["persistence"] }
+egui-phosphor = "0.13"
 hayro = "0.7"
 hayro-svg = "0.7"
 image = { version = "0.25.10", default-features = false, features = ["png"] }

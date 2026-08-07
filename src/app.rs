@@ -10,6 +10,7 @@ use crate::doc::history::Command;
 use crate::state::DocState;
 use crate::tools::{self, ActiveTool};
 use crate::ui;
+use crate::ui::theme::ThemeChoice;
 
 pub struct EvoApp {
     dc: Option<DocState>,
@@ -19,6 +20,10 @@ pub struct EvoApp {
     temp_print_files: Vec<PathBuf>,
     /// OS blur-behind is active; panels use translucent fills.
     glass: bool,
+    theme: ThemeChoice,
+    /// What `theme::apply` was last called with, so we restyle when the
+    /// choice, the resolved light/dark theme, or `glass` changes.
+    applied: Option<(ThemeChoice, egui::Theme, bool)>,
     library: Option<crate::library::Library>,
     lib_view: ui::library_view::LibraryViewState,
 }
@@ -28,8 +33,16 @@ const ZOOM_STEP: f32 = 1.25;
 impl EvoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
-        let glass = apply_window_effects(cc);
-        crate::ui::theme::apply(&cc.egui_ctx, glass);
+        let vibrancy = apply_window_effects(cc);
+        let (theme, glass_pref) = match cc.storage {
+            Some(storage) => (
+                eframe::get_value(storage, "theme").unwrap_or_default(),
+                eframe::get_value(storage, "glass").unwrap_or(true),
+            ),
+            None => (ThemeChoice::default(), true),
+        };
+        let glass = glass_pref && vibrancy;
+        crate::ui::theme::apply(&cc.egui_ctx, theme, glass);
         let library = match crate::library::Library::open_default() {
             Ok(mut lib) => {
                 lib.start_indexer(&cc.egui_ctx);
@@ -47,6 +60,8 @@ impl EvoApp {
             flatten_on_save: false,
             temp_print_files: Vec::new(),
             glass,
+            theme,
+            applied: Some((theme, cc.egui_ctx.theme(), glass)),
             library,
             lib_view: ui::library_view::LibraryViewState::default(),
         };
@@ -56,9 +71,10 @@ impl EvoApp {
         app
     }
 
-    fn set_glass(&mut self, ctx: &egui::Context, glass: bool) {
+    /// Clearing `applied` makes `ui()` restyle on the next frame.
+    fn set_glass(&mut self, glass: bool) {
         self.glass = glass;
-        crate::ui::theme::apply(ctx, glass);
+        self.applied = None;
     }
 
     /// Persist the markup sidecar for a library document.
@@ -623,13 +639,23 @@ impl EvoApp {
                 }
                 ui.separator();
                 ui.checkbox(&mut self.show_thumbnails, "Show Thumbnails");
+                ui.menu_button("Theme", |ui| {
+                    for choice in ThemeChoice::ALL {
+                        if ui
+                            .radio_value(&mut self.theme, choice, choice.label())
+                            .clicked()
+                        {
+                            ui.close();
+                        }
+                    }
+                });
                 let mut solid = !self.glass;
                 if ui
                     .checkbox(&mut solid, "Solid Background")
                     .on_hover_text("Disable window translucency")
                     .changed()
                 {
-                    self.set_glass(ctx, !solid);
+                    self.set_glass(!solid);
                 }
             });
         });
@@ -669,14 +695,17 @@ impl EvoApp {
 }
 
 impl eframe::App for EvoApp {
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         if self.glass {
             [0.0, 0.0, 0.0, 0.0]
-        } else if _visuals.dark_mode {
-            egui::Color32::from_gray(24).to_normalized_gamma_f32()
         } else {
-            egui::Color32::from_gray(240).to_normalized_gamma_f32()
+            visuals.panel_fill.to_normalized_gamma_f32()
         }
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "theme", &self.theme);
+        eframe::set_value(storage, "glass", &self.glass);
     }
 
     fn on_exit(&mut self) {
@@ -689,6 +718,15 @@ impl eframe::App for EvoApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
+
+        // Restyle when the picked theme, the OS light/dark theme, or the
+        // translucency setting changed.
+        if self.applied != Some((self.theme, ctx.theme(), self.glass)) {
+            ui::theme::apply(ctx, self.theme, self.glass);
+            self.applied = Some((self.theme, ctx.theme(), self.glass));
+            ctx.request_repaint();
+        }
+
         // Files dropped onto the window.
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
@@ -775,7 +813,7 @@ impl eframe::App for EvoApp {
                 .show(ui, |ui| {
                     ui::inspector::show(ui, dc);
                 });
-            let fill = ui::theme::canvas_fill(ctx, self.glass);
+            let fill = ui::theme::canvas_fill(ctx, self.theme, self.glass);
             egui::CentralPanel::default_margins()
                 .frame(egui::Frame::default().fill(fill))
                 .show(ui, |ui| {
@@ -874,5 +912,8 @@ fn install_fonts(ctx: &egui::Context) {
         .entry(egui::FontFamily::Proportional)
         .or_default()
         .insert(0, "liberation_sans".into());
+    // Phosphor puts its glyphs in the private-use area and self-inserts at
+    // index 1, so it only ever fills in the icons Liberation lacks.
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     ctx.set_fonts(fonts);
 }
