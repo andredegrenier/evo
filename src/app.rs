@@ -36,6 +36,10 @@ pub struct EvoApp {
     prefs: ui::preferences::PreferencesState,
     wizard: ui::merge_wizard::MergeWizardState,
     ribbon: ui::ribbon::RibbonConfig,
+    /// Spawned on first use: most sessions never run a script.
+    script_engine: Option<crate::script::ScriptEngine>,
+    script_prefs: crate::script::ScriptPrefs,
+    scripts_ui: ui::scripts::ScriptsState,
 }
 
 pub const ZOOM_STEP: f32 = 1.25;
@@ -57,6 +61,26 @@ fn cmd() -> Modifiers {
     Modifiers::COMMAND
 }
 
+/// A title turned into something safe to use as a filename.
+fn sanitize_filename(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('-').trim();
+    if trimmed.is_empty() {
+        "document".to_owned()
+    } else {
+        trimmed.chars().take(80).collect()
+    }
+}
+
 /// Read every file, naming the one that failed. `merge_pdfs` reports errors
 /// per batch, so without this the user is told the merge failed but not which
 /// file caused it.
@@ -73,7 +97,7 @@ impl EvoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
         let vibrancy = apply_window_effects(cc);
-        let (theme, glass_pref, keymap, mut ribbon) = match cc.storage {
+        let (theme, glass_pref, keymap, mut ribbon, script_prefs) = match cc.storage {
             Some(storage) => (
                 eframe::get_value(storage, "theme").unwrap_or_default(),
                 // Solid by default: translucency is a finish, not the design.
@@ -82,12 +106,14 @@ impl EvoApp {
                     eframe::get_value::<StoredKeymap>(storage, "keymap").unwrap_or_default(),
                 ),
                 eframe::get_value(storage, "ribbon").unwrap_or_default(),
+                eframe::get_value(storage, "script_prefs").unwrap_or_default(),
             ),
             None => (
                 ThemeChoice::default(),
                 false,
                 Keymap::default(),
                 ui::ribbon::RibbonConfig::default(),
+                crate::script::ScriptPrefs::default(),
             ),
         };
         // A stored layout predates any item added since it was written.
@@ -120,6 +146,9 @@ impl EvoApp {
             prefs: ui::preferences::PreferencesState::default(),
             wizard: ui::merge_wizard::MergeWizardState::default(),
             ribbon,
+            script_engine: None,
+            script_prefs,
+            scripts_ui: ui::scripts::ScriptsState::default(),
         };
         if let Some(path) = initial_file {
             app.open_path(path, &cc.egui_ctx);
@@ -528,6 +557,106 @@ impl EvoApp {
         self.keymap.menu_label(ctx, text, action)
     }
 
+    /// Draw the Scripts window and act on it: start and cancel runs, and take
+    /// delivery of whatever a finished run produced.
+    fn scripts_window(&mut self, ctx: &egui::Context) {
+        if !self.scripts_ui.open {
+            return;
+        }
+        // The Lua thread and its vendored VM are only worth starting for
+        // someone who actually opens this window.
+        if self.script_engine.is_none() {
+            self.script_engine = Some(crate::script::ScriptEngine::spawn(ctx));
+        }
+
+        let title = self.dc.as_ref().map(|dc| dc.title());
+        let action = ui::scripts::show(
+            ctx,
+            &mut self.scripts_ui,
+            self.script_engine.as_ref(),
+            title.as_deref(),
+        );
+
+        match action {
+            Some(ui::scripts::ScriptsAction::Run { name, source }) => {
+                let snapshot = self.dc.as_ref().map(|dc| crate::script::DocSnapshot {
+                    title: dc.title(),
+                    source: dc.doc.source.clone(),
+                    page_count: dc.doc.pages.len(),
+                });
+                if let Some(engine) = &self.script_engine {
+                    engine.run(name, source, snapshot, self.script_prefs.clone());
+                }
+            }
+            Some(ui::scripts::ScriptsAction::Cancel) => {
+                if let Some(engine) = &self.script_engine {
+                    engine.cancel();
+                }
+            }
+            Some(ui::scripts::ScriptsAction::Open(doc)) => {
+                match Document::load_bytes(doc.bytes, None) {
+                    Ok(loaded) => {
+                        self.close_document();
+                        let mut dc = DocState::new(loaded, ctx);
+                        dc.title_override = Some(doc.title);
+                        self.dc = Some(dc);
+                    }
+                    Err(e) => self.error = Some(format!("Could not open the document: {e}")),
+                }
+            }
+            Some(ui::scripts::ScriptsAction::RevealFolder(dir)) => {
+                if let Err(e) = crate::export::print::open_with_default_app(&dir) {
+                    self.error = Some(format!("Could not open {}: {e}", dir.display()));
+                }
+            }
+            None => {}
+        }
+
+        self.collect_script_output(ctx);
+    }
+
+    /// Import what a finished run generated. The script thread hands back
+    /// bytes and never touches the library itself, so this is where a
+    /// generated document actually becomes one.
+    fn collect_script_output(&mut self, ctx: &egui::Context) {
+        let Some(engine) = &self.script_engine else {
+            return;
+        };
+        let Some(outcome) = engine.take_outcome() else {
+            return;
+        };
+        let docs = match outcome {
+            Ok(docs) => docs,
+            // The failure is already in the log the user is looking at;
+            // an error dialog on top of it would just be noise.
+            Err(_) => return,
+        };
+
+        for doc in docs {
+            let Some(lib) = &self.library else {
+                // Without a library there is nowhere to put it, but the user
+                // can still open it from the window.
+                self.scripts_ui.produced.push(doc);
+                continue;
+            };
+            let filename = format!("{}.pdf", sanitize_filename(&doc.title));
+            match lib.import_bytes(doc.bytes.clone(), &doc.title, &filename) {
+                Ok(meta) => {
+                    if let Ok(bytes) = lib.load_bytes(&meta.id) {
+                        crate::library::spawn_thumbnail_job(
+                            std::sync::Arc::new(bytes),
+                            lib.thumb_path(&meta.id),
+                            ctx.clone(),
+                        );
+                    }
+                    self.lib_view.mark_dirty();
+                }
+                Err(e) => self.error = Some(format!("Could not add to the library: {e}")),
+            }
+            self.scripts_ui.produced.push(doc);
+        }
+    }
+
     fn menu_bar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
@@ -716,6 +845,19 @@ impl EvoApp {
                     self.set_glass(!solid);
                 }
             });
+            ui.menu_button("Tools", |ui| {
+                if ui
+                    .button("Scripts…")
+                    .on_hover_text(
+                        "Run a Lua script over this document — for instance, to have \
+                         a local model write a summary",
+                    )
+                    .clicked()
+                {
+                    self.scripts_ui.open();
+                    ui.close();
+                }
+            });
         });
     }
 
@@ -766,6 +908,7 @@ impl eframe::App for EvoApp {
         eframe::set_value(storage, "glass", &self.glass);
         eframe::set_value(storage, "keymap", &self.keymap.to_stored());
         eframe::set_value(storage, "ribbon", &self.ribbon);
+        eframe::set_value(storage, "script_prefs", &self.script_prefs);
     }
 
     fn on_exit(&mut self) {
@@ -856,7 +999,14 @@ impl eframe::App for EvoApp {
             None => {}
         }
 
-        ui::preferences::show(ctx, &mut self.prefs, &mut self.keymap, &mut self.ribbon);
+        ui::preferences::show(
+            ctx,
+            &mut self.prefs,
+            &mut self.keymap,
+            &mut self.ribbon,
+            &mut self.script_prefs,
+        );
+        self.scripts_window(ctx);
 
         let (wizard_title, wizard_pages) = match &self.dc {
             Some(dc) => (Some(dc.title()), dc.pages.len()),

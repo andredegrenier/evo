@@ -22,9 +22,18 @@ one-click centering on the page.
   documents
 - Page thumbnails sidebar
 
+**Interface**
+- A **ribbon** of grouped controls — history, tools, style, zoom — laid out
+  either side of an **evo** button that takes you back to your library.
+  Right-click it to hide groups or to drag groups and buttons into the order
+  you want; the layout is remembered
+- **Rebindable keyboard shortcuts**: every command is listed in
+  Preferences (⌘,), where you can record a new chord for it. Conflicts are
+  reported rather than silently applied
+
 **Markup** — <kbd>V</kbd> select, <kbd>H</kbd> highlight, <kbd>T</kbd> text,
 <kbd>R</kbd> rectangle, <kbd>O</kbd> ellipse, <kbd>L</kbd> line,
-<kbd>A</kbd> arrow, <kbd>P</kbd> pen
+<kbd>A</kbd> arrow, <kbd>P</kbd> pen, <kbd>G</kbd> pan (or hold space)
 - Every markup has 8 resize handles (shift = lock aspect), drag to move,
   arrow keys to nudge (shift = 10 pt)
 - **Snapping & guides**: dragged edges and centers snap to the page center,
@@ -39,8 +48,10 @@ one-click centering on the page.
 - Multi-select on the thumbnail rail (click / shift / ⌘), then rotate,
   delete, copy/paste (duplicate), print just the selection, or extract
   pages to a new PDF — all undoable; applied on export
-- Insert pages from other PDFs into the open document, or combine several
-  PDFs into one (File menu, or drop multiple files onto the window)
+- **Combine / Insert PDFs** (File menu, or drop several files onto the
+  window): one wizard for building a document out of several. Each file is
+  checked as you add it, rows are reordered by dragging, and the result
+  either extends the open document or becomes a new one
 
 **Library & search**
 - A personal document library (shown when nothing is open): import PDFs,
@@ -52,6 +63,17 @@ one-click centering on the page.
   the original PDF bytes are never modified
 - Stored under the platform data directory (`~/Library/Application Support/evo`
   on macOS, `%APPDATA%` on Windows, `~/.local/share/evo` on Linux)
+
+**Scripting** — Tools ▸ Scripts
+- Embedded **Lua**, with an `evo` table for reading the open document's text
+  and asking a **local language model** to write something from it. The
+  result is laid out as a PDF and added to your library
+- The model runs on your machine: point Preferences ▸ Scripting at Ollama,
+  LM Studio, llama.cpp's server or anything else speaking either dialect.
+  Nothing is sent anywhere else
+- Scripts are sandboxed — no filesystem, no processes, no other network
+  access — and are stopped by a Cancel button or a configurable time limit.
+  Three worked examples are written into the scripts folder on first use
 
 **Output**
 - **Export PDF**: markups are written as real PDF annotations with appearance
@@ -93,6 +115,9 @@ Ctrl elsewhere.
   `text-detection.rten` and `text-recognition.rten` there manually.
 - Saving always re-serializes through lopdf (use *Save As*; evo never
   overwrites your original in place).
+- Scripting needs a model server you run yourself; evo ships no weights. A
+  generated document uses the same standard-14 Helvetica as text boxes, so
+  characters outside its encoding are written as `?` (the log says when).
 
 ## License
 

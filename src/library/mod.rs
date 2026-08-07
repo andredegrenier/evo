@@ -218,15 +218,6 @@ impl Library {
     /// imported before).
     pub fn import(&self, path: &Path) -> Result<DocMeta, LibraryError> {
         let bytes = std::fs::read(path)?;
-        // Validate + page count via the normal loader (rejects encrypted).
-        let doc = crate::doc::Document::load_bytes(bytes.clone(), Some(path.to_path_buf()))?;
-
-        let id = hex_digest(&bytes);
-        if let Some(existing) = self.db.get_doc(&id)? {
-            return Ok(existing);
-        }
-        self.blobs.put(&id, &bytes)?;
-
         let filename = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -235,6 +226,29 @@ impl Library {
             .file_stem()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Document".into());
+        self.import_bytes(bytes, &title, &filename)
+    }
+
+    /// Import a PDF that never was a file -- one a script generated, say.
+    /// Same validation, hashing and indexing as [`Self::import`]; only the
+    /// title and filename come from the caller instead of the path.
+    pub fn import_bytes(
+        &self,
+        bytes: Vec<u8>,
+        title: &str,
+        filename: &str,
+    ) -> Result<DocMeta, LibraryError> {
+        // Validate + page count via the normal loader (rejects encrypted).
+        let doc = crate::doc::Document::load_bytes(bytes.clone(), None)?;
+
+        let id = hex_digest(&bytes);
+        if let Some(existing) = self.db.get_doc(&id)? {
+            return Ok(existing);
+        }
+        self.blobs.put(&id, &bytes)?;
+
+        let filename = filename.to_owned();
+        let title = title.to_owned();
         let meta = DocMeta {
             id: id.clone(),
             title,

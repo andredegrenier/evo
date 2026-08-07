@@ -6,6 +6,7 @@ mod export;
 mod keymap;
 mod library;
 mod render;
+mod script;
 mod state;
 mod tools;
 mod ui;

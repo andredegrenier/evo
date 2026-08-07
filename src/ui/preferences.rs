@@ -3,6 +3,8 @@
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 
 use crate::keymap::{Action, Category, Keymap};
+use crate::script::ScriptPrefs;
+use crate::script::model::Api;
 use crate::ui::ribbon::RibbonConfig;
 
 #[derive(Default, PartialEq, Clone, Copy)]
@@ -10,6 +12,7 @@ pub enum Tab {
     #[default]
     Shortcuts,
     Ribbon,
+    Scripting,
 }
 
 #[derive(Default)]
@@ -41,6 +44,7 @@ pub fn show(
     st: &mut PreferencesState,
     keymap: &mut Keymap,
     ribbon: &mut RibbonConfig,
+    scripts: &mut ScriptPrefs,
 ) -> bool {
     if !st.open {
         st.capturing = None;
@@ -57,7 +61,11 @@ pub fn show(
         .default_height(520.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                for (tab, label) in [(Tab::Shortcuts, "Shortcuts"), (Tab::Ribbon, "Ribbon")] {
+                for (tab, label) in [
+                    (Tab::Shortcuts, "Shortcuts"),
+                    (Tab::Ribbon, "Ribbon"),
+                    (Tab::Scripting, "Scripting"),
+                ] {
                     if ui.selectable_label(st.tab == tab, label).clicked() {
                         st.tab = tab;
                         st.capturing = None;
@@ -68,6 +76,7 @@ pub fn show(
             match st.tab {
                 Tab::Shortcuts => changed |= shortcuts_tab(ctx, ui, st, keymap),
                 Tab::Ribbon => changed |= ribbon_tab(ui, ribbon),
+                Tab::Scripting => changed |= scripting_tab(ui, scripts),
             }
         });
     st.open = open;
@@ -337,6 +346,91 @@ fn ribbon_tab(ui: &mut egui::Ui, cfg: &mut RibbonConfig) -> bool {
     }
 
     changed
+}
+
+fn scripting_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs) -> bool {
+    let before = prefs.clone();
+
+    ui.heading("Scripting");
+    ui.label(
+        egui::RichText::new(
+            "Scripts talk to a language model running on your own machine. \
+             evo does not ship one: point this at a local server such as \
+             Ollama, LM Studio or llama.cpp.",
+        )
+        .weak(),
+    );
+    ui.add_space(10.0);
+
+    egui::Grid::new("scripting-grid")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("API");
+            ui.horizontal(|ui| {
+                for api in Api::ALL {
+                    if ui
+                        .selectable_label(prefs.model.api == api, api.label())
+                        .clicked()
+                    {
+                        // Moving between dialects almost always means a
+                        // different server, so offer its usual address.
+                        let was_default = prefs.model.base_url == prefs.model.api.default_url();
+                        prefs.model.api = api;
+                        if was_default {
+                            prefs.model.base_url = api.default_url().to_owned();
+                        }
+                    }
+                }
+            });
+            ui.end_row();
+
+            ui.label("Server");
+            ui.add(
+                egui::TextEdit::singleline(&mut prefs.model.base_url)
+                    .hint_text(prefs.model.api.default_url())
+                    .desired_width(260.0),
+            );
+            ui.end_row();
+
+            ui.label("Model");
+            ui.add(
+                egui::TextEdit::singleline(&mut prefs.model.model)
+                    .hint_text("llama3.2")
+                    .desired_width(260.0),
+            );
+            ui.end_row();
+
+            ui.label("Reply timeout");
+            ui.add(
+                egui::DragValue::new(&mut prefs.model.timeout_secs)
+                    .range(5..=3600)
+                    .suffix(" s"),
+            )
+            .on_hover_text("How long to wait for the model before giving up");
+            ui.end_row();
+
+            ui.label("Script time limit");
+            ui.add(
+                egui::DragValue::new(&mut prefs.deadline_secs)
+                    .range(5..=3600)
+                    .suffix(" s"),
+            )
+            .on_hover_text("A script that runs longer than this is stopped");
+            ui.end_row();
+        });
+
+    ui.add_space(12.0);
+    ui.separator();
+    ui.label(
+        egui::RichText::new(
+            "Scripts run sandboxed: no filesystem, no processes, and no network \
+             beyond the server above.",
+        )
+        .weak(),
+    );
+
+    *prefs != before
 }
 
 #[cfg(test)]

@@ -31,8 +31,8 @@ fn temp_pdf(doc: &Document) -> PathBuf {
     std::env::temp_dir().join(format!("evo-print-{stem}-{}.pdf", std::process::id()))
 }
 
-/// Open a file with the platform's default handler.
-fn open_with_default_app(path: &Path) -> std::io::Result<()> {
+/// Open a file, or a folder, with the platform's default handler.
+pub fn open_with_default_app(path: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     let mut cmd = {
         let mut c = Command::new("open");

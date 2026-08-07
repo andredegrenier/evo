@@ -5,6 +5,7 @@ pub mod library_view;
 pub mod merge_wizard;
 pub mod preferences;
 pub mod ribbon;
+pub mod scripts;
 pub mod theme;
 pub mod thumbnails;
 pub mod viewport;

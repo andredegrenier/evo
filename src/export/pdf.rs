@@ -436,7 +436,7 @@ const HELVETICA_WIDTHS: [u16; 95] = [
     556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, // 'p'..'~'
 ];
 
-fn char_width(c: char, font_size: f32) -> f32 {
+pub fn char_width(c: char, font_size: f32) -> f32 {
     let units = match c {
         ' '..='~' => HELVETICA_WIDTHS[(c as usize) - 32],
         _ => 556,
@@ -480,7 +480,7 @@ pub fn wrap_text(text: &str, font_size: f32, max_width: f32) -> Vec<String> {
     lines
 }
 
-fn escape_pdf_string(s: &str) -> String {
+pub fn escape_pdf_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -640,7 +640,7 @@ fn append_ocr_text_layer(
     append_content_stream(lo, page_id, stream_id)
 }
 
-fn helvetica_font_dict() -> Dictionary {
+pub fn helvetica_font_dict() -> Dictionary {
     dictionary! {
         "Type" => "Font",
         "Subtype" => "Type1",
