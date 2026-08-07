@@ -1,89 +1,95 @@
-//! The frosted, Preview-like look. When `glass` is on (OS vibrancy active),
-//! panel fills stay a touch translucent so the blurred desktop reads through;
-//! like Preview's own chrome they are nearly opaque, and the solid variant
-//! uses the same design language with fully opaque fills.
+//! The default look: macOS Preview's chrome, rebuilt in egui.
+//!
+//! Solid by default. An earlier version leaned on window translucency for its
+//! character, which read as murky rather than layered -- panel, card and page
+//! all washed into each other over a busy desktop. The layering now comes from
+//! the palette itself (a panel grey, a raised near-white, a sunken well) and
+//! translucency is an optional finish on top of it.
 
-use eframe::egui::{self, Color32, CornerRadius, Shadow, Stroke, Vec2};
+use eframe::egui::Color32;
 
 use super::ACCENT;
+use super::tokens::{GLASS_CANVAS_ALPHA, Tokens, alpha};
 
-fn alpha(c: Color32, a: u8) -> Color32 {
-    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
-}
-
-pub fn visuals(dark: bool, glass: bool) -> egui::Visuals {
-    let mut visuals = if dark {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    };
-
-    let panel_base = if dark {
-        Color32::from_rgb(30, 30, 34)
-    } else {
-        Color32::from_rgb(246, 246, 248)
-    };
-    let panel_alpha = if glass { 245 } else { 255 };
-    visuals.panel_fill = alpha(panel_base, panel_alpha);
-    visuals.window_fill = alpha(panel_base, if glass { 250 } else { 255 });
-
-    visuals.window_corner_radius = CornerRadius::same(10);
-    visuals.menu_corner_radius = CornerRadius::same(10);
-    visuals.window_shadow = Shadow {
-        offset: [0, 6],
-        blur: 24,
-        spread: 0,
-        color: Color32::from_black_alpha(70),
-    };
-
-    visuals.selection.bg_fill = alpha(ACCENT, 70);
-    visuals.selection.stroke = Stroke::new(1.0, ACCENT);
-    visuals.hyperlink_color = ACCENT;
-
-    let widget_alpha = if glass { 235 } else { 255 };
-    let widget_base = if dark {
-        Color32::from_rgb(58, 58, 64)
-    } else {
-        Color32::from_rgb(232, 232, 236)
-    };
-    for w in [
-        &mut visuals.widgets.inactive,
-        &mut visuals.widgets.hovered,
-        &mut visuals.widgets.active,
-        &mut visuals.widgets.open,
-    ] {
-        w.corner_radius = CornerRadius::same(7);
-        w.weak_bg_fill = alpha(widget_base, widget_alpha);
+pub fn tokens(dark: bool, glass: bool) -> Tokens {
+    let base = if dark { dark_tokens() } else { light_tokens() };
+    Tokens {
+        bg_canvas: if glass {
+            alpha(base.bg_canvas, GLASS_CANVAS_ALPHA)
+        } else {
+            base.bg_canvas
+        },
+        glass,
+        dark,
+        ..base
     }
-    visuals.widgets.hovered.weak_bg_fill = alpha(widget_base, 255);
-    visuals.widgets.noninteractive.corner_radius = CornerRadius::same(7);
-
-    visuals.extreme_bg_color = if dark {
-        alpha(Color32::from_rgb(14, 14, 18), panel_alpha)
-    } else {
-        alpha(Color32::WHITE, panel_alpha)
-    };
-
-    visuals
 }
 
-/// Preview-like control metrics: roomy buttons on a tight grid. Shared by
-/// every theme so switching palettes never reflows the chrome.
-pub fn apply_spacing(ctx: &egui::Context) {
-    ctx.all_styles_mut(|style| {
-        style.spacing.button_padding = Vec2::new(8.0, 5.0);
-        style.spacing.item_spacing = Vec2::new(6.0, 6.0);
-        style.spacing.interact_size = Vec2::new(28.0, 28.0);
-    });
+fn light_tokens() -> Tokens {
+    Tokens {
+        bg_panel: Color32::from_rgb(246, 246, 247),
+        bg_raised: Color32::from_rgb(255, 255, 255),
+        bg_sunken: Color32::from_rgb(255, 255, 255),
+        // Pages are white, so the desk has to be clearly darker or the sheet
+        // edges disappear.
+        bg_canvas: Color32::from_rgb(178, 178, 182),
+
+        ink: Color32::from_rgb(28, 28, 30),
+        ink_muted: Color32::from_rgb(112, 112, 120),
+
+        accent: ACCENT,
+        on_accent: Color32::WHITE,
+        warn: Color32::from_rgb(0xb7, 0x6e, 0x00),
+        error: Color32::from_rgb(0xc0, 0x39, 0x2b),
+
+        outline: Color32::from_rgb(222, 222, 226),
+        outline_strong: Color32::from_rgb(196, 196, 202),
+
+        control: Color32::from_rgb(233, 233, 237),
+        control_hover: Color32::from_rgb(223, 223, 229),
+        control_active: Color32::from_rgb(211, 211, 218),
+
+        radius_s: 5,
+        radius_m: 8,
+        radius_l: 12,
+        space_xs: 3.0,
+        space_s: 6.0,
+        ribbon_height: 44.0,
+        glass: false,
+        dark: false,
+    }
 }
 
-/// Backdrop behind the pages. Glass keeps a hint of translucency in the page
-/// margins only; the pages themselves are painted opaque white.
-pub fn canvas_fill(dark: bool, glass: bool) -> Color32 {
-    match (dark, glass) {
-        (true, true) => Color32::from_rgba_unmultiplied(24, 24, 28, 235),
-        (true, false) => Color32::from_gray(45),
-        (false, true) => Color32::from_rgba_unmultiplied(216, 218, 224, 235),
-        (false, false) => Color32::from_gray(180),
+fn dark_tokens() -> Tokens {
+    Tokens {
+        // Graphite rather than black: pure black makes the white pages glare.
+        bg_panel: Color32::from_rgb(32, 32, 35),
+        bg_raised: Color32::from_rgb(44, 44, 48),
+        bg_sunken: Color32::from_rgb(22, 22, 25),
+        bg_canvas: Color32::from_rgb(26, 26, 29),
+
+        ink: Color32::from_rgb(236, 236, 240),
+        ink_muted: Color32::from_rgb(150, 150, 158),
+
+        accent: ACCENT,
+        on_accent: Color32::WHITE,
+        warn: Color32::from_rgb(0xe8, 0xa3, 0x3d),
+        error: Color32::from_rgb(0xef, 0x6f, 0x62),
+
+        outline: Color32::from_rgb(58, 58, 63),
+        outline_strong: Color32::from_rgb(80, 80, 88),
+
+        control: Color32::from_rgb(58, 58, 64),
+        control_hover: Color32::from_rgb(69, 69, 76),
+        control_active: Color32::from_rgb(82, 82, 90),
+
+        radius_s: 5,
+        radius_m: 8,
+        radius_l: 12,
+        space_xs: 3.0,
+        space_s: 6.0,
+        ribbon_height: 44.0,
+        glass: false,
+        dark: true,
     }
 }

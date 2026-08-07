@@ -35,9 +35,10 @@ pub struct EvoApp {
     keymap: Keymap,
     prefs: ui::preferences::PreferencesState,
     wizard: ui::merge_wizard::MergeWizardState,
+    ribbon: ui::ribbon::RibbonConfig,
 }
 
-const ZOOM_STEP: f32 = 1.25;
+pub const ZOOM_STEP: f32 = 1.25;
 
 /// Tool actions and the tool each selects.
 const TOOL_ACTIONS: [(Action, ActiveTool); 9] = [
@@ -72,16 +73,25 @@ impl EvoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
         let vibrancy = apply_window_effects(cc);
-        let (theme, glass_pref, keymap) = match cc.storage {
+        let (theme, glass_pref, keymap, mut ribbon) = match cc.storage {
             Some(storage) => (
                 eframe::get_value(storage, "theme").unwrap_or_default(),
-                eframe::get_value(storage, "glass").unwrap_or(true),
+                // Solid by default: translucency is a finish, not the design.
+                eframe::get_value(storage, "glass").unwrap_or(false),
                 Keymap::from_stored(
                     eframe::get_value::<StoredKeymap>(storage, "keymap").unwrap_or_default(),
                 ),
+                eframe::get_value(storage, "ribbon").unwrap_or_default(),
             ),
-            None => (ThemeChoice::default(), true, Keymap::default()),
+            None => (
+                ThemeChoice::default(),
+                false,
+                Keymap::default(),
+                ui::ribbon::RibbonConfig::default(),
+            ),
         };
+        // A stored layout predates any item added since it was written.
+        ribbon.sanitize();
         let glass = glass_pref && vibrancy;
         crate::ui::theme::apply(&cc.egui_ctx, theme, glass);
         let library = match crate::library::Library::open_default() {
@@ -109,6 +119,7 @@ impl EvoApp {
             keymap,
             prefs: ui::preferences::PreferencesState::default(),
             wizard: ui::merge_wizard::MergeWizardState::default(),
+            ribbon,
         };
         if let Some(path) = initial_file {
             app.open_path(path, &cc.egui_ctx);
@@ -754,6 +765,7 @@ impl eframe::App for EvoApp {
         eframe::set_value(storage, "theme", &self.theme);
         eframe::set_value(storage, "glass", &self.glass);
         eframe::set_value(storage, "keymap", &self.keymap.to_stored());
+        eframe::set_value(storage, "ribbon", &self.ribbon);
     }
 
     fn on_exit(&mut self) {
@@ -829,14 +841,22 @@ impl eframe::App for EvoApp {
             self.menu_bar(ctx, ui);
         });
 
+        let tokens = ui::theme::tokens(ctx, self.theme, self.glass);
+        let mut ribbon_action = None;
         if let Some(dc) = &mut self.dc {
             let keymap = &self.keymap;
-            egui::Panel::top("toolbar").show(ui, |ui| {
-                ui::toolbar::show(ui, dc, keymap);
-            });
+            let ribbon = &mut self.ribbon;
+            ribbon_action = egui::Panel::top("ribbon")
+                .exact_size(tokens.ribbon_height)
+                .show(ui, |ui| ui::ribbon::show(ui, dc, ribbon, keymap, &tokens))
+                .inner;
+        }
+        match ribbon_action {
+            Some(ui::ribbon::RibbonAction::GoToLibrary) => self.close_document(),
+            None => {}
         }
 
-        ui::preferences::show(ctx, &mut self.prefs, &mut self.keymap);
+        ui::preferences::show(ctx, &mut self.prefs, &mut self.keymap, &mut self.ribbon);
 
         let (wizard_title, wizard_pages) = match &self.dc {
             Some(dc) => (Some(dc.title()), dc.pages.len()),

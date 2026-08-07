@@ -14,7 +14,7 @@ use crate::state::DocState;
 use select::Handle;
 use snap::{Guide, SnapFeatures, snap_rect};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ActiveTool {
     Select,
     Pan,

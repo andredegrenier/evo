@@ -1,12 +1,21 @@
-//! Preferences: currently the keyboard shortcut editor.
+//! Preferences: keyboard shortcuts and ribbon layout.
 
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 
 use crate::keymap::{Action, Category, Keymap};
+use crate::ui::ribbon::RibbonConfig;
+
+#[derive(Default, PartialEq, Clone, Copy)]
+pub enum Tab {
+    #[default]
+    Shortcuts,
+    Ribbon,
+}
 
 #[derive(Default)]
 pub struct PreferencesState {
     pub open: bool,
+    tab: Tab,
     /// The action whose next key press becomes its new binding.
     pub capturing: Option<Action>,
     /// Set after a capture that landed on a chord already in use.
@@ -26,8 +35,13 @@ impl PreferencesState {
     }
 }
 
-/// Returns true when a binding changed, so the caller knows to persist.
-pub fn show(ctx: &egui::Context, st: &mut PreferencesState, keymap: &mut Keymap) -> bool {
+/// Returns true when something changed, so the caller knows to persist.
+pub fn show(
+    ctx: &egui::Context,
+    st: &mut PreferencesState,
+    keymap: &mut Keymap,
+    ribbon: &mut RibbonConfig,
+) -> bool {
     if !st.open {
         st.capturing = None;
         st.conflict = None;
@@ -42,7 +56,19 @@ pub fn show(ctx: &egui::Context, st: &mut PreferencesState, keymap: &mut Keymap)
         .default_width(430.0)
         .default_height(520.0)
         .show(ctx, |ui| {
-            changed |= shortcuts_tab(ctx, ui, st, keymap);
+            ui.horizontal(|ui| {
+                for (tab, label) in [(Tab::Shortcuts, "Shortcuts"), (Tab::Ribbon, "Ribbon")] {
+                    if ui.selectable_label(st.tab == tab, label).clicked() {
+                        st.tab = tab;
+                        st.capturing = None;
+                    }
+                }
+            });
+            ui.separator();
+            match st.tab {
+                Tab::Shortcuts => changed |= shortcuts_tab(ctx, ui, st, keymap),
+                Tab::Ribbon => changed |= ribbon_tab(ui, ribbon),
+            }
         });
     st.open = open;
     if !st.open {
@@ -256,6 +282,61 @@ fn normalize(m: Modifiers) -> Modifiers {
         ctrl: false,
         mac_cmd: false,
     }
+}
+
+fn ribbon_tab(ui: &mut egui::Ui, cfg: &mut RibbonConfig) -> bool {
+    let mut changed = false;
+
+    ui.heading("Ribbon");
+    ui.label(
+        egui::RichText::new(
+            "Choose which groups appear. To rearrange them, turn on customizing \
+             and drag groups or individual buttons — right-clicking the ribbon \
+             itself does the same.",
+        )
+        .weak(),
+    );
+    ui.add_space(8.0);
+
+    for i in 0..cfg.groups.len() {
+        let label = cfg.groups[i].group.label();
+        let mut visible = cfg.groups[i].visible;
+        if ui.checkbox(&mut visible, label).changed() {
+            cfg.groups[i].visible = visible;
+            changed = true;
+        }
+    }
+
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        let mut customizing = cfg.customizing;
+        if ui
+            .checkbox(&mut customizing, "Customizing")
+            .on_hover_text("Drag groups and buttons on the ribbon to rearrange them")
+            .changed()
+        {
+            cfg.customizing = customizing;
+        }
+        if ui.button("Reset Layout").clicked() {
+            let customizing = cfg.customizing;
+            *cfg = RibbonConfig::default();
+            cfg.customizing = customizing;
+            changed = true;
+        }
+    });
+
+    if cfg.customizing {
+        ui.add_space(6.0);
+        ui.label(
+            egui::RichText::new(
+                "Buttons are inert while customizing so a drag moves them \
+                 instead of operating them.",
+            )
+            .weak(),
+        );
+    }
+
+    changed
 }
 
 #[cfg(test)]

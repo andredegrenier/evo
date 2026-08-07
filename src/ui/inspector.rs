@@ -7,7 +7,7 @@ use crate::doc::annotation::{Annotation, AnnotationKind};
 use crate::doc::geometry::{PdfPoint, PdfRect};
 use crate::doc::history::Command;
 use crate::state::DocState;
-use crate::ui::toolbar::{from_egui, to_egui};
+use crate::ui::ribbon::{from_egui, to_egui};
 
 struct FieldResponse {
     changed: bool,

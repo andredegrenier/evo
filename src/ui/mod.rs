@@ -4,7 +4,7 @@ pub mod inspector;
 pub mod library_view;
 pub mod merge_wizard;
 pub mod preferences;
+pub mod ribbon;
 pub mod theme;
 pub mod thumbnails;
-pub mod toolbar;
 pub mod viewport;
