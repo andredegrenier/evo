@@ -471,6 +471,26 @@ fn route_pointer(
         }
     }
 
+    // Plain clicks: egui only sets the drag flags once the pointer moves, and
+    // `clicked()` is mutually exclusive with them, so a click has to drive the
+    // tool state machine on its own (press immediately followed by release).
+    if response.clicked()
+        && !response.double_clicked()
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        if dc.editing_text.is_some() {
+            commit_text_edit(dc);
+        }
+        if let Some(slot) = slot_at(pos) {
+            let p = pointer_info_at(dc, slot, content_rect, pos, modifiers);
+            tools::on_press(dc, &p);
+            tools::on_release(dc, &p);
+        } else if dc.tool == ActiveTool::Select {
+            dc.selection = None;
+        }
+        return;
+    }
+
     if response.drag_started()
         && let Some(pos) = response.interact_pointer_pos()
     {
