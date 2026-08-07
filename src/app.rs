@@ -538,14 +538,26 @@ impl eframe::App for EvoApp {
             self.status_bar(ui);
         });
 
+        let mut open_extracted: Option<Vec<u8>> = None;
+        let mut pending_temp_file: Option<PathBuf> = None;
+        let mut pending_error: Option<String> = None;
         if let Some(dc) = &mut self.dc {
             if self.show_thumbnails {
-                egui::Panel::left("thumbnails")
+                let action = egui::Panel::left("thumbnails")
                     .resizable(false)
                     .exact_size(150.0)
-                    .show(ui, |ui| {
-                        ui::thumbnails::show(ui, dc);
-                    });
+                    .show(ui, |ui| ui::thumbnails::show(ui, dc))
+                    .inner;
+                match action {
+                    Some(ui::thumbnails::RailAction::OpenExtracted(bytes)) => {
+                        open_extracted = Some(bytes);
+                    }
+                    Some(ui::thumbnails::RailAction::TempPrintFile(path)) => {
+                        pending_temp_file = Some(path);
+                    }
+                    Some(ui::thumbnails::RailAction::Error(msg)) => pending_error = Some(msg),
+                    None => {}
+                }
             }
             egui::Panel::right("inspector")
                 .resizable(true)
@@ -568,6 +580,19 @@ impl eframe::App for EvoApp {
                     ));
                 });
             });
+        }
+
+        if let Some(path) = pending_temp_file {
+            self.temp_print_files.push(path);
+        }
+        if let Some(msg) = pending_error {
+            self.error = Some(msg);
+        }
+        if let Some(bytes) = open_extracted {
+            match crate::doc::Document::load_bytes(bytes, None) {
+                Ok(doc) => self.dc = Some(DocState::new(doc, ctx)),
+                Err(e) => self.error = Some(e.to_string()),
+            }
         }
 
         if let Some(error) = self.error.clone() {

@@ -1,12 +1,14 @@
 //! Markup annotations. These live in a layer separate from the source PDF and
 //! are only written into a real PDF at export time.
 
+use serde::{Deserialize, Serialize};
+
 use super::geometry::{PdfPoint, PdfRect};
 
 pub type AnnotationId = u64;
 
 /// RGBA color, straight (not premultiplied), 0-255.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Color {
     pub r: u8,
     pub g: u8,
@@ -30,7 +32,7 @@ impl Color {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Style {
     pub stroke: Color,
     pub stroke_width: f32,
@@ -50,14 +52,14 @@ impl Default for Style {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum TextAlign {
     Left,
     Center,
     Right,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum AnnotationKind {
     /// Semi-transparent marker rectangle.
     Highlight,
@@ -82,7 +84,7 @@ pub enum AnnotationKind {
     },
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Annotation {
     pub id: AnnotationId,
     /// Index into the ORIGINAL document's pages (stable across page reorder).

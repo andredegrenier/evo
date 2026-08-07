@@ -92,7 +92,7 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
 }
 
 fn transform_for(dc: &DocState, slot: &PageSlot, content_rect: Rect) -> PageTransform {
-    let info = &dc.doc.pages[slot.original];
+    let info = &dc.doc.pages[dc.pages.source_of(slot.original)];
     PageTransform {
         screen_rect: Rect::from_min_size(
             content_rect.min + slot.rect.min.to_vec2(),
@@ -131,15 +131,16 @@ fn paint_and_interact(
         );
         painter.rect_filled(t.screen_rect, CornerRadius::ZERO, Color32::WHITE);
 
-        let exact = dc.cache.get(slot.original, render_scale);
+        let source = dc.pages.source_of(slot.original);
+        let exact = dc.cache.get(source, render_scale);
         let tex = exact
             .clone()
-            .or_else(|| dc.thumb_cache.get(slot.original, THUMB_SCALE))
-            .or_else(|| dc.cache.best_effort(slot.original).map(|(_, t)| t));
-        if exact.is_none() && !dc.cache.is_pending(slot.original, render_scale) {
-            dc.cache.mark_pending(slot.original, render_scale);
+            .or_else(|| dc.thumb_cache.get(source, THUMB_SCALE))
+            .or_else(|| dc.cache.best_effort(source).map(|(_, t)| t));
+        if exact.is_none() && !dc.cache.is_pending(source, render_scale) {
+            dc.cache.mark_pending(source, render_scale);
             dc.worker.request(RenderRequest {
-                page: slot.original,
+                page: source,
                 scale: render_scale,
             });
         }
@@ -413,7 +414,7 @@ fn pointer_info_at(
     modifiers: Modifiers,
 ) -> PointerInfo {
     let t = transform_for(dc, slot, content_rect);
-    let info = &dc.doc.pages[slot.original];
+    let info = &dc.doc.pages[dc.pages.source_of(slot.original)];
     PointerInfo {
         page: slot.original,
         pos: t.from_screen(pos),

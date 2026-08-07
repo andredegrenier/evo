@@ -1,6 +1,8 @@
 //! Per-document editor state: the document itself plus everything the UI
 //! needs to edit it (selection, active tool, undo history, render caches).
 
+use std::collections::BTreeSet;
+
 use eframe::egui;
 
 use crate::doc::Document;
@@ -31,6 +33,45 @@ pub struct DocState {
     /// Style applied to newly created annotations.
     pub current_style: Style,
     pub current_font_size: f32,
+
+    /// Multi-selection on the page rail, as display positions.
+    pub rail: RailSelection,
+    /// Logical page indices copied via the rail's Copy action.
+    pub page_clipboard: Vec<usize>,
+}
+
+/// Page-rail multi-selection (display positions).
+#[derive(Default)]
+pub struct RailSelection {
+    pub selected: BTreeSet<usize>,
+    pub anchor: Option<usize>,
+}
+
+impl RailSelection {
+    pub fn clear(&mut self) {
+        self.selected.clear();
+        self.anchor = None;
+    }
+
+    /// Apply a click at `pos` with the platform modifiers.
+    pub fn click(&mut self, pos: usize, shift: bool, cmd: bool) {
+        if shift && let Some(anchor) = self.anchor {
+            let (a, b) = (anchor.min(pos), anchor.max(pos));
+            if !cmd {
+                self.selected.clear();
+            }
+            self.selected.extend(a..=b);
+        } else if cmd {
+            if !self.selected.remove(&pos) {
+                self.selected.insert(pos);
+            }
+            self.anchor = Some(pos);
+        } else {
+            self.selected.clear();
+            self.selected.insert(pos);
+            self.anchor = Some(pos);
+        }
+    }
 }
 
 impl DocState {
@@ -52,6 +93,8 @@ impl DocState {
             editing_text: None,
             current_style: Style::default(),
             current_font_size: 14.0,
+            rail: RailSelection::default(),
+            page_clipboard: Vec::new(),
         }
     }
 

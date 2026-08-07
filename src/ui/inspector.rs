@@ -40,7 +40,7 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
         return;
     };
 
-    let info = dc.doc.pages[ann.page];
+    let info = dc.doc.pages[dc.pages.source_of(ann.page)];
     let (page_w, page_h) = (info.width, info.height);
 
     // Position/size in points; Y shown from the top of the page (like

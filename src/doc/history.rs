@@ -14,12 +14,15 @@ pub enum Command {
         before: Annotation,
         after: Annotation,
     },
-    /// Any page operation (rotate/delete/reorder); the page list is small
-    /// enough to snapshot whole.
+    /// Any page operation (rotate/delete/reorder/duplicate); the page list is
+    /// small enough to snapshot whole.
     SetPageList {
         before: PageList,
         after: PageList,
     },
+    /// Several commands applied as one undo step (e.g. duplicate pages +
+    /// clone their annotations).
+    Batch(Vec<Command>),
 }
 
 impl Command {
@@ -31,6 +34,11 @@ impl Command {
             }
             Command::ModifyAnnotation { after, .. } => store.replace(after.clone()),
             Command::SetPageList { after, .. } => *pages = after.clone(),
+            Command::Batch(cmds) => {
+                for cmd in cmds {
+                    cmd.apply(store, pages);
+                }
+            }
         }
     }
 
@@ -42,6 +50,11 @@ impl Command {
             Command::RemoveAnnotation(a) => store.replace(a.clone()),
             Command::ModifyAnnotation { before, .. } => store.replace(before.clone()),
             Command::SetPageList { before, .. } => *pages = before.clone(),
+            Command::Batch(cmds) => {
+                for cmd in cmds.iter().rev() {
+                    cmd.revert(store, pages);
+                }
+            }
         }
     }
 }

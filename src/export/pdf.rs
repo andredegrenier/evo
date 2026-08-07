@@ -51,44 +51,60 @@ pub fn export_pdf_bytes(
     let mut lo = LoDocument::load_mem(&doc.source)?;
 
     let page_map = lo.get_pages();
-    let page_ids: Vec<ObjectId> = (1..=doc.pages.len() as u32)
+    let source_ids: Vec<ObjectId> = (1..=doc.pages.len() as u32)
         .map(|n| page_map.get(&n).copied().ok_or(ExportError::BadStructure))
         .collect::<Result<_, _>>()?;
 
-    // Markup, per kept page.
-    for &orig in &pages.order {
-        let page_id = page_ids[orig];
-        let info = doc.pages[orig];
-        let annotations: Vec<Annotation> = store.on_page(orig).cloned().collect();
-        if annotations.is_empty() {
-            continue;
-        }
-        if options.flatten {
-            flatten_annotations(&mut lo, page_id, &info, &annotations)?;
+    // Resolve each display slot's logical page to a page OBJECT. The first
+    // occurrence of a source page keeps its original object; every further
+    // occurrence (duplicated pages) gets a cloned page dict so rotation and
+    // annotations stay independent (content streams remain shared).
+    let mut seen_source: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut slot_ids: Vec<(usize, ObjectId)> = Vec::with_capacity(pages.order.len()); // (logical, id)
+    for &logical in &pages.order {
+        let source = pages.source_of(logical);
+        let id = if seen_source.insert(source) {
+            source_ids[source]
         } else {
-            for ann in &annotations {
-                let annot_id = build_annotation(&mut lo, &info, ann);
-                push_page_annot(&mut lo, page_id, annot_id)?;
-            }
-        }
+            let cloned = lo.get_dictionary(source_ids[source])?.clone();
+            lo.add_object(Object::Dictionary(cloned))
+        };
+        slot_ids.push((logical, id));
     }
 
-    // Rotation.
-    for &orig in &pages.order {
-        let extra = pages.rotation_of(orig).degrees();
+    // Markup + rotation, per display slot.
+    for &(logical, page_id) in &slot_ids {
+        let info = doc.pages[pages.source_of(logical)];
+        let annotations: Vec<Annotation> = store.on_page(logical).cloned().collect();
+        if !annotations.is_empty() {
+            if options.flatten {
+                flatten_annotations(&mut lo, page_id, &info, &annotations)?;
+            } else {
+                for ann in &annotations {
+                    let annot_id = build_annotation(&mut lo, &info, ann);
+                    push_page_annot(&mut lo, page_id, annot_id)?;
+                }
+            }
+        }
+
+        let extra = pages.rotation_of(logical).degrees();
         if extra != 0 {
-            let info = doc.pages[orig];
             let total = (info.intrinsic_rotation + extra).rem_euclid(360);
-            let page_dict = lo.get_dictionary_mut(page_ids[orig])?;
+            let page_dict = lo.get_dictionary_mut(page_id)?;
             page_dict.set("Rotate", total);
         }
     }
 
-    // Reorder / delete: rebuild the page tree flat, in display order.
-    let order_changed = pages.order.len() != doc.pages.len()
-        || pages.order.iter().enumerate().any(|(i, &p)| i != p);
+    // Reorder / delete / duplicate: rebuild the page tree flat, in display
+    // order, whenever the slots differ from the pristine document.
+    let order_changed = slot_ids.len() != doc.pages.len()
+        || slot_ids
+            .iter()
+            .enumerate()
+            .any(|(i, &(logical, id))| logical != i || id != source_ids[i]);
     if order_changed {
-        rebuild_page_tree(&mut lo, &page_ids, &pages.order)?;
+        let kids: Vec<ObjectId> = slot_ids.iter().map(|&(_, id)| id).collect();
+        rebuild_page_tree(&mut lo, &kids)?;
     }
 
     let mut buf = Vec::new();
@@ -120,11 +136,7 @@ fn push_page_annot(
     Ok(())
 }
 
-fn rebuild_page_tree(
-    lo: &mut LoDocument,
-    page_ids: &[ObjectId],
-    order: &[usize],
-) -> Result<(), ExportError> {
+fn rebuild_page_tree(lo: &mut LoDocument, kids: &[ObjectId]) -> Result<(), ExportError> {
     let pages_id = lo
         .catalog()?
         .get(b"Pages")
@@ -132,19 +144,16 @@ fn rebuild_page_tree(
         .and_then(|o| o.as_reference().ok())
         .ok_or(ExportError::BadStructure)?;
 
-    let kids: Vec<Object> = order
-        .iter()
-        .map(|&orig| Object::Reference(page_ids[orig]))
-        .collect();
-    let count = kids.len() as i64;
+    let kid_refs: Vec<Object> = kids.iter().map(|&id| Object::Reference(id)).collect();
+    let count = kid_refs.len() as i64;
 
     let pages_dict = lo.get_dictionary_mut(pages_id)?;
-    pages_dict.set("Kids", kids);
+    pages_dict.set("Kids", kid_refs);
     pages_dict.set("Count", count);
 
     // Reparent every kept page to the root so the flattened tree is valid.
-    for &orig in order {
-        let page_dict = lo.get_dictionary_mut(page_ids[orig])?;
+    for &id in kids {
+        let page_dict = lo.get_dictionary_mut(id)?;
         page_dict.set("Parent", Object::Reference(pages_id));
     }
     Ok(())
@@ -1050,6 +1059,28 @@ mod tests {
         let bytes = export_pdf_bytes(&doc, &pages, &store, ExportOptions::default()).unwrap();
         let lo = LoDocument::load_mem(&bytes).unwrap();
         assert_eq!(lo.get_pages().len(), 1);
+    }
+
+    #[test]
+    fn duplicated_page_gets_independent_dict() {
+        let doc = fixture();
+        let mut pages = PageList::new(doc.pages.len());
+        // Duplicate page 1 (logical 0) and rotate only the copy.
+        let copy = pages.duplicate(0, 1);
+        pages.states[copy].extra_rotation = crate::doc::geometry::ExtraRotation::Cw90;
+        let store = AnnotationStore::default();
+
+        let bytes = export_pdf_bytes(&doc, &pages, &store, ExportOptions::default()).unwrap();
+        let lo = LoDocument::load_mem(&bytes).unwrap();
+        let page_map = lo.get_pages();
+        assert_eq!(page_map.len(), 3);
+        // Slot 1 is the rotated copy; slot 0 must remain unrotated.
+        let first = lo.get_dictionary(page_map[&1]).unwrap();
+        assert!(first.get(b"Rotate").is_err());
+        let second = lo.get_dictionary(page_map[&2]).unwrap();
+        assert_eq!(second.get(b"Rotate").unwrap().as_i64().unwrap(), 90);
+        // And they are different objects.
+        assert_ne!(page_map[&1], page_map[&2]);
     }
 
     #[test]

@@ -55,9 +55,9 @@ pub struct Layout {
 
 impl Viewport {
     /// Displayed size (points) of an original page, honoring user rotation.
-    pub fn page_display_size(doc: &Document, pages: &PageList, original: usize) -> Vec2 {
-        let info = &doc.pages[original];
-        if pages.rotation_of(original).swaps_axes() {
+    pub fn page_display_size(doc: &Document, pages: &PageList, logical: usize) -> Vec2 {
+        let info = &doc.pages[pages.source_of(logical)];
+        if pages.rotation_of(logical).swaps_axes() {
             vec2(info.height, info.width)
         } else {
             vec2(info.width, info.height)

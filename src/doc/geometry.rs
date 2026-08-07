@@ -8,9 +8,10 @@
 //! separately by [`PageTransform`].
 
 use eframe::emath::{Pos2, Rect, Vec2};
+use serde::{Deserialize, Serialize};
 
 /// A point in PDF page space (points, y-up).
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct PdfPoint {
     pub x: f32,
     pub y: f32,
@@ -23,7 +24,7 @@ impl PdfPoint {
 }
 
 /// An axis-aligned rectangle in PDF page space, kept normalized (min <= max).
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub struct PdfRect {
     pub min: PdfPoint,
     pub max: PdfPoint,
@@ -76,7 +77,7 @@ impl PdfRect {
 }
 
 /// User-applied page rotation, clockwise, on top of the intrinsic `/Rotate`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum ExtraRotation {
     #[default]
     None,

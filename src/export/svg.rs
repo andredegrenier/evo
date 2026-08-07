@@ -46,14 +46,15 @@ pub fn export_svg(
     let single = pages.len() == 1;
 
     let mut written = Vec::new();
-    for (position, &orig) in pages.order.iter().enumerate() {
+    for (position, &logical) in pages.order.iter().enumerate() {
+        let source = pages.source_of(logical);
         let hayro_pages = pdf.pages();
-        let page = hayro_pages.get(orig).ok_or(SvgError::Parse)?;
+        let page = hayro_pages.get(source).ok_or(SvgError::Parse)?;
         let base_svg = convert(page, &cache, &settings, &svg_settings);
 
-        let info = &doc.pages[orig];
-        let markup = markup_group(store, orig, info.height);
-        let rotation = pages.rotation_of(orig);
+        let info = &doc.pages[source];
+        let markup = markup_group(store, logical, info.height);
+        let rotation = pages.rotation_of(logical);
         let full = compose(&base_svg, &markup, info.width, info.height, rotation);
 
         let out_path = if single {

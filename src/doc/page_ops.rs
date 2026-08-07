@@ -1,23 +1,31 @@
-//! Logical page operations (rotate / delete / reorder). These only mutate the
-//! in-memory page list; lopdf applies them to the real PDF at export time.
+//! Logical page operations (rotate / delete / reorder / duplicate). These only
+//! mutate the in-memory page list; lopdf applies them to the real PDF at
+//! export time.
+//!
+//! Pages are addressed by **logical index**: initially identical to the source
+//! document's page indices, but duplication appends new logical pages that map
+//! back to an existing source page via [`PageList::source_of`].
+
+use serde::{Deserialize, Serialize};
 
 use super::geometry::ExtraRotation;
 
-/// One entry per page of the ORIGINAL document. `order` below decides display
-/// order; deleted pages simply drop out of `order` (kept here so undo can
-/// restore them).
-#[derive(Clone, Copy, Debug, Default)]
+/// Per-logical-page state.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct PageState {
     pub extra_rotation: ExtraRotation,
 }
 
 /// The editable page list.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PageList {
-    /// Per-original-page state, indexed by original page index.
+    /// Per-logical-page state, indexed by logical page index.
     pub states: Vec<PageState>,
-    /// Display order: original page indices, deleted pages omitted.
+    /// Display order: logical page indices, deleted pages omitted.
     pub order: Vec<usize>,
+    /// Maps logical page index -> source-document page index. Identity for
+    /// original pages; duplicates point at the page they were copied from.
+    pub source_of: Vec<usize>,
 }
 
 impl PageList {
@@ -25,6 +33,7 @@ impl PageList {
         Self {
             states: vec![PageState::default(); page_count],
             order: (0..page_count).collect(),
+            source_of: (0..page_count).collect(),
         }
     }
 
@@ -33,17 +42,22 @@ impl PageList {
         self.order.len()
     }
 
-    pub fn rotation_of(&self, original: usize) -> ExtraRotation {
-        self.states[original].extra_rotation
+    /// Source-document page index behind a logical page.
+    pub fn source_of(&self, logical: usize) -> usize {
+        self.source_of[logical]
     }
 
-    pub fn rotate_cw(&mut self, original: usize) {
-        let r = &mut self.states[original].extra_rotation;
+    pub fn rotation_of(&self, logical: usize) -> ExtraRotation {
+        self.states[logical].extra_rotation
+    }
+
+    pub fn rotate_cw(&mut self, logical: usize) {
+        let r = &mut self.states[logical].extra_rotation;
         *r = r.rotated_cw();
     }
 
-    pub fn rotate_ccw(&mut self, original: usize) {
-        let r = &mut self.states[original].extra_rotation;
+    pub fn rotate_ccw(&mut self, logical: usize) {
+        let r = &mut self.states[logical].extra_rotation;
         *r = r.rotated_ccw();
     }
 
@@ -59,14 +73,36 @@ impl PageList {
         self.order.insert(to, page);
     }
 
+    /// Duplicate the logical page `logical`, inserting the copy at display
+    /// position `at_pos`. Returns the new logical index.
+    pub fn duplicate(&mut self, logical: usize, at_pos: usize) -> usize {
+        let new_logical = self.states.len();
+        self.states.push(self.states[logical]);
+        self.source_of.push(self.source_of[logical]);
+        let at_pos = at_pos.min(self.order.len());
+        self.order.insert(at_pos, new_logical);
+        new_logical
+    }
+
     /// Whether anything differs from the pristine document.
     pub fn is_modified(&self, page_count: usize) -> bool {
-        self.order.len() != page_count
+        self.source_of.len() != page_count
+            || self.order.len() != page_count
             || self.order.iter().enumerate().any(|(i, &p)| i != p)
             || self
                 .states
                 .iter()
                 .any(|s| s.extra_rotation != ExtraRotation::None)
+    }
+
+    /// A copy of this list showing only the given display positions, in the
+    /// given order (used for print-selected / extract-pages subset export).
+    pub fn subset(&self, positions: &[usize]) -> Self {
+        Self {
+            states: self.states.clone(),
+            order: positions.iter().map(|&p| self.order[p]).collect(),
+            source_of: self.source_of.clone(),
+        }
     }
 }
 
@@ -87,5 +123,22 @@ mod tests {
     #[test]
     fn pristine_is_unmodified() {
         assert!(!PageList::new(3).is_modified(3));
+    }
+
+    #[test]
+    fn duplicate_maps_to_source() {
+        let mut pl = PageList::new(2);
+        let new_logical = pl.duplicate(1, 1);
+        assert_eq!(new_logical, 2);
+        assert_eq!(pl.order, vec![0, 2, 1]);
+        assert_eq!(pl.source_of(new_logical), 1);
+        assert!(pl.is_modified(2));
+    }
+
+    #[test]
+    fn subset_keeps_selection_order() {
+        let pl = PageList::new(4);
+        let sub = pl.subset(&[2, 0]);
+        assert_eq!(sub.order, vec![2, 0]);
     }
 }
