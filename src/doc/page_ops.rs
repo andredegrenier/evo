@@ -84,6 +84,17 @@ impl PageList {
         new_logical
     }
 
+    /// Append `count` fresh logical pages mapping to source pages starting at
+    /// `first_source` (used after Insert Pages merges new sources in).
+    pub fn append_source_pages(&mut self, first_source: usize, count: usize) {
+        for i in 0..count {
+            let logical = self.states.len();
+            self.states.push(PageState::default());
+            self.source_of.push(first_source + i);
+            self.order.push(logical);
+        }
+    }
+
     /// Whether anything differs from the pristine document.
     pub fn is_modified(&self, page_count: usize) -> bool {
         self.source_of.len() != page_count

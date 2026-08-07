@@ -38,6 +38,9 @@ pub struct DocState {
     pub rail: RailSelection,
     /// Logical page indices copied via the rail's Copy action.
     pub page_clipboard: Vec<usize>,
+    /// Set when the underlying source bytes differ from the file on disk
+    /// (e.g. after Insert Pages), independent of markup/page-list changes.
+    pub force_modified: bool,
 }
 
 /// Page-rail multi-selection (display positions).
@@ -95,12 +98,32 @@ impl DocState {
             current_font_size: 14.0,
             rail: RailSelection::default(),
             page_clipboard: Vec::new(),
+            force_modified: false,
         }
+    }
+
+    /// Build a state for `doc` (e.g. the merged result of Insert Pages) that
+    /// carries over the editing session of `old`: markup, history, page list,
+    /// viewport, and tool settings. Render workers and caches start fresh.
+    pub fn adopt(doc: Document, ctx: &egui::Context, old: DocState) -> Self {
+        let mut new = Self::new(doc, ctx);
+        new.store = old.store;
+        new.history = old.history;
+        new.pages = old.pages;
+        new.viewport = old.viewport;
+        new.tool = old.tool;
+        new.current_style = old.current_style;
+        new.current_font_size = old.current_font_size;
+        new.selection = old.selection;
+        new.force_modified = true;
+        new
     }
 
     /// True when there is anything to save (markup or page changes).
     pub fn is_modified(&self) -> bool {
-        !self.store.is_empty() || self.pages.is_modified(self.doc.pages.len())
+        self.force_modified
+            || !self.store.is_empty()
+            || self.pages.is_modified(self.doc.pages.len())
     }
 
     pub fn selected_annotation(&self) -> Option<&crate::doc::annotation::Annotation> {

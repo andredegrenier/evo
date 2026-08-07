@@ -129,6 +129,82 @@ impl EvoApp {
         }
     }
 
+    /// Merge the given PDFs into the open document, carrying the editing
+    /// session over. The current document's pages keep their indices, so
+    /// markup and history stay valid.
+    fn insert_files(&mut self, ctx: &egui::Context, files: Vec<PathBuf>) {
+        let Some(dc) = self.dc.take() else { return };
+        let mut loaded: Vec<Vec<u8>> = Vec::new();
+        for path in &files {
+            match std::fs::read(path) {
+                Ok(bytes) => loaded.push(bytes),
+                Err(e) => {
+                    self.error = Some(format!("Could not read {}: {e}", path.display()));
+                    self.dc = Some(dc);
+                    return;
+                }
+            }
+        }
+        let mut sources: Vec<&[u8]> = vec![&dc.doc.source];
+        sources.extend(loaded.iter().map(|b| b.as_slice()));
+        let merged = match crate::export::merge::merge_pdfs(&sources) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.error = Some(format!("Insert failed: {e}"));
+                self.dc = Some(dc);
+                return;
+            }
+        };
+        match Document::load_bytes(merged, dc.doc.path.clone()) {
+            Ok(doc) => {
+                let old_sources = dc.doc.pages.len();
+                let new_sources = doc.pages.len();
+                let before = dc.pages.clone();
+                let mut new_dc = DocState::adopt(doc, ctx, dc);
+                new_dc
+                    .pages
+                    .append_source_pages(old_sources, new_sources - old_sources);
+                new_dc
+                    .history
+                    .record(crate::doc::history::Command::SetPageList {
+                        before,
+                        after: new_dc.pages.clone(),
+                    });
+                self.dc = Some(new_dc);
+            }
+            Err(e) => {
+                self.error = Some(format!("Insert failed: {e}"));
+                self.dc = Some(dc);
+            }
+        }
+    }
+
+    /// Combine several PDFs into a brand-new untitled document.
+    fn combine_files(&mut self, ctx: &egui::Context, files: Vec<PathBuf>) {
+        let mut loaded: Vec<Vec<u8>> = Vec::new();
+        for path in &files {
+            match std::fs::read(path) {
+                Ok(bytes) => loaded.push(bytes),
+                Err(e) => {
+                    self.error = Some(format!("Could not read {}: {e}", path.display()));
+                    return;
+                }
+            }
+        }
+        let sources: Vec<&[u8]> = loaded.iter().map(|b| b.as_slice()).collect();
+        match crate::export::merge::merge_pdfs(&sources)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| Document::load_bytes(bytes, None).map_err(|e| e.to_string()))
+        {
+            Ok(doc) => {
+                let mut dc = DocState::new(doc, ctx);
+                dc.force_modified = true;
+                self.dc = Some(dc);
+            }
+            Err(e) => self.error = Some(format!("Combine failed: {e}")),
+        }
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         let cmd = Modifiers::COMMAND;
 
@@ -274,6 +350,27 @@ impl EvoApp {
                     ui.close();
                 }
                 let has_doc = self.dc.is_some();
+                if ui
+                    .add_enabled(has_doc, egui::Button::new("Insert Pages from PDF…"))
+                    .clicked()
+                {
+                    if let Some(files) = rfd::FileDialog::new()
+                        .add_filter("PDF documents", &["pdf"])
+                        .pick_files()
+                    {
+                        self.insert_files(ctx, files);
+                    }
+                    ui.close();
+                }
+                if ui.button("Combine PDFs…").clicked() {
+                    if let Some(files) = rfd::FileDialog::new()
+                        .add_filter("PDF documents", &["pdf"])
+                        .pick_files()
+                    {
+                        self.combine_files(ctx, files);
+                    }
+                    ui.close();
+                }
                 ui.separator();
                 if ui
                     .add_enabled(
@@ -511,11 +608,17 @@ impl eframe::App for EvoApp {
                 .filter_map(|f| f.path.clone())
                 .collect()
         });
-        if let Some(path) = dropped
+        let dropped_pdfs: Vec<PathBuf> = dropped
             .into_iter()
-            .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")))
-        {
-            self.open_path(path, ctx);
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")))
+            .collect();
+        match (dropped_pdfs.len(), self.dc.is_some()) {
+            (0, _) => {}
+            (1, _) => self.open_path(dropped_pdfs.into_iter().next().unwrap(), ctx),
+            // Several files onto an open document: insert them as pages.
+            (_, true) => self.insert_files(ctx, dropped_pdfs),
+            // Several files with nothing open: combine into one document.
+            (_, false) => self.combine_files(ctx, dropped_pdfs),
         }
 
         self.handle_shortcuts(ctx);
