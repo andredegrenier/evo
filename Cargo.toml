@@ -1,0 +1,26 @@
+[package]
+name = "evo"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "A simple pure-Rust PDF editor: Preview-like viewing with Bluebeam-style precision markup"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/andredegrenier/evo"
+categories = ["gui", "graphics"]
+keywords = ["pdf", "editor", "markup", "annotation"]
+
+[dependencies]
+eframe = "0.35"
+hayro = "0.7"
+hayro-svg = "0.7"
+lopdf = "0.44"
+rfd = "0.17"
+thiserror = "2"
+
+[profile.release]
+lto = "thin"
+
+# hayro is a young CPU rasterizer; keep it optimized even in dev builds so
+# page rendering stays interactive.
+[profile.dev.package."*"]
+opt-level = 2
