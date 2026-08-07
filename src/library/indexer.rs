@@ -37,8 +37,10 @@ pub struct Indexer {
 impl Indexer {
     /// Spawn the worker. `known_docs` (id, title) seeds a reconciliation pass
     /// so documents imported in previous sessions get indexed too.
+    /// `models_dir` is where OCR models live (downloaded on first need).
     pub fn spawn(
         index_dir: PathBuf,
+        models_dir: PathBuf,
         blobs: Arc<dyn BlobStore>,
         known_docs: Vec<(String, String)>,
         ctx: eframe::egui::Context,
@@ -65,6 +67,10 @@ impl Indexer {
                     }
                 };
                 let settings = InterpreterSettings::default();
+                // OCR engine is created lazily on the first scanned page;
+                // None = not yet tried, Some(None) = unavailable (offline or
+                // failed init), Some(Some) = ready.
+                let mut ocr: Option<Option<super::ocr::Ocr>> = None;
 
                 // Reconcile: index anything the previous sessions missed.
                 let backlog: Vec<(String, String)> = known_docs
@@ -73,7 +79,7 @@ impl Indexer {
                     .collect();
                 shared.lock().unwrap().pending = backlog.len();
 
-                let handle = |job: IndexJob,
+                let mut handle = |job: IndexJob,
                               index: &SearchIndex,
                               writer: &mut tantivy::IndexWriter| {
                     match job {
@@ -85,21 +91,73 @@ impl Indexer {
                             match blobs.get(&id) {
                                 Ok(bytes) => match Pdf::new(bytes) {
                                     Ok(pdf) => {
-                                        let mut needs_ocr = 0usize;
-                                        let texts: Vec<String> = pdf
-                                            .pages()
-                                            .iter()
-                                            .map(|p| {
-                                                let extracted = extract_page_text(p, &settings);
-                                                if extracted.text.trim().len() < 32
-                                                    || extracted.unmapped_ratio > 0.3
+                                        let pages = pdf.pages();
+                                        let mut texts: Vec<String> = Vec::with_capacity(pages.len());
+                                        let mut ocr_pages: Vec<usize> = Vec::new();
+                                        for (i, p) in pages.iter().enumerate() {
+                                            let extracted = extract_page_text(p, &settings);
+                                            if extracted.text.trim().len() < 32
+                                                || extracted.unmapped_ratio > 0.3
+                                            {
+                                                ocr_pages.push(i);
+                                            }
+                                            texts.push(extracted.text);
+                                        }
+
+                                        if !ocr_pages.is_empty() {
+                                            shared.lock().unwrap().ocr_pending +=
+                                                ocr_pages.len();
+                                            // Initialize (and possibly download) on demand.
+                                            if ocr.is_none() {
                                                 {
-                                                    needs_ocr += 1;
+                                                    let mut st = shared.lock().unwrap();
+                                                    st.current = Some(
+                                                        "Preparing OCR (first use downloads ~10 MB of models)"
+                                                            .into(),
+                                                    );
                                                 }
-                                                extracted.text
-                                            })
-                                            .collect();
-                                        shared.lock().unwrap().ocr_pending += needs_ocr;
+                                                ctx.request_repaint();
+                                                ocr = Some(
+                                                    match super::ocr::Ocr::load(&models_dir) {
+                                                        Ok(engine) => Some(engine),
+                                                        Err(e) => {
+                                                            shared.lock().unwrap().last_error =
+                                                                Some(e.to_string());
+                                                            None
+                                                        }
+                                                    },
+                                                );
+                                            }
+                                            if let Some(Some(engine)) = &ocr {
+                                                for &i in &ocr_pages {
+                                                    {
+                                                        let mut st = shared.lock().unwrap();
+                                                        st.current = Some(format!(
+                                                            "OCR: {title} p.{}",
+                                                            i + 1
+                                                        ));
+                                                    }
+                                                    ctx.request_repaint();
+                                                    match super::ocr::ocr_page(
+                                                        engine, &pages[i], &settings,
+                                                    ) {
+                                                        Ok(text) => texts[i] = text,
+                                                        Err(e) => {
+                                                            shared.lock().unwrap().last_error =
+                                                                Some(e.to_string());
+                                                        }
+                                                    }
+                                                    let mut st = shared.lock().unwrap();
+                                                    st.ocr_pending =
+                                                        st.ocr_pending.saturating_sub(1);
+                                                }
+                                            } else {
+                                                let mut st = shared.lock().unwrap();
+                                                st.ocr_pending = st
+                                                    .ocr_pending
+                                                    .saturating_sub(ocr_pages.len());
+                                            }
+                                        }
                                         if let Err(e) =
                                             index.index_document(writer, &id, &title, &texts)
                                         {

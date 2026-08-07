@@ -4,6 +4,7 @@
 
 pub mod extract;
 pub mod indexer;
+pub mod ocr;
 pub mod search;
 pub mod store;
 
@@ -133,12 +134,13 @@ impl Library {
         if self.indexer.is_some() {
             return;
         }
-        let known = self
+        let known: Vec<(String, String)> = self
             .list()
             .map(|docs| docs.into_iter().map(|d| (d.id, d.title)).collect())
             .unwrap_or_default();
         self.indexer = Some(indexer::Indexer::spawn(
             self.root.join("index"),
+            self.root.join("models"),
             self.blobs.clone(),
             known,
             ctx.clone(),

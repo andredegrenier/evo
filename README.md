@@ -36,8 +36,22 @@ one-click centering on the page.
 - Full undo/redo (⌘Z / ⇧⌘Z)
 
 **Pages**
-- Rotate, delete, and drag-to-reorder pages from the thumbnail sidebar
-  (all undoable; applied on export)
+- Multi-select on the thumbnail rail (click / shift / ⌘), then rotate,
+  delete, copy/paste (duplicate), print just the selection, or extract
+  pages to a new PDF — all undoable; applied on export
+- Insert pages from other PDFs into the open document, or combine several
+  PDFs into one (File menu, or drop multiple files onto the window)
+
+**Library & search**
+- A personal document library (shown when nothing is open): import PDFs,
+  browse cards with thumbnails, and search **titles and full page text**
+  with highlighted snippets — a result click opens the document at that page
+- Text is extracted directly from each PDF; pages with no text layer
+  (scans) are OCR'd with the pure-Rust [ocrs](https://github.com/robertknight/ocrs)
+  engine. Markup on library documents is saved automatically as a sidecar —
+  the original PDF bytes are never modified
+- Stored under the platform data directory (`~/Library/Application Support/evo`
+  on macOS, `%APPDATA%` on Windows, `~/.local/share/evo` on Linux)
 
 **Output**
 - **Export PDF**: markups are written as real PDF annotations with appearance
@@ -73,6 +87,10 @@ Ctrl elsewhere.
 - Encrypted / password-protected PDFs are not supported.
 - Text boxes export using the built-in Helvetica (standard-14) font; on screen
   they render with the bundled, metrically-compatible Liberation Sans.
+- OCR models (~10 MB, by [Robert Knight](https://github.com/robertknight/ocrs-models),
+  CC-BY-SA-4.0) are downloaded on first use into the library's `models/`
+  folder — they are not bundled with the binary. Offline machines can place
+  `text-detection.rten` and `text-recognition.rten` there manually.
 - Saving always re-serializes through lopdf (use *Save As*; evo never
   overwrites your original in place).
 
