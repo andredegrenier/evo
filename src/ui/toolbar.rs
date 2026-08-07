@@ -21,6 +21,26 @@ const TOOLS: [(ActiveTool, &str, &str); 9] = [
 
 pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
     ui.horizontal(|ui| {
+        if ui
+            .add_enabled(dc.history.can_undo(), egui::Button::new("⟲"))
+            .on_hover_text("Undo (⌘Z)")
+            .clicked()
+        {
+            if dc.editing_text.is_some() {
+                canvas::commit_text_edit(dc);
+            }
+            dc.history.undo(&mut dc.store, &mut dc.pages);
+        }
+        if ui
+            .add_enabled(dc.history.can_redo(), egui::Button::new("⟳"))
+            .on_hover_text("Redo (⇧⌘Z)")
+            .clicked()
+        {
+            dc.history.redo(&mut dc.store, &mut dc.pages);
+        }
+
+        ui.separator();
+
         for (tool, icon, tip) in TOOLS {
             let selected = dc.tool == tool;
             let button = egui::Button::new(icon).selected(selected);

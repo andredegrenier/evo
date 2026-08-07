@@ -13,6 +13,7 @@ keywords = ["pdf", "editor", "markup", "annotation"]
 eframe = "0.35"
 hayro = "0.7"
 hayro-svg = "0.7"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 lopdf = "0.44"
 rfd = "0.17"
 thiserror = "2"
@@ -24,3 +25,9 @@ lto = "thin"
 # page rendering stays interactive.
 [profile.dev.package."*"]
 opt-level = 2
+
+[workspace]
+members = [".", "xtask"]
+
+[build-dependencies]
+winresource = "0.1.31"

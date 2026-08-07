@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+resvg = "0.47"
+ico = "0.4"
+icns = "0.3"

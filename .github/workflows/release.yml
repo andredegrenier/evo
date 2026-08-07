@@ -45,9 +45,20 @@ jobs:
       - name: Package (windows)
         if: runner.os == 'Windows'
         run: Compress-Archive -Path target/release/${{ matrix.binary }} -DestinationPath ${{ matrix.artifact }}.zip
+      - name: Assemble .app bundle (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          APP=evo.app
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
+          cp target/release/evo "$APP/Contents/MacOS/evo"
+          cp assets/icon/evo.icns "$APP/Contents/Resources/evo.icns"
+          codesign --force --deep -s - "$APP"
+          zip -r ${{ matrix.artifact }}.app.zip "$APP"
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             ${{ matrix.artifact }}.tar.gz
             ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}.app.zip

@@ -524,11 +524,21 @@ fn text_edit_overlay(ui: &mut egui::Ui, dc: &mut DocState, layout: &Layout, cont
         _ => unreachable!(),
     };
 
+    // Transparent editor so the page stays visible while typing; a thin
+    // accent border marks the box bounds instead.
     let response = ui.put(
         rect,
         TextEdit::multiline(&mut text)
             .font(FontId::proportional(font_size * t.zoom))
-            .text_color(color32(ann.style.stroke, 1.0)),
+            .text_color(color32(ann.style.stroke, 1.0))
+            .background_color(Color32::TRANSPARENT)
+            .margin(egui::Margin::ZERO),
+    );
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::ZERO,
+        Stroke::new(1.0, SELECTION_COLOR),
+        StrokeKind::Outside,
     );
 
     if response.changed()
