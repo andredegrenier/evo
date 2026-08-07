@@ -23,6 +23,9 @@ pub struct Viewport {
     pub offset: Vec2,
     /// One-shot request to scroll a display-position page into view.
     pub scroll_to_page: Option<usize>,
+    /// One-shot request to center a page-space rect (find match) in view,
+    /// as `(display position, rect)`.
+    pub scroll_to_rect: Option<(usize, crate::doc::geometry::PdfRect)>,
 }
 
 impl Default for Viewport {
@@ -33,6 +36,7 @@ impl Default for Viewport {
             pending_offset: None,
             offset: Vec2::ZERO,
             scroll_to_page: None,
+            scroll_to_rect: None,
         }
     }
 }

@@ -1,15 +1,19 @@
 //! Per-document editor state: the document itself plus everything the UI
 //! needs to edit it (selection, active tool, undo history, render caches).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::ops::Range;
 
 use eframe::egui;
 
 use crate::doc::Document;
 use crate::doc::annotation::{AnnotationId, Style};
+use crate::doc::geometry::PdfRect;
 use crate::doc::history::History;
 use crate::doc::page_ops::PageList;
 use crate::doc::store::AnnotationStore;
+use crate::library::extract::PageTextLayout;
+use crate::library::textjob::TextWorker;
 use crate::render::RenderWorker;
 use crate::render::cache::TextureCache;
 use crate::tools::{ActiveTool, ToolController};
@@ -46,6 +50,40 @@ pub struct DocState {
     pub library_id: Option<String>,
     /// Display title when there is no filesystem path (library/untitled docs).
     pub title_override: Option<String>,
+
+    /// Positioned text per *source* page, filled in by `text_worker`.
+    pub page_text: HashMap<usize, PageTextLayout>,
+    /// Background text extraction/OCR, started the first time ⌘F is used.
+    pub text_worker: Option<TextWorker>,
+    pub find: FindState,
+}
+
+/// Find-in-document (⌘F) state.
+#[derive(Default)]
+pub struct FindState {
+    pub open: bool,
+    pub query: String,
+    /// Matches in display order, at most one pass per source page.
+    pub matches: Vec<FindMatch>,
+    /// Index into `matches` of the highlighted hit.
+    pub active: usize,
+    /// Ask the find field for keyboard focus on the next frame.
+    pub focus_pending: bool,
+    /// Query the current `matches` were computed for.
+    pub last_query: String,
+    /// New page text arrived; recompute matches.
+    pub dirty: bool,
+}
+
+/// One occurrence of the find query.
+pub struct FindMatch {
+    pub source_page: usize,
+    /// Index into the page layout's lines.
+    pub line: usize,
+    /// Byte range inside that line's text.
+    pub range: Range<usize>,
+    /// Union of the matched characters' boxes, in display space.
+    pub rect: PdfRect,
 }
 
 /// Page-rail multi-selection (display positions).
@@ -106,6 +144,9 @@ impl DocState {
             force_modified: false,
             library_id: None,
             title_override: None,
+            page_text: HashMap::new(),
+            text_worker: None,
+            find: FindState::default(),
         }
     }
 
@@ -113,7 +154,16 @@ impl DocState {
     /// carries over the editing session of `old`: markup, history, page list,
     /// viewport, and tool settings. Render workers and caches start fresh.
     pub fn adopt(doc: Document, ctx: &egui::Context, old: DocState) -> Self {
+        let same_pages = doc.pages.len() == old.doc.pages.len();
         let mut new = Self::new(doc, ctx);
+        // Source page indices shift when pages are inserted, so the ⌘F text
+        // cache only survives when the source document is unchanged.
+        if same_pages {
+            new.page_text = old.page_text;
+            new.text_worker = old.text_worker;
+        }
+        new.find = old.find;
+        new.find.dirty = true;
         new.store = old.store;
         new.history = old.history;
         new.pages = old.pages;

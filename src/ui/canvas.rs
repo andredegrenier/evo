@@ -19,6 +19,9 @@ pub const THUMB_SCALE: f32 = 0.22;
 
 const SELECTION_COLOR: Color32 = Color32::from_rgb(0x2f, 0x7c, 0xf6);
 const GUIDE_COLOR: Color32 = Color32::from_rgb(0x00, 0xb4, 0xd8);
+/// Find-in-document highlights: every hit, then the one being stepped through.
+const FIND_MATCH_COLOR: Color32 = Color32::from_rgba_unmultiplied_const(255, 235, 59, 110);
+const FIND_ACTIVE_COLOR: Color32 = Color32::from_rgba_unmultiplied_const(255, 152, 0, 150);
 
 pub fn color32(c: Color, opacity: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r, c.g, c.b, (c.a as f32 * opacity).round() as u8)
@@ -84,6 +87,17 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
             let target =
                 Rect::from_min_size(content_rect.min + slot.rect.min.to_vec2(), slot.rect.size());
             ui.scroll_to_rect(target, Some(egui::Align::TOP));
+        }
+
+        // Center a find match (⌘F next/previous).
+        if let Some((position, rect)) = dc.viewport.scroll_to_rect.take()
+            && let Some(slot) = layout.slots.get(position)
+        {
+            let t = transform_for(dc, slot, content_rect);
+            ui.scroll_to_rect(
+                t.rect_to_screen(rect).expand(40.0),
+                Some(egui::Align::Center),
+            );
         }
 
         paint_and_interact(ui, dc, &layout, content_rect, &response);
@@ -159,8 +173,27 @@ fn paint_and_interact(
             StrokeKind::Outside,
         );
 
-        // Markup on this page.
+        // Find matches, under the markup.
         let page_painter = ui.painter_at(t.screen_rect.intersect(clip).expand(2.0));
+        if dc.find.open {
+            for (i, m) in dc.find.matches.iter().enumerate() {
+                if m.source_page != source {
+                    continue;
+                }
+                let color = if i == dc.find.active {
+                    FIND_ACTIVE_COLOR
+                } else {
+                    FIND_MATCH_COLOR
+                };
+                page_painter.rect_filled(
+                    t.rect_to_screen(m.rect).expand(1.0),
+                    CornerRadius::same(2),
+                    color,
+                );
+            }
+        }
+
+        // Markup on this page.
         for ann in dc.store.on_page(slot.original) {
             paint_annotation(&page_painter, &t, ann);
         }

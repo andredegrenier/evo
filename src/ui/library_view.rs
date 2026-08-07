@@ -29,6 +29,8 @@ pub struct LibraryViewState {
     /// Last observed indexer queue depth; a change means the stored per-page
     /// statuses moved on and the card metadata needs re-reading.
     last_pending: Option<usize>,
+    /// ⌘F on the library home focuses the search field.
+    pub focus_search_pending: bool,
 }
 
 impl LibraryViewState {
@@ -111,6 +113,10 @@ pub fn show(
                     ))
                     .desired_width(240.0),
             );
+            if state.focus_search_pending {
+                resp.request_focus();
+                state.focus_search_pending = false;
+            }
             if resp.changed() {
                 state.search_hits = if state.query.trim().is_empty() {
                     None

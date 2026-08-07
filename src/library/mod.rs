@@ -7,6 +7,7 @@ pub mod indexer;
 pub mod ocr;
 pub mod search;
 pub mod store;
+pub mod textjob;
 
 use std::io;
 use std::path::{Path, PathBuf};

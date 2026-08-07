@@ -322,6 +322,18 @@ impl EvoApp {
             self.print();
         }
 
+        // Find: in a document it opens the find bar, on the library home it
+        // jumps to the search field.
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::F))) {
+            match &mut self.dc {
+                Some(dc) => {
+                    dc.find.open = true;
+                    dc.find.focus_pending = true;
+                }
+                None => self.lib_view.focus_search_pending = true,
+            }
+        }
+
         let Some(dc) = &mut self.dc else {
             return;
         };
@@ -790,6 +802,8 @@ impl eframe::App for EvoApp {
         let mut open_extracted: Option<Vec<u8>> = None;
         let mut pending_temp_file: Option<PathBuf> = None;
         let mut pending_error: Option<String> = None;
+        // Find-time OCR reuses the library's models, but never downloads them.
+        let models_dir = self.library.as_ref().map(|lib| lib.root.join("models"));
         if let Some(dc) = &mut self.dc {
             if self.show_thumbnails {
                 let action = egui::Panel::left("thumbnails")
@@ -814,11 +828,14 @@ impl eframe::App for EvoApp {
                     ui::inspector::show(ui, dc);
                 });
             let fill = ui::theme::canvas_fill(ctx, self.theme, self.glass);
-            egui::CentralPanel::default_margins()
+            let canvas_rect = egui::CentralPanel::default_margins()
                 .frame(egui::Frame::default().fill(fill))
                 .show(ui, |ui| {
                     ui::canvas::show(ui, dc);
-                });
+                })
+                .response
+                .rect;
+            ui::findbar::show(ctx, dc, models_dir, canvas_rect);
         } else {
             let mut lib_action = None;
             egui::CentralPanel::default_margins().show(ui, |ui| {

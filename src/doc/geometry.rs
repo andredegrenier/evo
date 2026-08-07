@@ -68,6 +68,14 @@ impl PdfRect {
         p.x >= self.min.x && p.x <= self.max.x && p.y >= self.min.y && p.y <= self.max.y
     }
 
+    /// Smallest rect containing both.
+    pub fn union(&self, other: Self) -> Self {
+        Self {
+            min: PdfPoint::new(self.min.x.min(other.min.x), self.min.y.min(other.min.y)),
+            max: PdfPoint::new(self.max.x.max(other.max.x), self.max.y.max(other.max.y)),
+        }
+    }
+
     pub fn expanded(&self, by: f32) -> Self {
         Self {
             min: PdfPoint::new(self.min.x - by, self.min.y - by),

@@ -8,7 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
-use ocrs::{ImageSource, OcrEngine, OcrEngineParams};
+use ocrs::{ImageSource, OcrEngine, OcrEngineParams, TextItem, TextLine};
+
+use super::extract::{CharBox, LineLayout};
+use crate::doc::geometry::{PdfPoint, PdfRect};
 
 const DETECTION: &str = "text-detection.rten";
 const RECOGNITION: &str = "text-recognition.rten";
@@ -45,6 +48,12 @@ fn download(url: &str, dest: &Path) -> Result<(), String> {
     std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Are both models already on disk? Callers that must not trigger a download
+/// (find-in-document) gate on this before touching [`Ocr::load`].
+pub fn models_present(dir: &Path) -> bool {
+    dir.join(DETECTION).exists() && dir.join(RECOGNITION).exists()
 }
 
 /// Make sure both model files exist in `dir`, downloading if needed.
@@ -95,26 +104,40 @@ impl Ocr {
         Ok(Self { engine })
     }
 
-    /// Recognize text in an RGBA bitmap.
-    pub fn recognize_rgba(&self, rgba: &[u8], width: u32, height: u32) -> Result<String, OcrError> {
+    /// Recognize text lines in an RGBA bitmap. Character boxes come back in
+    /// input-image pixels.
+    fn recognize_lines(
+        &self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<TextLine>, OcrError> {
         let source = ImageSource::from_bytes(rgba, (width, height))
             .map_err(|e| OcrError::Run(e.to_string()))?;
         let input = self
             .engine
             .prepare_input(source)
             .map_err(|e| OcrError::Run(e.to_string()))?;
-        self.engine
-            .get_text(&input)
-            .map_err(|e| OcrError::Run(e.to_string()))
+        let words = self
+            .engine
+            .detect_words(&input)
+            .map_err(|e| OcrError::Run(e.to_string()))?;
+        let lines = self.engine.find_text_lines(&input, &words);
+        Ok(self
+            .engine
+            .recognize_text(&input, &lines)
+            .map_err(|e| OcrError::Run(e.to_string()))?
+            .into_iter()
+            .flatten()
+            .collect())
     }
 }
 
-/// Rasterize one page for OCR and recognize its text.
-pub fn ocr_page(
-    ocr: &Ocr,
+/// Rasterize one page at the OCR scale; returns the pixmap and that scale.
+fn render_for_ocr(
     page: &hayro::hayro_syntax::page::Page<'_>,
     settings: &hayro::hayro_interpret::InterpreterSettings,
-) -> Result<String, OcrError> {
+) -> (hayro::vello_cpu::Pixmap, f32) {
     use hayro::vello_cpu::color::AlphaColor;
     use hayro::{RenderCache, RenderSettings};
 
@@ -132,12 +155,57 @@ pub fn ocr_page(
             bg_color: AlphaColor::WHITE,
         },
     );
+    (pixmap, scale)
+}
+
+/// OCR one page, keeping a box per recognized character in canonical display
+/// space (PDF points, y-up).
+pub fn ocr_page_layout(
+    ocr: &Ocr,
+    page: &hayro::hayro_syntax::page::Page<'_>,
+    settings: &hayro::hayro_interpret::InterpreterSettings,
+) -> Result<Vec<LineLayout>, OcrError> {
+    let (pixmap, scale) = render_for_ocr(page, settings);
     // Fully opaque white background => premultiplied == straight RGBA.
-    ocr.recognize_rgba(
+    let lines = ocr.recognize_lines(
         pixmap.data_as_u8_slice(),
         pixmap.width() as u32,
         pixmap.height() as u32,
-    )
+    )?;
+    let (_, page_h) = page.render_dimensions();
+    Ok(lines
+        .iter()
+        .map(|line| line_layout(line, scale, page_h))
+        .collect())
+}
+
+/// Convert one recognized line's pixel boxes into display space.
+fn line_layout(line: &TextLine, scale: f32, page_h: f32) -> LineLayout {
+    let mut text = String::new();
+    let mut chars = Vec::with_capacity(line.chars().len());
+    for tc in line.chars() {
+        let start = text.len();
+        text.push(tc.char);
+        let r = tc.rect;
+        chars.push(CharBox {
+            byte_range: start..text.len(),
+            rect: PdfRect::from_points(
+                PdfPoint::new(r.left() as f32 / scale, page_h - r.bottom() as f32 / scale),
+                PdfPoint::new(r.right() as f32 / scale, page_h - r.top() as f32 / scale),
+            ),
+        });
+    }
+    LineLayout { text, chars }
+}
+
+/// Rasterize one page for OCR and recognize its text.
+pub fn ocr_page(
+    ocr: &Ocr,
+    page: &hayro::hayro_syntax::page::Page<'_>,
+    settings: &hayro::hayro_interpret::InterpreterSettings,
+) -> Result<String, OcrError> {
+    let lines = ocr_page_layout(ocr, page, settings)?;
+    Ok(super::extract::join_lines(&lines))
 }
 
 #[cfg(test)]
@@ -233,11 +301,24 @@ mod tests {
 
         let models_dir = std::env::temp_dir().join("evo-ocr-models");
         let ocr = Ocr::load(&models_dir).expect("model download + init");
+        assert!(models_present(&models_dir));
         let text = ocr_page(&ocr, &pages[0], &settings).unwrap();
         let lower = text.to_lowercase();
         assert!(
             lower.contains("quick") || lower.contains("fixture"),
             "OCR text: {text}"
         );
+
+        // The positioned pipeline sees the same text, with in-bounds boxes.
+        let (w, h) = pages[0].render_dimensions();
+        let layout = ocr_page_layout(&ocr, &pages[0], &settings).unwrap();
+        assert_eq!(crate::library::extract::join_lines(&layout), text);
+        for line in &layout {
+            assert_eq!(line.chars.len(), line.text.chars().count());
+            for cb in &line.chars {
+                assert!(cb.rect.min.x >= -1.0 && cb.rect.max.x <= w + 1.0, "{cb:?}");
+                assert!(cb.rect.min.y >= -1.0 && cb.rect.max.y <= h + 1.0, "{cb:?}");
+            }
+        }
     }
 }
