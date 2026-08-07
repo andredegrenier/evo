@@ -14,6 +14,10 @@ use hayro::hayro_syntax::Pdf;
 use hayro::vello_cpu::color::AlphaColor;
 use hayro::{RenderCache, RenderSettings};
 
+/// Scale the page rail renders at. Lives here rather than in the UI because
+/// the worker has to tell rail requests apart from canvas ones.
+pub const THUMB_SCALE: f32 = 0.22;
+
 /// Quantize a raw scale (framebuffer pixels per PDF point) into a bucket so
 /// the texture cache gets reusable keys while zooming.
 pub fn scale_bucket(scale: f32) -> f32 {
@@ -33,10 +37,41 @@ pub struct RenderRequest {
     pub scale: f32,
 }
 
+impl RenderRequest {
+    /// Rail thumbnails and canvas pages are separate classes of work: they go
+    /// to separate caches and are wanted at the same time.
+    fn is_thumb(&self) -> bool {
+        (self.scale - THUMB_SCALE).abs() < 1e-3
+    }
+}
+
 pub struct RenderResponse {
     pub page: usize,
     pub scale: f32,
-    pub image: egui::ColorImage,
+    /// `None` when the request was superseded before it ran. The worker always
+    /// answers, so the cache can clear the pending flag either way.
+    pub image: Option<egui::ColorImage>,
+}
+
+/// Add `req` to a pending batch, dropping any request it supersedes: the same
+/// page, at the same class of scale. Dropped requests are returned so the
+/// worker can report them.
+///
+/// Coalescing across classes would let a rail thumbnail cancel a full-quality
+/// canvas render of the same page (they share one queue), which is how pages
+/// used to get stuck blurry.
+fn coalesce(batch: &mut Vec<RenderRequest>, req: RenderRequest) -> Vec<RenderRequest> {
+    let mut dropped = Vec::new();
+    batch.retain(|r| {
+        if r.page == req.page && r.is_thumb() == req.is_thumb() {
+            dropped.push(*r);
+            false
+        } else {
+            true
+        }
+    });
+    batch.push(req);
+    dropped
 }
 
 pub struct RenderWorker {
@@ -72,14 +107,28 @@ impl RenderWorker {
                 // build a backlog of stale renders.
                 while let Ok(first) = req_rx.recv() {
                     let mut batch: Vec<RenderRequest> = vec![first];
+                    let mut dropped: Vec<RenderRequest> = Vec::new();
                     loop {
                         match req_rx.try_recv() {
-                            Ok(req) => {
-                                batch.retain(|r| r.page != req.page);
-                                batch.push(req);
-                            }
+                            Ok(req) => dropped.extend(coalesce(&mut batch, req)),
                             Err(TryRecvError::Empty) => break,
                             Err(TryRecvError::Disconnected) => return,
+                        }
+                    }
+
+                    // Report the superseded ones so the cache stops waiting on
+                    // them; an unanswered request would pin its pending flag
+                    // and the page would never be asked for again.
+                    for req in dropped {
+                        if res_tx
+                            .send(RenderResponse {
+                                page: req.page,
+                                scale: req.scale,
+                                image: None,
+                            })
+                            .is_err()
+                        {
+                            return;
                         }
                     }
 
@@ -109,7 +158,7 @@ impl RenderWorker {
                             .send(RenderResponse {
                                 page: req.page,
                                 scale: req.scale,
-                                image,
+                                image: Some(image),
                             })
                             .is_err()
                         {
@@ -138,5 +187,62 @@ impl RenderWorker {
 
     pub fn had_warnings(&self) -> bool {
         self.had_warnings.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(page: usize, scale: f32) -> RenderRequest {
+        RenderRequest { page, scale }
+    }
+
+    #[test]
+    fn newest_request_for_a_page_wins() {
+        let mut batch = vec![req(0, 1.0)];
+        let dropped = coalesce(&mut batch, req(0, 2.0));
+        assert_eq!(batch, vec![req(0, 2.0)]);
+        assert_eq!(dropped, vec![req(0, 1.0)]);
+    }
+
+    #[test]
+    fn a_thumbnail_never_cancels_a_page_render() {
+        let mut batch = vec![req(0, 4.0)];
+        let dropped = coalesce(&mut batch, req(0, THUMB_SCALE));
+        assert_eq!(batch, vec![req(0, 4.0), req(0, THUMB_SCALE)]);
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn a_page_render_never_cancels_a_thumbnail() {
+        let mut batch = vec![req(0, THUMB_SCALE)];
+        let dropped = coalesce(&mut batch, req(0, 4.0));
+        assert_eq!(batch, vec![req(0, THUMB_SCALE), req(0, 4.0)]);
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn thumbnails_coalesce_with_each_other() {
+        let mut batch = vec![req(0, THUMB_SCALE)];
+        let dropped = coalesce(&mut batch, req(0, THUMB_SCALE));
+        assert_eq!(batch, vec![req(0, THUMB_SCALE)]);
+        assert_eq!(dropped, vec![req(0, THUMB_SCALE)]);
+    }
+
+    #[test]
+    fn other_pages_are_untouched() {
+        let mut batch = vec![req(0, 1.0), req(1, 1.0)];
+        let dropped = coalesce(&mut batch, req(2, 1.0));
+        assert_eq!(batch, vec![req(0, 1.0), req(1, 1.0), req(2, 1.0)]);
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn scale_bucket_is_quantized_and_clamped() {
+        assert_eq!(scale_bucket(1.0), 1.0);
+        assert_eq!(scale_bucket(1.1), 1.25);
+        assert_eq!(scale_bucket(0.01), 0.25);
+        assert_eq!(scale_bucket(99.0), 8.0);
     }
 }

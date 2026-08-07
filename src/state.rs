@@ -15,7 +15,7 @@ use crate::doc::store::AnnotationStore;
 use crate::library::extract::PageTextLayout;
 use crate::library::textjob::TextWorker;
 use crate::render::RenderWorker;
-use crate::render::cache::TextureCache;
+use crate::render::cache::{self, TextureCache};
 use crate::tools::{ActiveTool, ToolController};
 use crate::ui::viewport::Viewport;
 
@@ -130,8 +130,8 @@ impl DocState {
             store: AnnotationStore::default(),
             history: History::default(),
             worker,
-            cache: TextureCache::default(),
-            thumb_cache: TextureCache::default(),
+            cache: TextureCache::with_budget(cache::CANVAS_BUDGET),
+            thumb_cache: TextureCache::with_budget(cache::THUMB_BUDGET),
             viewport: Viewport::default(),
             tool: ActiveTool::Select,
             tool_ctl: ToolController::default(),

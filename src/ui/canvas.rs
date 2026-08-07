@@ -15,7 +15,7 @@ use crate::state::DocState;
 use crate::tools::{self, ActiveTool, PointerInfo, ToolState, snap::Guide};
 use crate::ui::viewport::{Layout, PageSlot, Viewport};
 
-pub const THUMB_SCALE: f32 = 0.22;
+pub use crate::render::THUMB_SCALE;
 
 const SELECTION_COLOR: Color32 = Color32::from_rgb(0x2f, 0x7c, 0xf6);
 const GUIDE_COLOR: Color32 = Color32::from_rgb(0x00, 0xb4, 0xd8);
@@ -27,13 +27,22 @@ pub fn color32(c: Color, opacity: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r, c.g, c.b, (c.a as f32 * opacity).round() as u8)
 }
 
-/// Route finished renders from the worker into the texture caches.
+/// Route finished renders from the worker into the texture caches, and start
+/// the caches' frame. Called once per frame, before anything paints.
 pub fn poll_worker(dc: &mut DocState, ctx: &egui::Context) {
+    dc.cache.begin_frame();
+    dc.thumb_cache.begin_frame();
     while let Some(res) = dc.worker.try_recv() {
-        if (res.scale - THUMB_SCALE).abs() < 1e-3 {
-            dc.thumb_cache.insert(ctx, res.page, res.scale, res.image);
+        let cache = if (res.scale - THUMB_SCALE).abs() < 1e-3 {
+            &mut dc.thumb_cache
         } else {
-            dc.cache.insert(ctx, res.page, res.scale, res.image);
+            &mut dc.cache
+        };
+        match res.image {
+            Some(image) => cache.insert(ctx, res.page, res.scale, image),
+            // Superseded before it ran: stop waiting on it, so a page that is
+            // still on screen gets asked for again next frame.
+            None => cache.clear_pending(res.page, res.scale),
         }
     }
 }
@@ -42,7 +51,14 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
     let viewport_rect = ui.max_rect();
 
     if dc.viewport.fit_width {
-        dc.viewport.zoom = Viewport::fit_width_zoom(&dc.doc, &dc.pages, viewport_rect.width());
+        // Fit to the width the scroll area will actually have. Using the full
+        // rect makes the widest page overflow by exactly the scrollbar's width,
+        // which raises a horizontal scrollbar, which shrinks the area, which
+        // re-derives the zoom — a feedback loop that flaps the render scale
+        // across a bucket boundary. (Floating scrollbars allocate 0, so this is
+        // a no-op for them.)
+        let avail = viewport_rect.width() - ui.spacing().scroll.allocated_width();
+        dc.viewport.zoom = Viewport::fit_width_zoom(&dc.doc, &dc.pages, avail);
     }
 
     // Pinch / ctrl-scroll zoom, anchored under the pointer.
@@ -66,11 +82,23 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
         );
     }
 
+    // Drag-to-scroll defaults to `OnTouch`, and where it does kick in it fights
+    // the Pan tool: both write the scroll offset, and on a direction reversal
+    // the two disagree and the view snaps back. Dragging inside the canvas is
+    // ours to route (tools or pan); the wheel and the scrollbars are untouched.
     let mut scroll_area = egui::ScrollArea::both()
         .auto_shrink(false)
+        .scroll_source(egui::containers::scroll_area::ScrollSource {
+            drag: egui::containers::scroll_area::DragScroll::Never,
+            ..Default::default()
+        })
         .id_salt("page-canvas");
     if let Some(offset) = dc.viewport.pending_offset.take() {
         scroll_area = scroll_area.scroll_offset(offset);
+        // Mirror it now: `offset` is otherwise only refreshed from the scroll
+        // area's output at the end of the frame, so a pan started this frame
+        // would compute its delta against a stale base.
+        dc.viewport.offset = offset;
     }
 
     let output = scroll_area.show(ui, |ui| {
@@ -147,10 +175,14 @@ fn paint_and_interact(
 
         let source = dc.pages.source_of(slot.original);
         let exact = dc.cache.get(source, render_scale);
+        // Fall back to another canvas scale before the 0.22 rail thumbnail:
+        // scaling a sharp texture reads as "not re-rendered yet", while
+        // dropping to the thumbnail is a visible blur flash every time zoom
+        // crosses a bucket boundary.
         let tex = exact
             .clone()
-            .or_else(|| dc.thumb_cache.get(source, THUMB_SCALE))
-            .or_else(|| dc.cache.best_effort(source).map(|(_, t)| t));
+            .or_else(|| dc.cache.best_effort(source).map(|(_, t)| t))
+            .or_else(|| dc.thumb_cache.get(source, THUMB_SCALE));
         if exact.is_none() && !dc.cache.is_pending(source, render_scale) {
             dc.cache.mark_pending(source, render_scale);
             dc.worker.request(RenderRequest {
