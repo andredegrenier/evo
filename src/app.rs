@@ -313,6 +313,10 @@ impl EvoApp {
             .and_then(|bytes| Document::load_bytes(bytes, None).map_err(|e| e.to_string()))
         {
             Ok(doc) => {
+                // Combining replaces whatever was open, so let the outgoing
+                // document save its markup sidecar first. Assigning over
+                // `self.dc` would drop it silently.
+                self.close_document();
                 let mut dc = DocState::new(doc, ctx);
                 dc.force_modified = true;
                 self.dc = Some(dc);

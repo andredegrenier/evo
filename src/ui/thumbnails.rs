@@ -47,44 +47,61 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) -> Option<RailAction> {
                 let is_selected = dc.rail.selected.contains(&position);
 
                 let id = ui.id().with("thumb").with(position);
-                let response = ui
-                    .dnd_drag_source(id, position, |ui| {
-                        ui.vertical_centered(|ui| {
-                            let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
-                            paint_thumb(ui, dc, source, rect, rotation, is_selected);
-                            ui.label(format!("{}", position + 1));
-                            resp
-                        })
-                        .inner
+                // One widget sensing both, rather than egui's `dnd_drag_source`
+                // helper: that wraps the contents in a second, drag-only widget
+                // over the same rect, which takes the interaction and leaves
+                // the thumbnail's own `clicked()` permanently false. Clicking a
+                // page to look at it never worked because of it.
+                let (rect, resp) = ui
+                    .vertical_centered(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                        let resp = ui.interact(rect, id, Sense::click_and_drag());
+                        paint_thumb(ui.painter(), dc, source, rect, rotation, is_selected);
+                        ui.label(format!("{}", position + 1));
+                        (rect, resp)
                     })
-                    .response;
+                    .inner;
+                resp.dnd_set_drag_payload(position);
 
-                let inner_resp = response.clone();
+                if resp.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    // `dnd_drag_source` drew the dragged item under the pointer
+                    // for us; carry that affordance over by hand.
+                    if let Some(pointer) = ui.ctx().pointer_interact_pos() {
+                        let ghost = Rect::from_center_size(pointer, rect.size());
+                        let painter = ui
+                            .ctx()
+                            .layer_painter(egui::LayerId::new(egui::Order::Tooltip, id));
+                        painter.rect_filled(ghost, CornerRadius::same(2), Color32::WHITE);
+                        paint_thumb(&painter, dc, source, ghost, rotation, true);
+                    }
+                }
 
-                if inner_resp.clicked() {
+                if resp.clicked() {
                     let (shift, cmd) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
                     dc.rail.click(position, shift, cmd);
+                    // Extending a multi-selection shouldn't yank the view.
                     if !shift && !cmd {
                         dc.viewport.scroll_to_page = Some(position);
                     }
                 }
 
                 // Drop another thumb onto this one -> reorder.
-                if let Some(from) = inner_resp.dnd_release_payload::<usize>()
+                if let Some(from) = resp.dnd_release_payload::<usize>()
                     && *from != position
                 {
                     reorder = Some((*from, position));
                 }
-                if inner_resp.dnd_hover_payload::<usize>().is_some() {
+                if resp.dnd_hover_payload::<usize>().is_some() {
                     ui.painter().rect_stroke(
-                        inner_resp.rect,
+                        resp.rect,
                         CornerRadius::same(2),
                         Stroke::new(2.0, ACCENT),
                         StrokeKind::Outside,
                     );
                 }
 
-                inner_resp.context_menu(|ui| {
+                resp.context_menu(|ui| {
                     // Right-clicking outside the selection selects just that page.
                     if !dc.rail.selected.contains(&position) {
                         dc.rail.click(position, false, false);
@@ -101,7 +118,12 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) -> Option<RailAction> {
                 let before = dc.pages.clone();
                 dc.pages.reorder(from, to);
                 record_pages(dc, before);
+                // Follow the page that just moved. Leaving the selection empty
+                // and the canvas where it was makes a reorder feel like it
+                // happened to some other document.
                 dc.rail.clear();
+                dc.rail.click(to, false, false);
+                dc.viewport.scroll_to_page = Some(to);
             }
         });
     action
@@ -267,14 +289,13 @@ fn record_pages(dc: &mut DocState, before: PageList) {
 }
 
 fn paint_thumb(
-    ui: &egui::Ui,
+    painter: &egui::Painter,
     dc: &mut DocState,
     source: usize,
     rect: Rect,
     rotation: crate::doc::geometry::ExtraRotation,
     is_selected: bool,
 ) {
-    let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::same(2), Color32::WHITE);
     let tex = dc.thumb_cache.get(source, THUMB_SCALE);
     if let Some(tex) = tex {
@@ -299,6 +320,135 @@ fn paint_thumb(
             CornerRadius::same(2),
             Stroke::new(1.0, Color32::from_gray(180)),
             StrokeKind::Outside,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui::{self, Pos2, Rect, Sense, Vec2};
+
+    const THUMB: Vec2 = Vec2::new(120.0, 160.0);
+
+    struct Harness {
+        ctx: egui::Context,
+        base: egui::RawInput,
+    }
+
+    #[derive(Clone, Copy)]
+    struct Observed {
+        clicked: bool,
+        drag_started: bool,
+        rect: Rect,
+    }
+
+    impl Default for Observed {
+        fn default() -> Self {
+            Self {
+                clicked: false,
+                drag_started: false,
+                rect: Rect::ZERO,
+            }
+        }
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            Self {
+                ctx: egui::Context::default(),
+                base: egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 400.0))),
+                    focused: true,
+                    ..Default::default()
+                },
+            }
+        }
+
+        /// One frame of the rail's widget structure. `wrap_in_drag_source`
+        /// selects egui's helper, which is the shape the bug had.
+        fn frame(&self, events: Vec<egui::Event>, wrap_in_drag_source: bool) -> Observed {
+            let seen = std::cell::Cell::new(Observed::default());
+            let _ = self.ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..self.base.clone()
+                },
+                |ui| {
+                    let id = egui::Id::new("thumb-0");
+                    let resp = if wrap_in_drag_source {
+                        ui.dnd_drag_source(id, 0usize, |ui| {
+                            ui.allocate_exact_size(THUMB, Sense::click()).1
+                        })
+                        .inner
+                    } else {
+                        let (rect, _) = ui.allocate_exact_size(THUMB, Sense::hover());
+                        let resp = ui.interact(rect, id, Sense::click_and_drag());
+                        resp.dnd_set_drag_payload(0usize);
+                        resp
+                    };
+                    seen.set(Observed {
+                        clicked: resp.clicked(),
+                        drag_started: resp.drag_started(),
+                        rect: resp.rect,
+                    });
+                },
+            );
+            seen.get()
+        }
+
+        fn button(pos: Pos2, pressed: bool) -> egui::Event {
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }
+        }
+
+        /// Move onto the widget, press, release. Returns the release frame.
+        fn click(&self, wrap: bool) -> Observed {
+            let center = self.frame(vec![], wrap).rect.center();
+            self.frame(vec![egui::Event::PointerMoved(center)], wrap);
+            self.frame(vec![Self::button(center, true)], wrap);
+            self.frame(vec![Self::button(center, false)], wrap)
+        }
+    }
+
+    #[test]
+    fn clicking_a_thumbnail_is_reported() {
+        let h = Harness::new();
+        assert!(
+            h.click(false).clicked,
+            "a click on the rail must reach the widget — this is what navigates to the page"
+        );
+    }
+
+    /// Pins the reason the rail can't go back to `dnd_drag_source`: that helper
+    /// puts a second, drag-only widget over the same rect, and it swallows the
+    /// click. Clicking a page silently did nothing for as long as it was used.
+    #[test]
+    fn the_dnd_drag_source_helper_swallows_the_click() {
+        let h = Harness::new();
+        assert!(
+            !h.click(true).clicked,
+            "if egui ever starts reporting this click, the workaround can be dropped"
+        );
+    }
+
+    #[test]
+    fn dragging_a_thumbnail_still_starts_a_drag() {
+        let h = Harness::new();
+        let center = h.frame(vec![], false).rect.center();
+        h.frame(vec![egui::Event::PointerMoved(center)], false);
+        h.frame(vec![Harness::button(center, true)], false);
+        // Past the drag threshold.
+        let moved = h.frame(
+            vec![egui::Event::PointerMoved(center + Vec2::new(0.0, 60.0))],
+            false,
+        );
+        assert!(
+            moved.drag_started,
+            "reorder must keep working alongside click-to-navigate"
         );
     }
 }
