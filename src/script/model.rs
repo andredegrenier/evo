@@ -29,10 +29,50 @@ pub enum ModelError {
     Cancelled,
 }
 
+/// Who said something in a conversation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
+impl Role {
+    /// The name both dialects use on the wire.
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::User => "user",
+            Self::Assistant => "assistant",
+            Self::Tool => "tool",
+        }
+    }
+}
+
+/// One turn of a conversation.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: Role,
+    pub content: String,
+}
+
+impl ChatMessage {
+    pub fn new(role: Role, content: impl Into<String>) -> Self {
+        Self {
+            role,
+            content: content.into(),
+        }
+    }
+}
+
 pub struct GenerateRequest {
     pub model: String,
     pub prompt: String,
     pub system: Option<String>,
+    /// Earlier turns, oldest first. Empty for a one-shot completion.
+    pub history: Vec<ChatMessage>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
 }
@@ -56,7 +96,7 @@ pub trait ModelBackend: Send {
 /// Which API dialect the configured endpoint speaks.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum Api {
-    /// Ollama's native `/api/generate`, newline-delimited JSON.
+    /// Ollama's native `/api/chat`, newline-delimited JSON.
     #[default]
     Ollama,
     /// `/v1/chat/completions`, server-sent events. llama.cpp's server,
@@ -144,7 +184,7 @@ impl ModelBackend for HttpBackend {
         on_token: &mut dyn FnMut(&str) -> ControlFlow<()>,
     ) -> Result<String, ModelError> {
         let (path, body) = match self.config.api {
-            Api::Ollama => ("api/generate", ollama_body(req)),
+            Api::Ollama => ("api/chat", ollama_body(req)),
             Api::OpenAiCompatible => ("v1/chat/completions", openai_body(req)),
         };
         let url = self.url(path);
@@ -223,6 +263,23 @@ impl ModelBackend for HttpBackend {
     }
 }
 
+/// The conversation both dialects send: the system prompt, the earlier turns,
+/// and this request's prompt as the last user message.
+fn messages(req: &GenerateRequest) -> Vec<serde_json::Value> {
+    let mut messages = Vec::with_capacity(req.history.len() + 2);
+    if let Some(system) = &req.system {
+        messages.push(serde_json::json!({"role": "system", "content": system}));
+    }
+    for turn in &req.history {
+        messages.push(serde_json::json!({
+            "role": turn.role.wire(),
+            "content": turn.content,
+        }));
+    }
+    messages.push(serde_json::json!({"role": "user", "content": req.prompt}));
+    messages
+}
+
 fn ollama_body(req: &GenerateRequest) -> serde_json::Value {
     let mut options = serde_json::Map::new();
     if let Some(t) = req.temperature {
@@ -233,12 +290,9 @@ fn ollama_body(req: &GenerateRequest) -> serde_json::Value {
     }
     let mut body = serde_json::json!({
         "model": req.model,
-        "prompt": req.prompt,
+        "messages": messages(req),
         "stream": true,
     });
-    if let Some(system) = &req.system {
-        body["system"] = system.clone().into();
-    }
     if !options.is_empty() {
         body["options"] = serde_json::Value::Object(options);
     }
@@ -246,11 +300,7 @@ fn ollama_body(req: &GenerateRequest) -> serde_json::Value {
 }
 
 fn openai_body(req: &GenerateRequest) -> serde_json::Value {
-    let mut messages = Vec::new();
-    if let Some(system) = &req.system {
-        messages.push(serde_json::json!({"role": "system", "content": system}));
-    }
-    messages.push(serde_json::json!({"role": "user", "content": req.prompt}));
+    let messages = messages(req);
     let mut body = serde_json::json!({
         "model": req.model,
         "messages": messages,
@@ -282,8 +332,15 @@ pub fn parse_chunk(api: Api, line: &str) -> Option<Chunk> {
     match api {
         Api::Ollama => {
             let v: serde_json::Value = serde_json::from_str(line).ok()?;
+            // `/api/chat` puts the text under `message.content`; `/api/generate`
+            // used a flat `response`. Older servers, and anything proxying the
+            // generate endpoint, still speak the latter.
+            let text = v["message"]["content"]
+                .as_str()
+                .or_else(|| v["response"].as_str())
+                .unwrap_or_default();
             Some(Chunk {
-                text: v["response"].as_str().unwrap_or_default().to_owned(),
+                text: text.to_owned(),
                 done: v["done"].as_bool().unwrap_or(false),
             })
         }
@@ -332,14 +389,43 @@ pub fn parse_model_list(api: Api, body: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn request(prompt: &str) -> GenerateRequest {
+        GenerateRequest {
+            model: "m".into(),
+            prompt: prompt.into(),
+            system: None,
+            history: Vec::new(),
+            temperature: None,
+            max_tokens: None,
+        }
+    }
+
     #[test]
     fn ollama_chunks_carry_text_and_the_done_flag() {
+        let c = parse_chunk(Api::Ollama, r#"{"message":{"content":"Hel"},"done":false}"#)
+            .expect("a chunk");
+        assert_eq!(c.text, "Hel");
+        assert!(!c.done);
+
+        let c =
+            parse_chunk(Api::Ollama, r#"{"message":{"content":""},"done":true}"#).expect("a chunk");
+        assert!(c.done);
+    }
+
+    /// `/api/generate`'s flat field still reads, so a server (or proxy) that
+    /// answers in the old shape keeps working.
+    #[test]
+    fn ollama_still_reads_the_generate_endpoints_flat_field() {
         let c = parse_chunk(Api::Ollama, r#"{"response":"Hel","done":false}"#).expect("a chunk");
         assert_eq!(c.text, "Hel");
         assert!(!c.done);
 
-        let c = parse_chunk(Api::Ollama, r#"{"response":"","done":true}"#).expect("a chunk");
-        assert!(c.done);
+        // When both are present the chat shape wins.
+        let both = r#"{"message":{"content":"chat"},"response":"generate","done":false}"#;
+        assert_eq!(
+            parse_chunk(Api::Ollama, both).expect("a chunk").text,
+            "chat"
+        );
     }
 
     #[test]
@@ -399,15 +485,14 @@ mod tests {
 
     #[test]
     fn the_request_body_carries_the_options_that_were_set() {
-        let req = GenerateRequest {
-            model: "m".into(),
-            prompt: "p".into(),
-            system: Some("s".into()),
-            temperature: Some(0.5),
-            max_tokens: Some(64),
-        };
+        let mut req = request("p");
+        req.system = Some("s".into());
+        req.temperature = Some(0.5);
+        req.max_tokens = Some(64);
+
         let body = ollama_body(&req);
-        assert_eq!(body["system"], "s");
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][0]["content"], "s");
         assert_eq!(body["options"]["num_predict"], 64);
         assert_eq!(body["stream"], true);
 
@@ -419,15 +504,172 @@ mod tests {
 
     #[test]
     fn unset_options_are_left_out_entirely() {
-        let req = GenerateRequest {
-            model: "m".into(),
-            prompt: "p".into(),
-            system: None,
-            temperature: None,
-            max_tokens: None,
-        };
-        let body = ollama_body(&req);
-        assert!(body.get("system").is_none());
+        let body = ollama_body(&request("p"));
         assert!(body.get("options").is_none());
+        // With no system prompt the only message is the user's.
+        assert_eq!(body["messages"].as_array().expect("an array").len(), 1);
+        assert_eq!(body["messages"][0]["role"], "user");
+    }
+
+    #[test]
+    fn both_dialects_interleave_the_history_before_the_new_prompt() {
+        let mut req = request("and the second?");
+        req.system = Some("s".into());
+        req.history = vec![
+            ChatMessage::new(Role::User, "what is on the first page?"),
+            ChatMessage::new(Role::Assistant, "A title. [p.1]"),
+        ];
+
+        for body in [ollama_body(&req), openai_body(&req)] {
+            let messages = body["messages"].as_array().expect("an array");
+            let pairs: Vec<(&str, &str)> = messages
+                .iter()
+                .map(|m| {
+                    (
+                        m["role"].as_str().unwrap_or_default(),
+                        m["content"].as_str().unwrap_or_default(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                pairs,
+                [
+                    ("system", "s"),
+                    ("user", "what is on the first page?"),
+                    ("assistant", "A title. [p.1]"),
+                    ("user", "and the second?"),
+                ]
+            );
+        }
+    }
+
+    /// A one-shot HTTP server that answers the first request with `reply` and
+    /// hands back what it was asked. Enough of a server to prove which endpoint
+    /// the backend posts to and that it reads a streamed body -- the parser
+    /// tests above cover the shapes, this covers the plumbing between them.
+    fn serve_once(reply: &'static str) -> (String, std::thread::JoinHandle<(String, String)>) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a local port");
+        let url = format!("http://{}", listener.local_addr().expect("an address"));
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("a connection");
+            let mut reader = BufReader::new(stream);
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).expect("a request line");
+
+            let mut length = 0usize;
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).expect("a header");
+                if header.trim().is_empty() {
+                    break;
+                }
+                if let Some(value) = header
+                    .to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(str::trim)
+                {
+                    length = value.parse().unwrap_or(0);
+                }
+            }
+            let mut body = vec![0u8; length];
+            reader.read_exact(&mut body).expect("the body");
+
+            let mut stream = reader.into_inner();
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\n\
+                         Connection: close\r\n\r\n{reply}"
+                    )
+                    .as_bytes(),
+                )
+                .expect("write the reply");
+            stream.flush().ok();
+            (
+                request_line.trim().to_owned(),
+                String::from_utf8_lossy(&body).into_owned(),
+            )
+        });
+        (url, handle)
+    }
+
+    #[test]
+    fn the_ollama_backend_posts_a_conversation_to_the_chat_endpoint() {
+        let reply = "{\"message\":{\"content\":\"The alarm \"},\"done\":false}\n\
+                     {\"message\":{\"content\":\"panel. [p.3]\"},\"done\":false}\n\
+                     {\"message\":{\"content\":\"\"},\"done\":true}\n";
+        let (url, server) = serve_once(reply);
+
+        let backend = ModelConfig {
+            api: Api::Ollama,
+            base_url: url,
+            // The request names the model; the config only supplies the
+            // default the caller starts from.
+            model: "from-config".into(),
+            timeout_secs: 10,
+        }
+        .build();
+        let mut req = request("where is it?");
+        req.model = "test-model".into();
+        req.system = Some("answer from the pages".into());
+        req.history = vec![ChatMessage::new(Role::User, "hello")];
+
+        let mut streamed = Vec::new();
+        let text = backend
+            .generate(&req, &mut |chunk: &str| {
+                streamed.push(chunk.to_owned());
+                ControlFlow::Continue(())
+            })
+            .expect("a completion");
+
+        assert_eq!(text, "The alarm panel. [p.3]");
+        assert_eq!(streamed, ["The alarm ", "panel. [p.3]"]);
+
+        let (request_line, body) = server.join().expect("the server thread");
+        assert_eq!(request_line, "POST /api/chat HTTP/1.1");
+        let sent: serde_json::Value = serde_json::from_str(&body).expect("json body");
+        assert_eq!(sent["model"], "test-model");
+        assert_eq!(sent["stream"], true);
+        assert_eq!(sent["messages"][0]["role"], "system");
+        assert_eq!(sent["messages"][1]["content"], "hello");
+        assert_eq!(sent["messages"][2]["content"], "where is it?");
+    }
+
+    #[test]
+    fn breaking_out_of_the_stream_reports_a_cancellation() {
+        let reply = "{\"message\":{\"content\":\"one\"},\"done\":false}\n\
+                     {\"message\":{\"content\":\"two\"},\"done\":false}\n";
+        let (url, server) = serve_once(reply);
+        let backend = ModelConfig {
+            api: Api::Ollama,
+            base_url: url,
+            model: "m".into(),
+            timeout_secs: 10,
+        }
+        .build();
+
+        let mut seen = 0;
+        let result = backend.generate(&request("q"), &mut |_: &str| {
+            seen += 1;
+            ControlFlow::Break(())
+        });
+        assert!(matches!(result, Err(ModelError::Cancelled)));
+        assert_eq!(seen, 1, "the stream stopped at the first chunk");
+        let _ = server.join();
+    }
+
+    #[test]
+    fn roles_round_trip_through_storage_under_their_wire_names() {
+        for role in [Role::System, Role::User, Role::Assistant, Role::Tool] {
+            let json = serde_json::to_string(&role).expect("serialize");
+            assert_eq!(json, format!("\"{}\"", role.wire()));
+            assert_eq!(
+                serde_json::from_str::<Role>(&json).expect("deserialize"),
+                role
+            );
+        }
     }
 }

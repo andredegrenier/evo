@@ -152,6 +152,21 @@ pub struct ExtractedPage {
     pub unmapped_ratio: f32,
 }
 
+/// Plain text for every page of a whole PDF, in source order.
+///
+/// A document that will not parse yields no pages rather than an error: the
+/// callers (scripts, chat) are asking what the document says, and "nothing"
+/// is the honest answer for something we cannot read.
+pub fn extract_all_pages(source: &std::sync::Arc<Vec<u8>>) -> Vec<String> {
+    let Ok(pdf) = hayro::hayro_syntax::Pdf::new(source.clone()) else {
+        return Vec::new();
+    };
+    pdf.pages()
+        .iter()
+        .map(|page| extract_page_text(page, &Default::default()).text)
+        .collect()
+}
+
 /// Extract plain text from one page.
 pub fn extract_page_text(page: &Page<'_>, settings: &InterpreterSettings) -> ExtractedPage {
     let (layout, unmapped_ratio) = extract_page_layout(page, settings);

@@ -57,22 +57,12 @@ impl RunCtx {
             return cached.clone();
         }
         let pages = match &self.doc {
-            Some(doc) => extract_all(&doc.source),
+            Some(doc) => crate::library::extract::extract_all_pages(&doc.source),
             None => Vec::new(),
         };
         *self.text_cache.borrow_mut() = Some(pages.clone());
         pages
     }
-}
-
-fn extract_all(source: &Arc<Vec<u8>>) -> Vec<String> {
-    let Ok(pdf) = hayro::hayro_syntax::Pdf::new(source.clone()) else {
-        return Vec::new();
-    };
-    pdf.pages()
-        .iter()
-        .map(|page| crate::library::extract::extract_page_text(page, &Default::default()).text)
-        .collect()
 }
 
 /// Run `source`, returning the documents it generated.
@@ -246,6 +236,7 @@ fn model_table(lua: &Lua, run: &Rc<RunCtx>) -> mlua::Result<Table> {
                 model: opts.model,
                 prompt,
                 system: opts.system,
+                history: Vec::new(),
                 temperature: opts.temperature,
                 max_tokens: opts.max_tokens,
             };

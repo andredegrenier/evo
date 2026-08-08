@@ -34,6 +34,7 @@ pub enum Action {
     ZoomOut,
     ZoomActual,
     ZoomFitWidth,
+    ToggleChat,
 
     ToolSelect,
     ToolPan,
@@ -69,7 +70,7 @@ impl Category {
 }
 
 impl Action {
-    pub const ALL: [Action; 22] = [
+    pub const ALL: [Action; 23] = [
         Self::Open,
         Self::Save,
         Self::Print,
@@ -83,6 +84,7 @@ impl Action {
         Self::ZoomOut,
         Self::ZoomActual,
         Self::ZoomFitWidth,
+        Self::ToggleChat,
         Self::ToolSelect,
         Self::ToolPan,
         Self::ToolHighlight,
@@ -109,6 +111,7 @@ impl Action {
             Self::ZoomOut => "Zoom Out",
             Self::ZoomActual => "Actual Size",
             Self::ZoomFitWidth => "Fit Width",
+            Self::ToggleChat => "Chat with Document",
             Self::ToolSelect => "Select",
             Self::ToolPan => "Pan",
             Self::ToolHighlight => "Highlight",
@@ -127,7 +130,11 @@ impl Action {
                 Category::File
             }
             Self::Undo | Self::Redo | Self::DeleteSelection | Self::Find => Category::Edit,
-            Self::ZoomIn | Self::ZoomOut | Self::ZoomActual | Self::ZoomFitWidth => Category::View,
+            Self::ZoomIn
+            | Self::ZoomOut
+            | Self::ZoomActual
+            | Self::ZoomFitWidth
+            | Self::ToggleChat => Category::View,
             _ => Category::Tools,
         }
     }
@@ -150,6 +157,7 @@ impl Action {
             Self::ZoomOut => shortcut(cmd, Key::Minus),
             Self::ZoomActual => shortcut(cmd, Key::Num0),
             Self::ZoomFitWidth => shortcut(cmd, Key::Num9),
+            Self::ToggleChat => shortcut(cmd | Modifiers::SHIFT, Key::C),
             Self::ToolSelect => shortcut(none, Key::V),
             // Pan has always been space-held, which stays; a tool key for it
             // is new and matches every other tool.

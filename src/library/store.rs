@@ -4,10 +4,13 @@ use std::path::Path;
 
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 
+use crate::script::model::ChatMessage;
+
 use super::{DocMeta, LibraryError, PageTextStatus, SavedMarkup};
 
 const DOCS: TableDefinition<&str, &[u8]> = TableDefinition::new("docs");
 const ANNOTS: TableDefinition<&str, &[u8]> = TableDefinition::new("annots");
+const CHATS: TableDefinition<&str, &[u8]> = TableDefinition::new("chats");
 const META: TableDefinition<&str, u64> = TableDefinition::new("meta");
 
 const SCHEMA_VERSION: u64 = 1;
@@ -29,6 +32,7 @@ impl MetaDb {
         {
             let _ = tx.open_table(DOCS).map_err(db_err)?;
             let _ = tx.open_table(ANNOTS).map_err(db_err)?;
+            let _ = tx.open_table(CHATS).map_err(db_err)?;
             let mut meta = tx.open_table(META).map_err(db_err)?;
             if meta.get("schema").map_err(db_err)?.is_none() {
                 meta.insert("schema", SCHEMA_VERSION).map_err(db_err)?;
@@ -105,6 +109,8 @@ impl MetaDb {
             docs.remove(id).map_err(db_err)?;
             let mut annots = tx.open_table(ANNOTS).map_err(db_err)?;
             annots.remove(id).map_err(db_err)?;
+            let mut chats = tx.open_table(CHATS).map_err(db_err)?;
+            chats.remove(id).map_err(db_err)?;
         }
         tx.commit().map_err(db_err)?;
         Ok(())
@@ -128,5 +134,33 @@ impl MetaDb {
             return Ok(None);
         };
         Ok(Some(serde_json::from_slice(guard.value()).map_err(db_err)?))
+    }
+
+    /// Store one document's chat transcript. An empty conversation removes the
+    /// record rather than writing an empty one, so clearing a chat forgets it.
+    pub fn put_chat(&self, id: &str, messages: &[ChatMessage]) -> Result<(), LibraryError> {
+        let tx = self.db.begin_write().map_err(db_err)?;
+        {
+            let mut table = tx.open_table(CHATS).map_err(db_err)?;
+            if messages.is_empty() {
+                table.remove(id).map_err(db_err)?;
+            } else {
+                let json = serde_json::to_vec(messages).map_err(db_err)?;
+                table.insert(id, json.as_slice()).map_err(db_err)?;
+            }
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(())
+    }
+
+    pub fn get_chat(&self, id: &str) -> Result<Vec<ChatMessage>, LibraryError> {
+        let tx = self.db.begin_read().map_err(db_err)?;
+        let table = tx.open_table(CHATS).map_err(db_err)?;
+        let Some(guard) = table.get(id).map_err(db_err)? else {
+            return Ok(Vec::new());
+        };
+        // A transcript written by a future version that this one cannot read is
+        // not worth failing the document's whole open for.
+        Ok(serde_json::from_slice(guard.value()).unwrap_or_default())
     }
 }

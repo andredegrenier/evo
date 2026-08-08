@@ -40,6 +40,8 @@ pub struct EvoApp {
     script_engine: Option<crate::script::ScriptEngine>,
     script_prefs: crate::script::ScriptPrefs,
     scripts_ui: ui::scripts::ScriptsState,
+    /// Spawned the first time the chat panel is opened.
+    chat_engine: Option<crate::chat::ChatEngine>,
 }
 
 pub const ZOOM_STEP: f32 = 1.25;
@@ -149,6 +151,7 @@ impl EvoApp {
             script_engine: None,
             script_prefs,
             scripts_ui: ui::scripts::ScriptsState::default(),
+            chat_engine: None,
         };
         if let Some(path) = initial_file {
             app.open_path(path, &cc.egui_ctx);
@@ -175,6 +178,10 @@ impl EvoApp {
             };
             if let Err(e) = lib.save_markup(id, &markup) {
                 self.error = Some(format!("Could not save markup to library: {e}"));
+            }
+            // The conversation is about this document, so it belongs with it.
+            if let Err(e) = lib.save_chat(id, &dc.chat.messages) {
+                self.error = Some(format!("Could not save the chat to library: {e}"));
             }
         }
     }
@@ -206,6 +213,14 @@ impl EvoApp {
                 let mut dc = DocState::new(doc, ctx);
                 dc.library_id = Some(id.to_owned());
                 dc.title_override = title;
+                // The library id is the chat worker's cache key too, so there
+                // is nothing to hash later.
+                dc.chat.doc_key = Some(id.to_owned());
+                if let Some(lib) = &self.library
+                    && let Ok(messages) = lib.load_chat(id)
+                {
+                    dc.chat.messages = messages;
+                }
                 if let Some(lib) = &self.library
                     && let Ok(Some(markup)) = lib.load_markup(id)
                 {
@@ -443,6 +458,10 @@ impl EvoApp {
             return;
         }
 
+        if self.keymap.consume(ctx, Action::ToggleChat) {
+            self.toggle_chat(ctx);
+        }
+
         // Redo before undo: with the default bindings ⇧⌘Z would otherwise also
         // satisfy ⌘Z.
         let redo = self.keymap.consume(ctx, Action::Redo);
@@ -657,6 +676,128 @@ impl EvoApp {
         }
     }
 
+    /// Show or hide the chat panel, starting its worker the first time.
+    fn toggle_chat(&mut self, ctx: &egui::Context) {
+        let Some(dc) = &mut self.dc else { return };
+        dc.chat.open = !dc.chat.open;
+        if dc.chat.open {
+            dc.chat.focus_pending = true;
+            if self.chat_engine.is_none() {
+                self.chat_engine = Some(crate::chat::ChatEngine::spawn(ctx));
+            }
+        }
+    }
+
+    /// Send a question to the chat worker, recording it in the transcript.
+    fn ask_chat(&mut self, question: String) {
+        let Some(engine) = &self.chat_engine else {
+            return;
+        };
+        let Some(dc) = &mut self.dc else { return };
+        // The worker caches page text under this key. A library document has
+        // one already; anything else is identified by its bytes.
+        let doc_key = match &dc.chat.doc_key {
+            Some(key) => key.clone(),
+            None => {
+                let key = crate::library::hex_digest(&dc.doc.source);
+                dc.chat.doc_key = Some(key.clone());
+                key
+            }
+        };
+        dc.chat.error = None;
+        dc.chat.last_pages.clear();
+        let history = crate::chat::history_for(&dc.chat.messages);
+        dc.chat
+            .messages
+            .push(crate::script::model::ChatMessage::new(
+                crate::script::model::Role::User,
+                question.clone(),
+            ));
+        engine.ask(crate::chat::ChatJob {
+            doc_key,
+            source: dc.doc.source.clone(),
+            title: dc.title(),
+            question,
+            history,
+            config: self.script_prefs.model.clone(),
+        });
+    }
+
+    /// Take a finished answer, if one is waiting, into the transcript it
+    /// belongs to. An answer for a document that has since been closed is
+    /// dropped rather than shown against whatever is open now.
+    fn collect_chat_answer(&mut self) {
+        let Some(engine) = &self.chat_engine else {
+            return;
+        };
+        let Some(outcome) = engine.take_outcome() else {
+            return;
+        };
+        let Some(dc) = &mut self.dc else { return };
+        if dc.chat.doc_key.as_deref() != Some(outcome.doc_key.as_str()) {
+            return;
+        }
+        match outcome.result {
+            Ok(answer) => {
+                dc.chat.last_pages = answer.pages;
+                dc.chat
+                    .messages
+                    .push(crate::script::model::ChatMessage::new(
+                        crate::script::model::Role::Assistant,
+                        answer.text,
+                    ));
+            }
+            Err(e) => {
+                // The question was never answered, so it does not belong in the
+                // transcript; put it back in the box to be asked again, unless
+                // the user has since started typing something else.
+                if dc.chat.messages.last().map(|m| m.role) == Some(crate::script::model::Role::User)
+                    && dc.chat.input.trim().is_empty()
+                    && let Some(last) = dc.chat.messages.pop()
+                {
+                    dc.chat.input = last.content;
+                }
+                let hint = if e.contains("could not reach the model") {
+                    "\n\nThe model endpoint is set in Preferences ▸ Scripting."
+                } else {
+                    ""
+                };
+                dc.chat.error = Some(format!("{e}{hint}"));
+            }
+        }
+    }
+
+    fn handle_chat_action(&mut self, action: ui::chat::ChatAction, ctx: &egui::Context) {
+        match action {
+            ui::chat::ChatAction::Ask(question) => self.ask_chat(question),
+            ui::chat::ChatAction::Cancel => {
+                if let Some(engine) = &self.chat_engine {
+                    engine.cancel();
+                }
+            }
+            ui::chat::ChatAction::Clear => {
+                if let Some(dc) = &mut self.dc {
+                    dc.chat.messages.clear();
+                    dc.chat.last_pages.clear();
+                    dc.chat.error = None;
+                }
+                self.save_sidecar();
+            }
+            ui::chat::ChatAction::GoToPage(page) => {
+                if let Some(dc) = &mut self.dc {
+                    // Citations name source pages; the view is in display
+                    // order, which page moves and deletions can change.
+                    dc.viewport.scroll_to_page = dc
+                        .pages
+                        .order
+                        .iter()
+                        .position(|&logical| dc.pages.source_of(logical) == page - 1);
+                    ctx.request_repaint();
+                }
+            }
+        }
+    }
+
     fn menu_bar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
@@ -846,6 +987,25 @@ impl EvoApp {
                 }
             });
             ui.menu_button("Tools", |ui| {
+                let has_doc = self.dc.is_some();
+                if ui
+                    .add_enabled(
+                        has_doc,
+                        egui::Button::new(self.label(
+                            ctx,
+                            "Chat with Document",
+                            Action::ToggleChat,
+                        )),
+                    )
+                    .on_hover_text(
+                        "Ask questions about the open document; a local model \
+                         answers from its pages and cites them",
+                    )
+                    .clicked()
+                {
+                    self.toggle_chat(ctx);
+                    ui.close();
+                }
                 if ui
                     .button("Scripts…")
                     .on_hover_text(
@@ -1039,9 +1199,12 @@ impl eframe::App for EvoApp {
             self.status_bar(ui);
         });
 
+        self.collect_chat_answer();
+
         let mut open_extracted: Option<Vec<u8>> = None;
         let mut pending_temp_file: Option<PathBuf> = None;
         let mut pending_error: Option<String> = None;
+        let mut chat_action: Option<ui::chat::ChatAction> = None;
         // Find-time OCR reuses the library's models, but never downloads them.
         let models_dir = self.library.as_ref().map(|lib| lib.root.join("models"));
         if let Some(dc) = &mut self.dc {
@@ -1061,6 +1224,17 @@ impl eframe::App for EvoApp {
                     Some(ui::thumbnails::RailAction::Error(msg)) => pending_error = Some(msg),
                     None => {}
                 }
+            }
+            // Outermost on the right: the chat is about the whole document,
+            // the inspector about one piece of markup inside it.
+            if dc.chat.open {
+                let engine = self.chat_engine.as_ref();
+                chat_action = egui::Panel::right("chat")
+                    .resizable(true)
+                    .default_size(340.0)
+                    .min_size(240.0)
+                    .show(ui, |ui| ui::chat::show(ui, dc, engine))
+                    .inner;
             }
             egui::Panel::right("inspector")
                 .resizable(true)
@@ -1103,6 +1277,9 @@ impl eframe::App for EvoApp {
             }
         }
 
+        if let Some(action) = chat_action {
+            self.handle_chat_action(action, ctx);
+        }
         if let Some(path) = pending_temp_file {
             self.temp_print_files.push(path);
         }

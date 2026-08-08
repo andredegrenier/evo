@@ -301,6 +301,22 @@ impl Library {
     pub fn save_markup(&self, id: &str, markup: &SavedMarkup) -> Result<(), LibraryError> {
         self.db.put_markup(id, markup)
     }
+
+    /// The saved chat transcript for a document (empty when there is none).
+    pub fn load_chat(
+        &self,
+        id: &str,
+    ) -> Result<Vec<crate::script::model::ChatMessage>, LibraryError> {
+        self.db.get_chat(id)
+    }
+
+    pub fn save_chat(
+        &self,
+        id: &str,
+        messages: &[crate::script::model::ChatMessage],
+    ) -> Result<(), LibraryError> {
+        self.db.put_chat(id, messages)
+    }
 }
 
 pub fn hex_digest(bytes: &[u8]) -> String {
@@ -455,6 +471,32 @@ mod tests {
         let loaded = lib.load_markup(&meta.id).unwrap().unwrap();
         assert_eq!(loaded.version, 1);
         assert_eq!(loaded.pages.order, vec![0, 1]);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn chat_sidecar_round_trip() {
+        use crate::script::model::{ChatMessage, Role};
+
+        let (lib, dir) = temp_library("chat");
+        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        assert!(lib.load_chat(&meta.id).unwrap().is_empty());
+
+        let messages = vec![
+            ChatMessage::new(Role::User, "what is on page 2?"),
+            ChatMessage::new(Role::Assistant, "The second page. [p.2]"),
+        ];
+        lib.save_chat(&meta.id, &messages).unwrap();
+        assert_eq!(lib.load_chat(&meta.id).unwrap(), messages);
+
+        // Clearing a conversation forgets it rather than storing an empty one.
+        lib.save_chat(&meta.id, &[]).unwrap();
+        assert!(lib.load_chat(&meta.id).unwrap().is_empty());
+
+        // A deleted document takes its transcript with it.
+        lib.save_chat(&meta.id, &messages).unwrap();
+        lib.delete(&meta.id).unwrap();
+        assert!(lib.load_chat(&meta.id).unwrap().is_empty());
         std::fs::remove_dir_all(dir).ok();
     }
 }

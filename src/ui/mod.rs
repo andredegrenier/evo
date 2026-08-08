@@ -1,4 +1,5 @@
 pub mod canvas;
+pub mod chat;
 pub mod findbar;
 pub mod inspector;
 pub mod library_view;

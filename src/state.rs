@@ -17,6 +17,7 @@ use crate::library::textjob::TextWorker;
 use crate::render::RenderWorker;
 use crate::render::cache::{self, TextureCache};
 use crate::tools::{ActiveTool, ToolController};
+use crate::ui::chat::ChatSessionState;
 use crate::ui::viewport::Viewport;
 
 pub struct DocState {
@@ -56,6 +57,9 @@ pub struct DocState {
     /// Background text extraction/OCR, started the first time ⌘F is used.
     pub text_worker: Option<TextWorker>,
     pub find: FindState,
+    /// Chat-with-document conversation. Lives here so it dies with the
+    /// document it is about.
+    pub chat: ChatSessionState,
 }
 
 /// Find-in-document (⌘F) state.
@@ -147,6 +151,7 @@ impl DocState {
             page_text: HashMap::new(),
             text_worker: None,
             find: FindState::default(),
+            chat: ChatSessionState::default(),
         }
     }
 
@@ -164,6 +169,11 @@ impl DocState {
         }
         new.find = old.find;
         new.find.dirty = true;
+        // The conversation carries over, but the pages it was about have moved:
+        // clearing the key makes the chat worker re-extract text for the merged
+        // document instead of answering from the old one's cache.
+        new.chat = old.chat;
+        new.chat.doc_key = None;
         new.store = old.store;
         new.history = old.history;
         new.pages = old.pages;
