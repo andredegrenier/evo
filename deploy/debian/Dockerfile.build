@@ -1,0 +1,31 @@
+# Dockerfile.build -- Path B: build a Debian x86_64 `evo` binary from a Mac.
+#
+# This is the fallback. Path A (build natively on the Debian box) is faster and
+# has fewer ways to go wrong; use this when the box cannot host a toolchain, or
+# when you want the binary before the box exists.
+#
+# The base image's Debian version must be no NEWER than the server's, because a
+# binary links against the glibc it was built with and glibc is only
+# backward-compatible. bookworm (Debian 12, glibc 2.36) runs on Debian 12 and
+# 13; a trixie-built binary would not run on 12.
+FROM rust:1.92-bookworm
+
+# The same list CI installs on Linux -- eframe and rfd link GTK whether or not
+# a window is ever opened -- plus the C++ toolchain that llama.cpp is built
+# with (cmake, clang, build-essential).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        clang \
+        pkg-config \
+        libgtk-3-dev \
+        libxkbcommon-dev \
+        libwayland-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# --features s3 is deliberate: the S3 blob backend is off at runtime unless
+# serve/config.json asks for it, so compiling it in costs nothing but means
+# switching to a bucket later is a config edit rather than another build.
+CMD ["cargo", "build", "--release", "--features", "s3"]

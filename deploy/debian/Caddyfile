@@ -1,0 +1,62 @@
+# Caddyfile -- for reachability tier (c) ONLY.
+#
+# Tier (c) is the direct one: your router forwards :443 to this box, Caddy
+# terminates TLS with a Let's Encrypt certificate for a domain you own, and
+# proxies to the loopback port `evo serve` listens on.
+#
+# You do NOT need this file for the other two tiers:
+#
+#   (a) Tailscale (recommended) -- `tailscale serve https / http://127.0.0.1:8443`
+#       gives you https://<box>.<tailnet>.ts.net with a valid certificate that
+#       Tailscale obtains and renews. No Caddy, no open ports, no DNS to own.
+#
+#   (b) Cloudflare Tunnel -- cloudflared holds an outbound connection to
+#       Cloudflare and forwards to 127.0.0.1:8443. Cloudflare terminates TLS.
+#       No Caddy, no open ports.
+#
+# Both of those are strictly less to run and less to expose than this. Reach
+# for tier (c) only if you specifically want evo on a public hostname.
+#
+# Install:
+#   sudo cp Caddyfile /etc/caddy/Caddyfile     # edit the hostname first
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# Ports 80 and 443 must both reach this box: 80 is how the ACME HTTP challenge
+# is answered, 443 is the actual service.
+
+evo.example.com {
+	# Caddy obtains and renews the certificate on its own. Put a real email
+	# here so Let's Encrypt can warn you when something is about to expire.
+	tls you@example.com
+
+	encode zstd gzip
+
+	# Page PNGs are content-addressed and served with immutable caching, so
+	# most of what crosses this proxy after the first read is 304s.
+	reverse_proxy 127.0.0.1:8443 {
+		# Caddy sets X-Forwarded-For, -Proto and -Host by default, and the
+		# unit runs evo with --trust-proxy so the login rate limiter counts
+		# per real client rather than per proxy.
+		#
+		# A scanned book takes a while to arrive and a chat answer streams
+		# for as long as the model talks: neither must be cut off.
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+
+	# evo's own upload limit is 200 MB (max_upload_mb in serve/config.json).
+	# Uncomment to have Caddy refuse oversized bodies before they reach it.
+	# request_body {
+	# 	max_size 210MB
+	# }
+
+	log {
+		output file /var/log/caddy/evo.log
+	}
+}
+
+# Nothing else is served from this box. An unmatched Host header gets a
+# connection, a certificate error, and no information about what runs here.

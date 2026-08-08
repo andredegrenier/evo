@@ -105,6 +105,52 @@ the only non-Rust components, both vendored.)
 - **Export SVG**: one SVG per page (original content + markup vectors)
 - **Print**: hands a flattened copy to the system print dialog (⌘P)
 
+## Phone access (`evo serve`)
+
+`evo serve` is the same binary with no window: it puts your library on a phone.
+Point Safari at it, add it to the home screen, and evo is an app — library and
+search, a page viewer that swipes and pinches, touch markup, document chat, and
+an agent chat that can **drive evo** ("find the page about the roof detail and
+highlight it" opens the document and draws the highlight).
+
+```sh
+evo serve init                 # choose a password; prints an otpauth:// URI
+evo serve                      # listens on 0.0.0.0:8443
+```
+
+`serve init` prints a QR-scannable URI for your authenticator app. Then
+`evo serve` starts the server; `--bind`, `--port`, `--data-dir`, `--config`,
+`--insecure-http` and `--trust-proxy` are the flags. `evo fetch-model` downloads
+model weights on a machine with no Preferences pane.
+
+**It is a progressive web app**, hand-written with no JavaScript dependencies:
+an installable app shell, a service worker that caches the shell and never an
+API answer, and pages served as immutable PNGs with the markup as a separate
+SVG overlay. iOS installs it to the home screen only over HTTPS, which is what
+the deployment guide is mostly about.
+
+**Security model.** A password (argon2id) *and* a TOTP code from an
+authenticator app, required together, on every route that is not the login page
+or the static shell. Sessions are 32-byte tokens stored only as hashes, in a
+`__Host-` cookie that is `Secure`, `HttpOnly` and `SameSite=Strict`; mutations
+also require a custom header, so a cross-site form cannot make one. Codes are
+single-use, logins are rate-limited per client address, and every secret
+comparison is constant-time. Everything is `0600` on disk and nothing is in the
+repository.
+
+The intended deployment is **loopback behind a tunnel**: the server binds
+`127.0.0.1` and Tailscale (or a Cloudflare tunnel, or Caddy) provides the
+certificate and the route. That opens no ports, and the password and code are
+still required inside the tunnel.
+
+The library `evo serve` opens is its own — one process may hold a library at a
+time, so the desktop app and the server cannot share a directory concurrently.
+Documents get to the server by upload; the formats are identical either way.
+
+Deploying it to a Debian machine, end to end — building, installing, the
+systemd unit, the three ways to reach it from a phone, choosing a model for the
+hardware you have, backups: **[deploy/debian/RUNBOOK.md](deploy/debian/RUNBOOK.md)**.
+
 ## Install & run
 
 Requires Rust 1.92+.

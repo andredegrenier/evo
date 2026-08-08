@@ -1,0 +1,53 @@
+[Unit]
+Description=evo serve -- the document library over HTTP, for a phone
+Documentation=https://github.com/andredegrenier/evo
+# The library is on local disk, but the model may be an endpoint on the
+# tailnet and S3 blobs are a network away, so wait for real connectivity.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=evo
+Group=evo
+
+# evo keeps downloaded model weights under the platform data directory --
+# $HOME/.local/share/evo/library/models/llm -- and --data-dir does not move
+# them. systemd sets HOME from the account already; saying it here means the
+# path stays the one the runbook prints even if the account's home changes.
+Environment=HOME=/var/lib/evo
+
+# Loopback only. Everything that reaches this from outside the box arrives
+# through Tailscale, a Cloudflare tunnel or Caddy -- all three terminate TLS
+# and forward here, which is why --trust-proxy is on: the rate limiter has to
+# be able to tell one client from another through the proxy.
+ExecStart=/usr/local/bin/evo serve --bind 127.0.0.1 --port 8443 --data-dir /var/lib/evo --trust-proxy
+
+Restart=on-failure
+RestartSec=5s
+# A cancelled generation and an open SSE stream both need a moment to unwind.
+TimeoutStopSec=30s
+
+# -- Hardening ---------------------------------------------------------------
+# The whole filesystem read-only apart from the library. A PDF importer that
+# can be talked into writing outside /var/lib/evo is a bad day; this makes it
+# an impossible one.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/evo
+NoNewPrivileges=yes
+PrivateTmp=yes
+# /home, /root and /run/user are not evo's business. HOME above is
+# /var/lib/evo, which this does not touch.
+ProtectHome=yes
+# CPU inference needs no device nodes. Remove this line if you ever build with
+# GPU offload, which needs /dev/dri or /dev/nvidia*.
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
