@@ -236,9 +236,9 @@ fn model_table(lua: &Lua, run: &Rc<RunCtx>) -> mlua::Result<Table> {
                 model: opts.model,
                 prompt,
                 system: opts.system,
-                history: Vec::new(),
                 temperature: opts.temperature,
                 max_tokens: opts.max_tokens,
+                ..Default::default()
             };
 
             // Check for cancellation between chunks as well as in the
@@ -251,10 +251,12 @@ fn model_table(lua: &Lua, run: &Rc<RunCtx>) -> mlua::Result<Table> {
                     ControlFlow::Continue(())
                 }
             };
+            // Scripts ask for text and get text: a script that wants a tool
+            // run calls the tool itself.
             match r.backend.generate(&request, &mut on_token) {
-                Ok(text) => {
-                    r.log(format!("Model returned {} characters.", text.len()));
-                    Ok(text)
+                Ok(outcome) => {
+                    r.log(format!("Model returned {} characters.", outcome.text.len()));
+                    Ok(outcome.text)
                 }
                 Err(e) => Err(mlua::Error::runtime(e.to_string())),
             }
@@ -329,12 +331,12 @@ mod tests {
             &self,
             _req: &GenerateRequest,
             on_token: &mut dyn FnMut(&str) -> ControlFlow<()>,
-        ) -> Result<String, super::super::model::ModelError> {
+        ) -> Result<super::super::model::GenerateOutcome, super::super::model::ModelError> {
             self.calls.fetch_add(1, Ordering::Relaxed);
             if on_token(&self.reply).is_break() {
                 return Err(super::super::model::ModelError::Cancelled);
             }
-            Ok(self.reply.clone())
+            Ok(super::super::model::GenerateOutcome::text(&self.reply))
         }
 
         fn list_models(&self) -> Result<Vec<String>, super::super::model::ModelError> {

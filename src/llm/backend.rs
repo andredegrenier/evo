@@ -23,7 +23,9 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 
-use crate::script::model::{GenerateRequest, ModelBackend, ModelError, Role};
+use crate::script::model::{GenerateOutcome, GenerateRequest, ModelBackend, ModelError, Role};
+
+use super::toolfmt;
 
 /// How much of a conversation the model is given. Larger costs memory: the KV
 /// cache is allocated for the whole window whether it is used or not.
@@ -133,7 +135,7 @@ impl ModelBackend for BuiltinBackend {
         &self,
         req: &GenerateRequest,
         on_token: &mut dyn FnMut(&str) -> ControlFlow<()>,
-    ) -> Result<String, ModelError> {
+    ) -> Result<GenerateOutcome, ModelError> {
         let path = self.model_path()?;
         let model = load(&path)?;
 
@@ -176,6 +178,11 @@ impl ModelBackend for BuiltinBackend {
         // mid-sequence and only complete with the next one.
         let mut pending: Vec<u8> = Vec::new();
         let mut produced = 0u32;
+        // When tools are on offer the answer may contain `<tool_call>` blocks,
+        // which are addressed to evo and not to the reader. Bytes of `text`
+        // already streamed; the rest is held back until the block closes.
+        let tools_offered = !req.tools.is_empty();
+        let mut streamed = 0usize;
 
         while produced < max_tokens && (pos as u32) < N_CTX {
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
@@ -188,7 +195,7 @@ impl ModelBackend for BuiltinBackend {
             pending.extend_from_slice(&piece(&model, token)?);
             if let Some(chunk) = take_utf8(&mut pending) {
                 text.push_str(&chunk);
-                if on_token(&chunk).is_break() {
+                if stream(&text, &mut streamed, tools_offered, on_token).is_break() {
                     return Err(ModelError::Cancelled);
                 }
             }
@@ -205,13 +212,17 @@ impl ModelBackend for BuiltinBackend {
         // Anything left is an incomplete sequence; the replacement character
         // is a better answer than dropping the byte silently.
         if !pending.is_empty() {
-            let tail = String::from_utf8_lossy(&pending).into_owned();
-            text.push_str(&tail);
-            if on_token(&tail).is_break() {
+            text.push_str(&String::from_utf8_lossy(&pending));
+            if stream(&text, &mut streamed, tools_offered, on_token).is_break() {
                 return Err(ModelError::Cancelled);
             }
         }
-        Ok(text)
+
+        if !tools_offered {
+            return Ok(GenerateOutcome::text(text));
+        }
+        let (text, tool_calls) = toolfmt::parse_tool_calls(&text);
+        Ok(GenerateOutcome { text, tool_calls })
     }
 
     fn list_models(&self) -> Result<Vec<String>, ModelError> {
@@ -252,16 +263,65 @@ fn sampler(temperature: f32) -> LlamaSampler {
     }
 }
 
+/// Hand the reader everything of `text` that is theirs to see and has not been
+/// handed over yet.
+fn stream(
+    text: &str,
+    streamed: &mut usize,
+    tools_offered: bool,
+    on_token: &mut dyn FnMut(&str) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    let visible = if tools_offered {
+        std::borrow::Cow::Owned(toolfmt::visible_text(text))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    };
+    if visible.len() <= *streamed {
+        return ControlFlow::Continue(());
+    }
+    // What is visible only ever grows, so everything past the mark is new.
+    let chunk = &visible[*streamed..];
+    *streamed = visible.len();
+    on_token(chunk)
+}
+
 /// The conversation as roles and text, in the order the model should see it.
+///
+/// There is no tool role in a chat template evo can rely on, so a tool round
+/// trip is written into the text the way the model itself writes it: the
+/// assistant's `<tool_call>` block, and the result as a `<tool_response>`
+/// message from the user.
 fn turns(req: &GenerateRequest) -> Vec<(&'static str, String)> {
     let mut turns = Vec::with_capacity(req.history.len() + 2);
-    if let Some(system) = &req.system {
-        turns.push((Role::System.wire(), system.clone()));
+    let system = if req.tools.is_empty() {
+        req.system.clone()
+    } else {
+        Some(toolfmt::system_with_tools(
+            req.system.as_deref(),
+            &req.tools,
+        ))
+    };
+    if let Some(system) = system {
+        turns.push((Role::System.wire(), system));
     }
     for m in &req.history {
-        turns.push((m.role.wire(), m.content.clone()));
+        match m.role {
+            Role::Tool => turns.push((
+                Role::User.wire(),
+                toolfmt::render_tool_result(m.name.as_deref(), &m.content),
+            )),
+            Role::Assistant if !m.tool_calls.is_empty() => turns.push((
+                Role::Assistant.wire(),
+                toolfmt::render_tool_calls(&m.content, &m.tool_calls),
+            )),
+            _ => turns.push((m.role.wire(), m.content.clone())),
+        }
     }
-    turns.push((Role::User.wire(), req.prompt.clone()));
+    // An empty prompt means the conversation already ends where the model
+    // should carry on from -- the agent loop after a tool has answered.
+    if !req.prompt.is_empty() {
+        turns.push((Role::User.wire(), req.prompt.clone()));
+    }
     turns
 }
 
@@ -293,6 +353,10 @@ fn fit_prompt(
     budget: usize,
 ) -> Result<Vec<llama_cpp_2::token::LlamaToken>, ModelError> {
     let mut turns = turns(req);
+    if turns.is_empty() {
+        return Err(ModelError::Read("there was nothing to ask".to_owned()));
+    }
+    // The last turn is the one trimmed to fit: it carries the quoted pages.
     let prompt_index = turns.len() - 1;
     for _ in 0..8 {
         let rendered = render(model, &turns);
@@ -359,7 +423,7 @@ fn take_utf8(buf: &mut Vec<u8>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::script::model::ChatMessage;
+    use crate::script::model::{ChatMessage, ToolCall, ToolDef};
 
     #[test]
     fn partial_characters_wait_for_the_rest_of_their_bytes() {
@@ -382,8 +446,7 @@ mod tests {
             prompt: "and now?".into(),
             system: Some("be brief".into()),
             history: vec![ChatMessage::new(Role::User, "hello")],
-            temperature: None,
-            max_tokens: None,
+            ..Default::default()
         };
         let turns = turns(&req);
         assert_eq!(
@@ -397,6 +460,79 @@ mod tests {
                 ("user", "and now?"),
             ]
         );
+    }
+
+    /// With tools on offer the system prompt describes them, and a tool round
+    /// trip in the history is written the way the model writes it -- there is
+    /// no tool role in the chat template to put it in.
+    #[test]
+    fn tools_and_their_results_are_written_into_the_conversation() {
+        let call = ToolCall::new("search_library", serde_json::json!({"query": "boiler"}));
+        let req = GenerateRequest {
+            model: "m".into(),
+            prompt: String::new(),
+            system: Some("be brief".into()),
+            history: vec![
+                ChatMessage::new(Role::User, "what about boilers?"),
+                ChatMessage::calling("Looking.", vec![call.clone()]),
+                ChatMessage::tool_result(&call, "2 matches"),
+            ],
+            tools: vec![ToolDef {
+                name: "search_library".into(),
+                description: "Search the library".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            }],
+            ..Default::default()
+        };
+        let turns = turns(&req);
+        let roles: Vec<&str> = turns.iter().map(|(r, _)| *r).collect();
+        // The result comes back as a user turn: the template has no tool role.
+        assert_eq!(roles, ["system", "user", "assistant", "user"]);
+        assert!(turns[0].1.starts_with("be brief"));
+        assert!(turns[0].1.contains("<tools>"));
+        assert!(turns[0].1.contains("search_library"));
+        assert!(turns[2].1.contains("<tool_call>"));
+        assert!(turns[2].1.starts_with("Looking."));
+        assert!(turns[3].1.contains("<tool_response>"));
+        assert!(turns[3].1.contains("2 matches"));
+
+        // An empty prompt adds no turn of its own.
+        assert!(!turns.iter().any(|(_, c)| c.is_empty()));
+    }
+
+    /// While a `<tool_call>` block is being written, the reader sees nothing
+    /// of it; text before and after still streams.
+    #[test]
+    fn a_tool_call_is_held_back_from_the_stream() {
+        let mut streamed = Vec::new();
+        let mut push = |chunk: &str| {
+            streamed.push(chunk.to_owned());
+            ControlFlow::Continue(())
+        };
+        let mut at = 0usize;
+        let mut text = String::new();
+        for piece in [
+            "Let me ",
+            "look.\n<tool_",
+            "call>{\"name\": \"a\", \"arguments\": {}}",
+            "</tool_call>",
+            "\nTwo matches.",
+        ] {
+            text.push_str(piece);
+            assert!(stream(&text, &mut at, true, &mut push).is_continue());
+        }
+        assert_eq!(streamed, ["Let me ", "look.\n", "\nTwo matches."]);
+
+        // Without tools on offer nothing is held back at all.
+        let mut streamed = Vec::new();
+        let mut push = |chunk: &str| {
+            streamed.push(chunk.to_owned());
+            ControlFlow::Continue(())
+        };
+        let mut at = 0usize;
+        let text = "a<tool_call>b".to_owned();
+        assert!(stream(&text, &mut at, false, &mut push).is_continue());
+        assert_eq!(streamed, ["a<tool_call>b"]);
     }
 
     /// A real round trip against a downloaded model. Ignored by default -- it
@@ -416,17 +552,18 @@ mod tests {
             model: String::new(),
             prompt: "Reply with the single word: pineapple.".into(),
             system: Some("You answer in one word.".into()),
-            history: Vec::new(),
             temperature: Some(0.0),
             max_tokens: Some(64),
+            ..Default::default()
         };
         let mut chunks = Vec::new();
-        let text = backend
+        let outcome = backend
             .generate(&req, &mut |c: &str| {
                 chunks.push(c.to_owned());
                 ControlFlow::Continue(())
             })
             .expect("a completion");
+        let text = outcome.text;
 
         assert!(!text.trim().is_empty(), "the model said nothing");
         assert!(!chunks.is_empty(), "nothing was streamed");
@@ -450,10 +587,9 @@ mod tests {
         let req = GenerateRequest {
             model: String::new(),
             prompt: "Count from one to fifty in words.".into(),
-            system: None,
-            history: Vec::new(),
             temperature: Some(0.0),
             max_tokens: Some(200),
+            ..Default::default()
         };
         let mut seen = 0;
         let result = backend.generate(&req, &mut |_: &str| {
@@ -462,6 +598,64 @@ mod tests {
         });
         assert!(matches!(result, Err(ModelError::Cancelled)));
         assert_eq!(seen, 1, "generation stopped at the first chunk");
+        unload();
+    }
+
+    /// The prompt-based tool format against a real model: it has to produce a
+    /// `<tool_call>` block that parses, and the block must not reach the
+    /// reader.
+    #[test]
+    #[ignore = "needs a downloaded model; set EVO_LLM_TEST_MODEL"]
+    fn the_builtin_backend_asks_for_a_tool_in_the_hermes_format() {
+        let Ok(id) = std::env::var("EVO_LLM_TEST_MODEL") else {
+            panic!("set EVO_LLM_TEST_MODEL to a catalogue id");
+        };
+        let backend = BuiltinBackend::new(id);
+        let req = GenerateRequest {
+            model: String::new(),
+            prompt: "What is the weather in London? Use the tool.".into(),
+            system: Some("You are a helpful assistant with tools.".into()),
+            tools: vec![ToolDef {
+                name: "get_weather".into(),
+                description: "Look up the current weather in a city".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                }),
+            }],
+            temperature: Some(0.0),
+            max_tokens: Some(512),
+            ..Default::default()
+        };
+        let mut streamed = String::new();
+        let outcome = backend
+            .generate(&req, &mut |c: &str| {
+                streamed.push_str(c);
+                ControlFlow::Continue(())
+            })
+            .expect("a completion");
+
+        assert_eq!(
+            outcome.tool_calls.len(),
+            1,
+            "expected one call, got text: {}",
+            outcome.text
+        );
+        assert_eq!(outcome.tool_calls[0].name, "get_weather");
+        assert!(
+            outcome.tool_calls[0].arguments["city"]
+                .as_str()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("london"),
+            "unexpected arguments: {}",
+            outcome.tool_calls[0].arguments
+        );
+        assert!(
+            !streamed.contains("<tool_call>"),
+            "the call reached the reader: {streamed}"
+        );
         unload();
     }
 }

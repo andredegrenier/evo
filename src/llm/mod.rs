@@ -14,6 +14,11 @@
 
 pub mod download;
 
+/// Compiled whether or not the engine is: it is plain string handling, and it
+/// is the only description of the tool format evo speaks.
+#[cfg_attr(not(feature = "builtin-llm"), allow(dead_code))]
+pub mod toolfmt;
+
 #[cfg(feature = "builtin-llm")]
 pub mod backend;
 

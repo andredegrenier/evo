@@ -60,6 +60,15 @@ impl Role {
 pub struct ChatMessage {
     pub role: Role,
     pub content: String,
+    /// Tools this assistant turn asked to run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    /// For a [`Role::Tool`] turn: which call this is the result of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// For a [`Role::Tool`] turn: which tool produced it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl ChatMessage {
@@ -67,16 +76,112 @@ impl ChatMessage {
         Self {
             role,
             content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    /// The assistant turn that asked for tools. The text is whatever it said
+    /// alongside the request, which is often nothing.
+    pub fn calling(text: impl Into<String>, calls: Vec<ToolCall>) -> Self {
+        Self {
+            tool_calls: calls,
+            ..Self::new(Role::Assistant, text)
+        }
+    }
+
+    /// What one tool answered, as the model should see it.
+    pub fn tool_result(call: &ToolCall, content: impl Into<String>) -> Self {
+        Self {
+            tool_call_id: call.id.clone(),
+            name: Some(call.name.clone()),
+            ..Self::new(Role::Tool, content)
         }
     }
 }
 
+/// A tool the model may ask for, described the way both dialects want it: a
+/// name, a sentence, and a JSON Schema for the arguments.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct ToolDef {
+    pub name: String,
+    pub description: String,
+    /// JSON Schema object. `{"type":"object","properties":{…}}`.
+    pub parameters: serde_json::Value,
+}
+
+impl ToolDef {
+    /// The shape both dialects put in their `tools` array.
+    pub fn wire(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            }
+        })
+    }
+}
+
+/// The model asking for one tool to be run.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct ToolCall {
+    /// The dialect's own handle for this call, when it gave one. OpenAI needs
+    /// it back on the result message; Ollama does not use one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub name: String,
+    /// Always an object once parsed; `{}` when the model sent nothing usable.
+    pub arguments: serde_json::Value,
+}
+
+impl ToolCall {
+    pub fn new(name: impl Into<String>, arguments: serde_json::Value) -> Self {
+        Self {
+            id: None,
+            name: name.into(),
+            arguments,
+        }
+    }
+
+    /// The arguments as the wire wants them: OpenAI carries them as a JSON
+    /// *string*, Ollama as an object.
+    pub fn arguments_json(&self) -> String {
+        self.arguments.to_string()
+    }
+}
+
+/// What one generation produced: text, and whatever tools it asked for.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct GenerateOutcome {
+    pub text: String,
+    pub tool_calls: Vec<ToolCall>,
+}
+
+impl GenerateOutcome {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            tool_calls: Vec::new(),
+        }
+    }
+}
+
+#[derive(Default)]
 pub struct GenerateRequest {
     pub model: String,
+    /// The question being asked. Empty when the conversation in `history` is
+    /// already up to date -- the agent loop continues that way after a tool
+    /// has answered.
     pub prompt: String,
     pub system: Option<String>,
     /// Earlier turns, oldest first. Empty for a one-shot completion.
     pub history: Vec<ChatMessage>,
+    /// Tools the model may ask for. Empty means it is only being asked for
+    /// text, and no dialect is told about tools at all.
+    pub tools: Vec<ToolDef>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
 }
@@ -89,7 +194,7 @@ pub trait ModelBackend: Send {
         &self,
         req: &GenerateRequest,
         on_token: &mut dyn FnMut(&str) -> ControlFlow<()>,
-    ) -> Result<String, ModelError>;
+    ) -> Result<GenerateOutcome, ModelError>;
 
     fn list_models(&self) -> Result<Vec<String>, ModelError>;
 
@@ -214,7 +319,7 @@ impl ModelBackend for UnavailableBackend {
         &self,
         _req: &GenerateRequest,
         _on_token: &mut dyn FnMut(&str) -> ControlFlow<()>,
-    ) -> Result<String, ModelError> {
+    ) -> Result<GenerateOutcome, ModelError> {
         Err(Self::error())
     }
 
@@ -255,7 +360,7 @@ impl ModelBackend for HttpBackend {
         &self,
         req: &GenerateRequest,
         on_token: &mut dyn FnMut(&str) -> ControlFlow<()>,
-    ) -> Result<String, ModelError> {
+    ) -> Result<GenerateOutcome, ModelError> {
         let (path, body) = match self.config.api {
             Api::Ollama => ("api/chat", ollama_body(req)),
             Api::OpenAiCompatible => ("v1/chat/completions", openai_body(req)),
@@ -288,6 +393,8 @@ impl ModelBackend for HttpBackend {
         // both; only the shape of each line differs.
         let api = self.config.api;
         let mut full = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut pending = PendingCalls::default();
         let reader = BufReader::new(response.into_body().into_reader());
         for line in reader.lines() {
             let line = line.map_err(|e| ModelError::Read(e.to_string()))?;
@@ -302,11 +409,20 @@ impl ModelBackend for HttpBackend {
                     return Err(ModelError::Cancelled);
                 }
             }
+            // Ollama sends a call in one piece; OpenAI dribbles it out.
+            tool_calls.extend(chunk.tool_calls);
+            for fragment in &chunk.fragments {
+                pending.add(fragment);
+            }
             if chunk.done {
                 break;
             }
         }
-        Ok(full)
+        tool_calls.extend(pending.finish());
+        Ok(GenerateOutcome {
+            tool_calls,
+            ..GenerateOutcome::text(full)
+        })
     }
 
     fn list_models(&self) -> Result<Vec<String>, ModelError> {
@@ -341,20 +457,74 @@ impl ModelBackend for HttpBackend {
 }
 
 /// The conversation both dialects send: the system prompt, the earlier turns,
-/// and this request's prompt as the last user message.
-fn messages(req: &GenerateRequest) -> Vec<serde_json::Value> {
+/// and this request's prompt as the last user message. An empty prompt adds no
+/// message -- the agent loop continues a conversation that already ends where
+/// the model should carry on from.
+fn messages(req: &GenerateRequest, api: Api) -> Vec<serde_json::Value> {
     let mut messages = Vec::with_capacity(req.history.len() + 2);
     if let Some(system) = &req.system {
         messages.push(serde_json::json!({"role": "system", "content": system}));
     }
     for turn in &req.history {
-        messages.push(serde_json::json!({
-            "role": turn.role.wire(),
-            "content": turn.content,
-        }));
+        messages.push(turn_json(turn, api));
     }
-    messages.push(serde_json::json!({"role": "user", "content": req.prompt}));
+    if !req.prompt.is_empty() {
+        messages.push(serde_json::json!({"role": "user", "content": req.prompt}));
+    }
     messages
+}
+
+/// One turn on the wire. Plain text turns are identical in both dialects; the
+/// ones that carry a tool call or its result are not.
+fn turn_json(turn: &ChatMessage, api: Api) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "role": turn.role.wire(),
+        "content": turn.content,
+    });
+    if !turn.tool_calls.is_empty() {
+        let calls: Vec<serde_json::Value> = turn
+            .tool_calls
+            .iter()
+            .map(|call| match api {
+                // OpenAI identifies each call and carries the arguments as a
+                // string; the result message quotes the id back.
+                Api::OpenAiCompatible => serde_json::json!({
+                    "id": call.id.clone().unwrap_or_default(),
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": call.arguments_json(),
+                    }
+                }),
+                _ => serde_json::json!({
+                    "function": {
+                        "name": call.name,
+                        "arguments": call.arguments,
+                    }
+                }),
+            })
+            .collect();
+        value["tool_calls"] = serde_json::Value::Array(calls);
+    }
+    if turn.role == Role::Tool {
+        match api {
+            Api::OpenAiCompatible => {
+                value["tool_call_id"] =
+                    serde_json::Value::String(turn.tool_call_id.clone().unwrap_or_default());
+            }
+            // Ollama names the tool instead: it never issued an id to quote.
+            _ => {
+                if let Some(name) = &turn.name {
+                    value["tool_name"] = serde_json::Value::String(name.clone());
+                }
+            }
+        }
+    }
+    value
+}
+
+fn tools_json(tools: &[ToolDef]) -> serde_json::Value {
+    serde_json::Value::Array(tools.iter().map(ToolDef::wire).collect())
 }
 
 fn ollama_body(req: &GenerateRequest) -> serde_json::Value {
@@ -367,17 +537,20 @@ fn ollama_body(req: &GenerateRequest) -> serde_json::Value {
     }
     let mut body = serde_json::json!({
         "model": req.model,
-        "messages": messages(req),
+        "messages": messages(req, Api::Ollama),
         "stream": true,
     });
     if !options.is_empty() {
         body["options"] = serde_json::Value::Object(options);
     }
+    if !req.tools.is_empty() {
+        body["tools"] = tools_json(&req.tools);
+    }
     body
 }
 
 fn openai_body(req: &GenerateRequest) -> serde_json::Value {
-    let messages = messages(req);
+    let messages = messages(req, Api::OpenAiCompatible);
     let mut body = serde_json::json!({
         "model": req.model,
         "messages": messages,
@@ -389,13 +562,103 @@ fn openai_body(req: &GenerateRequest) -> serde_json::Value {
     if let Some(n) = req.max_tokens {
         body["max_tokens"] = n.into();
     }
+    if !req.tools.is_empty() {
+        body["tools"] = tools_json(&req.tools);
+        // Let the model decide; evo never insists on a particular tool.
+        body["tool_choice"] = serde_json::Value::String("auto".to_owned());
+    }
     body
 }
 
-#[derive(Debug, PartialEq)]
+/// Part of one tool call, as OpenAI streams them: fragments identified by
+/// position in the call list, with the arguments arriving a few characters at
+/// a time.
+#[derive(Debug, Default, PartialEq)]
+pub struct ToolCallFragment {
+    pub index: usize,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub arguments: String,
+}
+
+/// Tool calls being assembled from fragments.
+#[derive(Debug, Default)]
+pub struct PendingCalls {
+    /// Keyed by the index the dialect gave, so calls come out in the order the
+    /// model asked for them however the fragments interleave.
+    calls: std::collections::BTreeMap<usize, PendingCall>,
+}
+
+#[derive(Debug, Default)]
+struct PendingCall {
+    id: Option<String>,
+    name: String,
+    arguments: String,
+}
+
+impl PendingCalls {
+    pub fn add(&mut self, fragment: &ToolCallFragment) {
+        let call = self.calls.entry(fragment.index).or_default();
+        // The id and name arrive once, in the first fragment of a call; later
+        // fragments repeat neither, and must not blank them.
+        if let Some(id) = &fragment.id
+            && !id.is_empty()
+        {
+            call.id = Some(id.clone());
+        }
+        if let Some(name) = &fragment.name
+            && !name.is_empty()
+        {
+            call.name.push_str(name);
+        }
+        call.arguments.push_str(&fragment.arguments);
+    }
+
+    /// The finished calls. Arguments that do not parse become `{}`: a tool
+    /// that is asked for with nonsense arguments should fail in the tool, with
+    /// a message the model can read, rather than take the whole answer down.
+    pub fn finish(self) -> Vec<ToolCall> {
+        self.calls
+            .into_values()
+            .filter(|call| !call.name.is_empty())
+            .map(|call| ToolCall {
+                id: call.id,
+                ..ToolCall::new(call.name, parse_arguments(&call.arguments))
+            })
+            .collect()
+    }
+}
+
+/// Arguments as an object, whether the dialect sent an object or a string of
+/// JSON, and `{}` for anything else.
+fn parse_arguments(value: &str) -> serde_json::Value {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return serde_json::json!({});
+    }
+    match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(v) if v.is_object() => v,
+        _ => serde_json::json!({}),
+    }
+}
+
+/// The same, for a value that may already be parsed.
+fn arguments_of(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(_) => value.clone(),
+        serde_json::Value::String(s) => parse_arguments(s),
+        _ => serde_json::json!({}),
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
 pub struct Chunk {
     pub text: String,
     pub done: bool,
+    /// Calls that arrived complete (Ollama sends them in one piece).
+    pub tool_calls: Vec<ToolCall>,
+    /// Pieces of calls still being assembled (OpenAI streams them).
+    pub fragments: Vec<ToolCallFragment>,
 }
 
 /// One line of a streaming response. `None` for keep-alives, blank lines and
@@ -419,14 +682,16 @@ pub fn parse_chunk(api: Api, line: &str) -> Option<Chunk> {
             Some(Chunk {
                 text: text.to_owned(),
                 done: v["done"].as_bool().unwrap_or(false),
+                tool_calls: ollama_tool_calls(&v["message"]["tool_calls"]),
+                fragments: Vec::new(),
             })
         }
         Api::OpenAiCompatible => {
             let data = line.strip_prefix("data:")?.trim();
             if data == "[DONE]" {
                 return Some(Chunk {
-                    text: String::new(),
                     done: true,
+                    ..Default::default()
                 });
             }
             let v: serde_json::Value = serde_json::from_str(data).ok()?;
@@ -434,11 +699,59 @@ pub fn parse_chunk(api: Api, line: &str) -> Option<Chunk> {
             Some(Chunk {
                 text: delta.as_str().unwrap_or_default().to_owned(),
                 done: v["choices"][0]["finish_reason"].is_string(),
+                tool_calls: Vec::new(),
+                fragments: openai_fragments(&v["choices"][0]["delta"]["tool_calls"]),
             })
         }
         // The built-in model streams through a callback, not over the wire.
         Api::Builtin => None,
     }
+}
+
+/// Ollama's `message.tool_calls`: whole calls, arguments already an object.
+fn ollama_tool_calls(value: &serde_json::Value) -> Vec<ToolCall> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let function = &item["function"];
+            let name = function["name"].as_str()?;
+            if name.is_empty() {
+                return None;
+            }
+            Some(ToolCall {
+                id: item["id"].as_str().map(str::to_owned),
+                name: name.to_owned(),
+                arguments: arguments_of(&function["arguments"]),
+            })
+        })
+        .collect()
+}
+
+/// OpenAI's `delta.tool_calls`: fragments, keyed by index.
+fn openai_fragments(value: &serde_json::Value) -> Vec<ToolCallFragment> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .enumerate()
+        .map(|(position, item)| {
+            let function = &item["function"];
+            ToolCallFragment {
+                // A server that omits the index has one call per delta.
+                index: item["index"].as_u64().map_or(position, |i| i as usize),
+                id: item["id"].as_str().map(str::to_owned),
+                name: function["name"].as_str().map(str::to_owned),
+                arguments: function["arguments"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+            }
+        })
+        .collect()
 }
 
 pub fn parse_model_list(api: Api, body: &str) -> Vec<String> {
@@ -470,10 +783,19 @@ mod tests {
         GenerateRequest {
             model: "m".into(),
             prompt: prompt.into(),
-            system: None,
-            history: Vec::new(),
-            temperature: None,
-            max_tokens: None,
+            ..Default::default()
+        }
+    }
+
+    fn weather_tool() -> ToolDef {
+        ToolDef {
+            name: "get_weather".into(),
+            description: "Look up the weather in a city".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            }),
         }
     }
 
@@ -696,14 +1018,15 @@ mod tests {
         req.history = vec![ChatMessage::new(Role::User, "hello")];
 
         let mut streamed = Vec::new();
-        let text = backend
+        let outcome = backend
             .generate(&req, &mut |chunk: &str| {
                 streamed.push(chunk.to_owned());
                 ControlFlow::Continue(())
             })
             .expect("a completion");
 
-        assert_eq!(text, "The alarm panel. [p.3]");
+        assert_eq!(outcome.text, "The alarm panel. [p.3]");
+        assert!(outcome.tool_calls.is_empty());
         assert_eq!(streamed, ["The alarm ", "panel. [p.3]"]);
 
         let (request_line, body) = server.join().expect("the server thread");
@@ -793,5 +1116,334 @@ mod tests {
                 role
             );
         }
+    }
+
+    // --- tools -----------------------------------------------------------
+
+    #[test]
+    fn a_request_without_tools_says_nothing_about_them() {
+        for body in [ollama_body(&request("p")), openai_body(&request("p"))] {
+            assert!(body.get("tools").is_none(), "{body}");
+            assert!(body.get("tool_choice").is_none(), "{body}");
+        }
+    }
+
+    #[test]
+    fn tools_are_offered_in_the_shape_each_dialect_wants() {
+        let mut req = request("what is the weather in London?");
+        req.tools = vec![weather_tool()];
+
+        for (api, body) in [
+            (Api::Ollama, ollama_body(&req)),
+            (Api::OpenAiCompatible, openai_body(&req)),
+        ] {
+            let tools = body["tools"].as_array().expect("an array");
+            assert_eq!(tools.len(), 1);
+            assert_eq!(tools[0]["type"], "function");
+            assert_eq!(tools[0]["function"]["name"], "get_weather");
+            assert_eq!(
+                tools[0]["function"]["description"],
+                "Look up the weather in a city"
+            );
+            assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
+            // Only OpenAI takes a choice, and evo never insists.
+            match api {
+                Api::OpenAiCompatible => assert_eq!(body["tool_choice"], "auto"),
+                _ => assert!(body.get("tool_choice").is_none()),
+            }
+        }
+    }
+
+    /// A tool round trip in the history: the assistant asked, the tool
+    /// answered. OpenAI threads an id through both; Ollama names the tool.
+    #[test]
+    fn a_finished_tool_round_trip_serializes_per_dialect() {
+        let call = ToolCall {
+            id: Some("call_1".into()),
+            name: "get_weather".into(),
+            arguments: serde_json::json!({"city": "London"}),
+        };
+        let mut req = request("");
+        req.history = vec![
+            ChatMessage::new(Role::User, "weather in London?"),
+            ChatMessage::calling("", vec![call.clone()]),
+            ChatMessage::tool_result(&call, "17°C and raining"),
+        ];
+
+        let body = openai_body(&req);
+        let messages = body["messages"].as_array().expect("an array");
+        assert_eq!(messages.len(), 3, "an empty prompt adds no message");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(messages[1]["tool_calls"][0]["type"], "function");
+        // OpenAI carries the arguments as a string of JSON, not an object.
+        assert_eq!(
+            messages[1]["tool_calls"][0]["function"]["arguments"],
+            r#"{"city":"London"}"#
+        );
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "call_1");
+        assert_eq!(messages[2]["content"], "17°C and raining");
+
+        let body = ollama_body(&req);
+        let messages = body["messages"].as_array().expect("an array");
+        assert_eq!(
+            messages[1]["tool_calls"][0]["function"]["name"],
+            "get_weather"
+        );
+        // Ollama wants an object, and issues no id to quote back.
+        assert_eq!(
+            messages[1]["tool_calls"][0]["function"]["arguments"]["city"],
+            "London"
+        );
+        assert!(messages[1]["tool_calls"][0].get("id").is_none());
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_name"], "get_weather");
+        assert!(messages[2].get("tool_call_id").is_none());
+    }
+
+    #[test]
+    fn ollama_sends_a_tool_call_in_one_piece() {
+        let line = r#"{"message":{"content":"","tool_calls":[{"function":
+            {"name":"get_weather","arguments":{"city":"London"}}}]},"done":false}"#;
+        let chunk = parse_chunk(Api::Ollama, line).expect("a chunk");
+        assert!(chunk.text.is_empty());
+        assert!(chunk.fragments.is_empty());
+        assert_eq!(chunk.tool_calls.len(), 1);
+        assert_eq!(chunk.tool_calls[0].name, "get_weather");
+        assert_eq!(chunk.tool_calls[0].arguments["city"], "London");
+        assert!(chunk.tool_calls[0].id.is_none());
+    }
+
+    /// Some builds hand back the arguments as a string, and some attach an id.
+    #[test]
+    fn ollama_tolerates_string_arguments_and_an_id() {
+        let line = r#"{"message":{"tool_calls":[{"id":"abc","function":
+            {"name":"get_weather","arguments":"{\"city\":\"Oslo\"}"}}]},"done":true}"#;
+        let chunk = parse_chunk(Api::Ollama, line).expect("a chunk");
+        assert_eq!(chunk.tool_calls[0].id.as_deref(), Some("abc"));
+        assert_eq!(chunk.tool_calls[0].arguments["city"], "Oslo");
+        assert!(chunk.done);
+
+        // Nonsense arguments become an empty object rather than a failure.
+        let line = r#"{"message":{"tool_calls":[{"function":
+            {"name":"get_weather","arguments":"not json"}}]},"done":true}"#;
+        let chunk = parse_chunk(Api::Ollama, line).expect("a chunk");
+        assert_eq!(chunk.tool_calls[0].arguments, serde_json::json!({}));
+
+        // A call with no name is not a call.
+        let line = r#"{"message":{"tool_calls":[{"function":{"arguments":{}}}]},"done":true}"#;
+        assert!(
+            parse_chunk(Api::Ollama, line)
+                .expect("a chunk")
+                .tool_calls
+                .is_empty()
+        );
+    }
+
+    /// OpenAI's fragments are the fiddly part: an id and a name once, then the
+    /// arguments a few characters at a time, possibly for several calls at
+    /// once. Each row is a captured stream and what it must add up to.
+    #[test]
+    fn openai_tool_call_fragments_accumulate_into_whole_calls() {
+        struct Case {
+            name: &'static str,
+            lines: &'static [&'static str],
+            want: Vec<ToolCall>,
+            want_text: &'static str,
+        }
+
+        let cases = vec![
+            Case {
+                name: "one call, arguments in pieces",
+                lines: &[
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"get_weather","arguments":""}}]}}]}"#,
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"ci"}}]}}]}"#,
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ty\": \"Lon"}}]}}]}"#,
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"don\"}"}}]}}]}"#,
+                    r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+                ],
+                want: vec![ToolCall {
+                    id: Some("call_a".into()),
+                    name: "get_weather".into(),
+                    arguments: serde_json::json!({"city": "London"}),
+                }],
+                want_text: "",
+            },
+            Case {
+                name: "two calls interleaved by index",
+                lines: &[
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"first","arguments":"{\"x\":"}}]}}]}"#,
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"second","arguments":"{\"y\":"}}]}}]}"#,
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"2}"}}]}}]}"#,
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1}"}}]}}]}"#,
+                    r#"data: [DONE]"#,
+                ],
+                want: vec![
+                    ToolCall {
+                        id: Some("a".into()),
+                        name: "first".into(),
+                        arguments: serde_json::json!({"x": 1}),
+                    },
+                    ToolCall {
+                        id: Some("b".into()),
+                        name: "second".into(),
+                        arguments: serde_json::json!({"y": 2}),
+                    },
+                ],
+                want_text: "",
+            },
+            Case {
+                name: "text first, then a call",
+                lines: &[
+                    r#"data: {"choices":[{"delta":{"content":"Let me look. "}}]}"#,
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c","function":{"name":"get_weather","arguments":"{}"}}]}}]}"#,
+                    r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+                ],
+                want: vec![ToolCall {
+                    id: Some("c".into()),
+                    name: "get_weather".into(),
+                    arguments: serde_json::json!({}),
+                }],
+                want_text: "Let me look. ",
+            },
+            Case {
+                name: "arguments never finish, so they are empty rather than wrong",
+                lines: &[
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"d","function":{"name":"get_weather","arguments":"{\"city\": \"Lon"}}]}}]}"#,
+                    r#"data: [DONE]"#,
+                ],
+                want: vec![ToolCall {
+                    id: Some("d".into()),
+                    name: "get_weather".into(),
+                    arguments: serde_json::json!({}),
+                }],
+                want_text: "",
+            },
+            Case {
+                name: "a name split across fragments",
+                lines: &[
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"e","function":{"name":"get_","arguments":""}}]}}]}"#,
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"weather","arguments":"{}"}}]}}]}"#,
+                    r#"data: [DONE]"#,
+                ],
+                want: vec![ToolCall {
+                    id: Some("e".into()),
+                    name: "get_weather".into(),
+                    arguments: serde_json::json!({}),
+                }],
+                want_text: "",
+            },
+            Case {
+                name: "no index: one call per delta",
+                lines: &[
+                    r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"f","function":{"name":"only","arguments":"{\"n\":1}"}}]}}]}"#,
+                    r#"data: [DONE]"#,
+                ],
+                want: vec![ToolCall {
+                    id: Some("f".into()),
+                    name: "only".into(),
+                    arguments: serde_json::json!({"n": 1}),
+                }],
+                want_text: "",
+            },
+            Case {
+                name: "plain answer, no calls at all",
+                lines: &[
+                    r#"data: {"choices":[{"delta":{"content":"17°C."}}]}"#,
+                    r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+                ],
+                want: Vec::new(),
+                want_text: "17°C.",
+            },
+        ];
+
+        for case in cases {
+            let mut pending = PendingCalls::default();
+            let mut text = String::new();
+            for line in case.lines {
+                let Some(chunk) = parse_chunk(Api::OpenAiCompatible, line) else {
+                    panic!("{}: {line} did not parse", case.name);
+                };
+                text.push_str(&chunk.text);
+                for fragment in &chunk.fragments {
+                    pending.add(fragment);
+                }
+                assert!(
+                    chunk.tool_calls.is_empty(),
+                    "{}: this dialect streams fragments",
+                    case.name
+                );
+            }
+            assert_eq!(text, case.want_text, "{}", case.name);
+            assert_eq!(pending.finish(), case.want, "{}", case.name);
+        }
+    }
+
+    /// The whole way through the backend, not just the parser: fragments over
+    /// the wire come back as one finished call.
+    #[test]
+    fn the_openai_backend_returns_an_accumulated_tool_call() {
+        let reply = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"One moment. \"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\
+             \"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":\
+             {\"arguments\":\"{\\\"city\\\": \\\"London\\\"}\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let (url, server) = serve_once(reply);
+        let backend = ModelConfig {
+            api: Api::OpenAiCompatible,
+            base_url: url,
+            model: "m".into(),
+            timeout_secs: 10,
+            ..Default::default()
+        }
+        .build();
+
+        let mut req = request("weather in London?");
+        req.tools = vec![weather_tool()];
+        let outcome = backend
+            .generate(&req, &mut |_: &str| ControlFlow::Continue(()))
+            .expect("a completion");
+
+        assert_eq!(outcome.text, "One moment. ");
+        assert_eq!(outcome.tool_calls.len(), 1);
+        assert_eq!(outcome.tool_calls[0].name, "get_weather");
+        assert_eq!(outcome.tool_calls[0].arguments["city"], "London");
+        assert_eq!(outcome.tool_calls[0].id.as_deref(), Some("call_1"));
+
+        let (request_line, body) = server.join().expect("the server thread");
+        assert_eq!(request_line, "POST /v1/chat/completions HTTP/1.1");
+        let sent: serde_json::Value = serde_json::from_str(&body).expect("json body");
+        assert_eq!(sent["tools"][0]["function"]["name"], "get_weather");
+        assert_eq!(sent["tool_choice"], "auto");
+    }
+
+    /// Transcripts saved before tool calling must still load, and a message
+    /// with no tools must not grow empty fields in storage.
+    #[test]
+    fn stored_messages_predating_tools_still_load() {
+        let old = r#"{"role":"assistant","content":"A report. [p.1]"}"#;
+        let message: ChatMessage = serde_json::from_str(old).expect("deserialize");
+        assert_eq!(message.content, "A report. [p.1]");
+        assert!(message.tool_calls.is_empty());
+        assert!(message.tool_call_id.is_none() && message.name.is_none());
+
+        let written = serde_json::to_string(&message).expect("serialize");
+        assert_eq!(written, old, "nothing empty is written out");
+
+        let call = ToolCall::new("get_weather", serde_json::json!({"city": "Oslo"}));
+        let calling = ChatMessage::calling("", vec![call.clone()]);
+        let round: ChatMessage =
+            serde_json::from_str(&serde_json::to_string(&calling).expect("serialize"))
+                .expect("deserialize");
+        assert_eq!(round, calling);
+
+        let result = ChatMessage::tool_result(&call, "17°C");
+        assert_eq!(result.role, Role::Tool);
+        assert_eq!(result.name.as_deref(), Some("get_weather"));
     }
 }

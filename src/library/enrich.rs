@@ -339,9 +339,9 @@ pub fn describe(
             model: config.model.clone(),
             prompt: user_prompt(title, text, attempt > 0),
             system: Some(SYSTEM_PROMPT.to_owned()),
-            history: Vec::new(),
             temperature: Some(TEMPERATURE),
             max_tokens: Some(MAX_TOKENS),
+            ..Default::default()
         };
         let mut on_token = |_: &str| {
             if keep_going() {
@@ -350,7 +350,7 @@ pub fn describe(
                 ControlFlow::Break(())
             }
         };
-        let reply = backend.generate(&request, &mut on_token)?;
+        let reply = backend.generate(&request, &mut on_token)?.text;
         match parse_enrichment(&reply) {
             Some(enrichment) => return Ok(enrichment),
             None => {

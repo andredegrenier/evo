@@ -12,6 +12,7 @@
 //! quoted pages -- each question retrieves afresh, so a conversation does not
 //! drag every page it ever touched along behind it.
 
+pub mod agent;
 pub mod retrieval;
 
 use std::ops::ControlFlow;
@@ -174,6 +175,9 @@ fn answer(
         prompt: retrieval::user_prompt(&job.title, &context, &job.question),
         system: Some(retrieval::system_prompt(&job.title)),
         history: job.history.clone(),
+        // No tools yet: the panel answers from the quoted pages alone. The
+        // loop is still the way through, so there is one path to keep working.
+        tools: Vec::new(),
         temperature: Some(TEMPERATURE),
         max_tokens: None,
     };
@@ -199,8 +203,20 @@ fn answer(
     };
 
     let pages: Vec<usize> = selected.iter().map(|p| p + 1).collect();
-    match backend.generate(&request, &mut on_token) {
-        Ok(text) => Ok(Answer { text, pages }),
+    let result = agent::run_agent(
+        backend.as_ref(),
+        request,
+        // Nothing is on offer, so nothing can be asked for.
+        &mut |call| Err(format!("evo has no tool called “{}”", call.name)),
+        agent::MAX_ITERATIONS,
+        &mut on_token,
+        cancel,
+    );
+    match result {
+        Ok(outcome) => Ok(Answer {
+            text: outcome.text,
+            pages,
+        }),
         Err(e) => {
             // A cancelled request still produced whatever had arrived; throwing
             // it away would be a worse answer to "stop" than keeping it.
