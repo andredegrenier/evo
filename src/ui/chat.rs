@@ -25,6 +25,13 @@ pub struct ChatSessionState {
     pub error: Option<String>,
     /// Pages the last answer was allowed to quote, 1-based.
     pub last_pages: Vec<usize>,
+    /// Tools the last answer ran, in order.
+    pub last_tools: Vec<String>,
+    /// Whether this conversation may use the MCP servers in Preferences.
+    ///
+    /// Off by default, and per panel: letting a model reach other programs is
+    /// a decision about this conversation, not a setting made once.
+    pub allow_tools: bool,
     /// Ask the input box for the keyboard on the next frame.
     pub focus_pending: bool,
 }
@@ -105,6 +112,7 @@ pub fn show(
     ui: &mut egui::Ui,
     dc: &mut DocState,
     engine: Option<&ChatEngine>,
+    tools_configured: bool,
 ) -> Option<ChatAction> {
     let mut action = None;
     let running = match (engine, dc.chat.doc_key.as_deref()) {
@@ -168,11 +176,23 @@ pub fn show(
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new("Answers come from this document")
-                        .weak()
-                        .small(),
-                );
+                if tools_configured {
+                    ui.checkbox(
+                        &mut dc.chat.allow_tools,
+                        egui::RichText::new("Allow tools").small(),
+                    )
+                    .on_hover_text(
+                        "Let the model use the MCP servers in Preferences ▸ MCP \
+                             while answering. Off by default; what it runs is \
+                             listed as it happens.",
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new("Answers come from this document")
+                            .weak()
+                            .small(),
+                    );
+                }
             });
         });
         ui.add_space(2.0);
@@ -199,14 +219,17 @@ pub fn show(
                 }
             }
             if !dc.chat.last_pages.is_empty() && !running {
-                ui.label(
-                    egui::RichText::new(format!("Read {}", page_list(&dc.chat.last_pages)))
-                        .weak()
-                        .small(),
-                );
+                let mut line = format!("Read {}", page_list(&dc.chat.last_pages));
+                if !dc.chat.last_tools.is_empty() {
+                    line.push_str(&format!(" · ran {}", dc.chat.last_tools.join(", ")));
+                }
+                ui.label(egui::RichText::new(line).weak().small());
             }
             if running && let Some(engine) = engine {
                 engine.with_status(|status| {
+                    for line in &status.activity {
+                        ui.label(egui::RichText::new(line).weak().small().monospace());
+                    }
                     if let Some(stage) = status.stage {
                         ui.add_space(6.0);
                         ui.label(egui::RichText::new(stage).weak());
@@ -375,7 +398,7 @@ mod tests {
         };
         let _ = ctx.run_ui(input, |ui| {
             action = egui::Panel::right("chat")
-                .show(ui, |ui| show(ui, &mut dc, None))
+                .show(ui, |ui| show(ui, &mut dc, None, true))
                 .inner;
         });
 
@@ -384,6 +407,36 @@ mod tests {
         assert!(action.is_none());
         assert!(dc.chat.open);
         assert_eq!(dc.chat.messages.len(), 2);
+    }
+
+    /// The toggle only appears when there is something to allow, and drawing
+    /// the panel must never turn it on by itself.
+    #[test]
+    fn tools_are_not_allowed_until_the_box_is_ticked() {
+        let ctx = egui::Context::default();
+        let bytes = std::fs::read("tests/fixtures/sample.pdf").expect("fixture");
+        let doc = crate::doc::Document::load_bytes(bytes, None).expect("load");
+        let mut dc = DocState::new(doc, &ctx);
+        dc.chat.open = true;
+        assert!(!dc.chat.allow_tools, "off by default");
+
+        for configured in [false, true] {
+            let ctx = egui::Context::default();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(900.0, 700.0),
+                )),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                egui::Panel::right("chat").show(ui, |ui| show(ui, &mut dc, None, configured));
+            });
+            assert!(
+                !dc.chat.allow_tools,
+                "drawing the panel must not grant tools (configured: {configured})"
+            );
+        }
     }
 
     #[test]

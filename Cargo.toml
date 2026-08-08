@@ -21,11 +21,19 @@ hayro-svg = "0.7"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 llama-cpp-2 = { version = "=0.1.154", default-features = false, optional = true }
 lopdf = "0.44"
-mlua = { version = "0.12.0", features = ["lua54", "vendored"] }
+mlua = { version = "0.12.0", features = ["lua54", "vendored", "serialize"] }
 ocrs = "0.12.2"
 redb = "4.1.0"
 rfd = "0.17"
-rmcp = { version = "3.1", features = ["server", "macros", "schemars", "transport-streamable-http-server", "transport-io"] }
+rmcp = { version = "3.1", features = [
+    "server",
+    "client",
+    "macros",
+    "schemars",
+    "transport-streamable-http-server",
+    "transport-io",
+    "transport-child-process",
+]  }
 rten = "0.24.0"
 schemars = "1"
 serde = { version = "1.0.229", features = ["derive"] }

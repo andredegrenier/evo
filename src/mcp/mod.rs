@@ -15,12 +15,33 @@
 //! halfway through a frame.
 
 pub mod bridge;
+pub mod client;
 pub mod headless;
 pub mod library_tools;
 pub mod runtime;
 pub mod server;
 
 use serde::{Deserialize, Serialize};
+
+/// What a chat turn or a script run is allowed to reach on other MCP servers.
+///
+/// A trait rather than the concrete client so that "no access" is a type the
+/// caller cannot accidentally have -- the Lua sandbox holds an `Option` of this
+/// and refuses when it is `None` -- and so the tests can grant a fake one.
+pub trait McpAccess: Send + Sync {
+    /// Every tool on every configured server. A server that will not start is
+    /// left out rather than reported: one broken entry is not a reason to have
+    /// no tools.
+    fn tools(&self) -> Vec<client::RemoteTool>;
+
+    /// Run one tool. `Err` is what the *model* or the script reads.
+    fn call(
+        &self,
+        server: &str,
+        tool: &str,
+        arguments: serde_json::Value,
+    ) -> Result<String, String>;
+}
 
 /// The port evo offers by default. Not registered with anyone; picked to be
 /// out of the way of the usual local model servers.
@@ -40,6 +61,9 @@ pub struct McpPrefs {
     /// mean something.
     #[serde(default = "new_token")]
     pub token: String,
+    /// MCP servers evo may itself start and use, for chat and scripts.
+    #[serde(default)]
+    pub clients: Vec<client::ClientEntry>,
 }
 
 fn default_port() -> u16 {
@@ -52,6 +76,7 @@ impl Default for McpPrefs {
             server_enabled: false,
             port: DEFAULT_PORT,
             token: new_token(),
+            clients: Vec::new(),
         }
     }
 }

@@ -17,6 +17,11 @@ pub struct ScriptsState {
     dir_error: Option<String>,
     /// Documents from the last run, offered for opening.
     pub produced: Vec<GeneratedDoc>,
+    /// Whether this run may reach the MCP servers in Preferences.
+    ///
+    /// Off by default and reset whenever the script changes: consent is given
+    /// to a particular script, and a different one has not been read.
+    allow_mcp: bool,
 }
 
 /// What the app shell should do after the window is drawn.
@@ -24,6 +29,8 @@ pub enum ScriptsAction {
     Run {
         name: String,
         source: String,
+        /// The user ticked "Allow MCP" for this run.
+        allow_mcp: bool,
     },
     Cancel,
     /// Open a generated document in the editor.
@@ -41,6 +48,15 @@ impl ScriptsState {
         self.listed = false;
     }
 
+    /// Pick a script. Consent does not carry over: it was given to the script
+    /// the user had read, not to whatever is selected next.
+    fn select(&mut self, script: Option<PathBuf>) {
+        if self.selected != script {
+            self.allow_mcp = false;
+        }
+        self.selected = script;
+    }
+
     fn reload(&mut self) {
         self.listed = true;
         let Some(dir) = crate::script::scripts_dir() else {
@@ -56,7 +72,7 @@ impl ScriptsState {
                     .as_ref()
                     .is_none_or(|s| !self.scripts.contains(s))
                 {
-                    self.selected = self.scripts.first().cloned();
+                    self.select(self.scripts.first().cloned());
                 }
             }
             Err(e) => self.dir_error = Some(format!("Could not open {}: {e}", dir.display())),
@@ -127,7 +143,12 @@ fn body(
                 let scripts = st.scripts.clone();
                 for path in scripts {
                     let name = display_name(&path);
-                    ui.selectable_value(&mut st.selected, Some(path), name);
+                    if ui
+                        .selectable_label(st.selected.as_ref() == Some(&path), name)
+                        .clicked()
+                    {
+                        st.select(Some(path));
+                    }
                 }
             });
 
@@ -146,6 +167,7 @@ fn body(
                         action = Some(ScriptsAction::Run {
                             name: display_name(&path),
                             source,
+                            allow_mcp: st.allow_mcp,
                         });
                     }
                     Err(e) => st.dir_error = Some(format!("Could not read the script: {e}")),
@@ -168,6 +190,15 @@ fn body(
         {
             action = Some(ScriptsAction::RevealFolder(dir));
         }
+    });
+
+    ui.add_space(4.0);
+    ui.add_enabled_ui(!running, |ui| {
+        ui.checkbox(&mut st.allow_mcp, "Allow MCP").on_hover_text(
+            "Let this run use the MCP servers in Preferences ▸ MCP. Scripts \
+                 are otherwise sealed off from everything but the model, and \
+                 this is unticked again whenever you pick a different script.",
+        );
     });
 
     ui.add_space(8.0);
@@ -234,6 +265,31 @@ fn display_name(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Consent is given to a script, having read it. Picking a different one
+    /// takes it back -- otherwise a tick on a script the user vouched for would
+    /// silently cover whatever they opened next.
+    #[test]
+    fn choosing_another_script_takes_the_mcp_consent_back() {
+        let mut st = ScriptsState::default();
+        let first = PathBuf::from("/scripts/a.lua");
+        let second = PathBuf::from("/scripts/b.lua");
+
+        st.select(Some(first.clone()));
+        assert!(!st.allow_mcp, "consent starts off");
+
+        st.allow_mcp = true;
+        // Re-picking the same script is not a change, so the tick stands.
+        st.select(Some(first));
+        assert!(st.allow_mcp);
+
+        st.select(Some(second));
+        assert!(!st.allow_mcp, "a different script has not been vouched for");
+
+        st.allow_mcp = true;
+        st.select(None);
+        assert!(!st.allow_mcp, "and neither has no script at all");
+    }
 
     #[test]
     fn a_script_is_shown_by_its_filename() {

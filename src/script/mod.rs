@@ -95,6 +95,9 @@ struct Job {
     source: String,
     doc: Option<DocSnapshot>,
     prefs: ScriptPrefs,
+    /// The MCP servers this run may use, if the user ticked the box for it.
+    /// `None` is the ordinary case and the default.
+    mcp: Option<Arc<dyn crate::mcp::McpAccess>>,
 }
 
 pub struct ScriptEngine {
@@ -120,7 +123,14 @@ impl ScriptEngine {
         Self { tx, status, cancel }
     }
 
-    pub fn run(&self, name: String, source: String, doc: Option<DocSnapshot>, prefs: ScriptPrefs) {
+    pub fn run(
+        &self,
+        name: String,
+        source: String,
+        doc: Option<DocSnapshot>,
+        prefs: ScriptPrefs,
+        mcp: Option<Arc<dyn crate::mcp::McpAccess>>,
+    ) {
         self.cancel.store(false, Ordering::Relaxed);
         {
             let mut status = self.status.lock().unwrap();
@@ -133,6 +143,7 @@ impl ScriptEngine {
             source,
             doc,
             prefs,
+            mcp,
         });
     }
 
@@ -167,6 +178,7 @@ fn worker(
             &job.source,
             job.doc,
             &job.prefs,
+            job.mcp.clone(),
             &status,
             &cancel,
             deadline,

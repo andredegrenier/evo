@@ -8,10 +8,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use eframe::egui;
-use mlua::{HookTriggers, Lua, LuaOptions, StdLib, Table, Value, VmState};
+use mlua::{HookTriggers, Lua, LuaOptions, LuaSerdeExt, StdLib, Table, Value, VmState};
 
 use super::model::{GenerateRequest, ModelBackend};
 use super::{DocSnapshot, GeneratedDoc, ScriptPrefs, ScriptStatus, docgen};
+use crate::mcp::McpAccess;
+
+/// What a script is told when it reaches for MCP without being given it.
+///
+/// The wording names the switch, because the answer to "I need this" is a tick
+/// box the user has to find, not something the script can arrange for itself.
+pub const NOT_GRANTED: &str = "MCP access was not granted for this run — tick \u{201c}Allow MCP\u{201d} in the Scripts window";
 
 /// Scripts are user-authored but shareable, so the VM gets no filesystem, no
 /// process control and no loader. Everything it can reach is on the `evo`
@@ -31,6 +38,9 @@ const MEMORY_LIMIT: usize = 256 * 1024 * 1024;
 struct RunCtx {
     doc: Option<DocSnapshot>,
     backend: Box<dyn ModelBackend>,
+    /// The MCP servers this run may reach. `None` -- the default, and what a
+    /// run gets unless the user ticked the box -- makes `evo.mcp` refuse.
+    mcp: Option<Arc<dyn McpAccess>>,
     status: Arc<Mutex<ScriptStatus>>,
     cancel: Arc<AtomicBool>,
     ctx: egui::Context,
@@ -47,6 +57,13 @@ impl RunCtx {
 
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// The MCP access this run was given, or the reason it has none.
+    fn granted(&self) -> mlua::Result<&Arc<dyn McpAccess>> {
+        self.mcp
+            .as_ref()
+            .ok_or_else(|| mlua::Error::runtime(NOT_GRANTED))
     }
 
     /// Page text, extracted from the snapshot on the worker thread. The UI
@@ -71,6 +88,7 @@ pub fn run(
     source: &str,
     doc: Option<DocSnapshot>,
     prefs: &ScriptPrefs,
+    mcp: Option<Arc<dyn McpAccess>>,
     status: &Arc<Mutex<ScriptStatus>>,
     cancel: &Arc<AtomicBool>,
     deadline: Instant,
@@ -102,6 +120,7 @@ pub fn run(
     let run = Rc::new(RunCtx {
         doc,
         backend: prefs.model.build(),
+        mcp,
         status: status.clone(),
         cancel: cancel.clone(),
         ctx: ctx.clone(),
@@ -144,6 +163,9 @@ fn install(lua: &Lua, run: &Rc<RunCtx>) -> mlua::Result<()> {
 
     evo.set("doc", doc_table(lua, run)?)?;
     evo.set("model", model_table(lua, run)?)?;
+    // Always installed, granted or not: a script that asks gets a sentence
+    // telling it what to do, rather than "attempt to index a nil value".
+    evo.set("mcp", mcp_table(lua, run)?)?;
 
     let r = run.clone();
     evo.set(
@@ -278,6 +300,62 @@ fn model_table(lua: &Lua, run: &Rc<RunCtx>) -> mlua::Result<Table> {
     Ok(model)
 }
 
+/// `evo.mcp`: the tools other MCP servers offer, when this run was allowed
+/// them.
+fn mcp_table(lua: &Lua, run: &Rc<RunCtx>) -> mlua::Result<Table> {
+    let mcp = lua.create_table()?;
+
+    let r = run.clone();
+    mcp.set(
+        "tools",
+        lua.create_function(move |lua, ()| {
+            let access = r.granted()?;
+            let listed: Vec<serde_json::Value> = access
+                .tools()
+                .iter()
+                .map(|tool| {
+                    serde_json::json!({
+                        "server": tool.server,
+                        "name": tool.tool,
+                        "description": tool.def.description,
+                        "parameters": tool.def.parameters,
+                    })
+                })
+                .collect();
+            lua.to_value(&listed)
+        })?,
+    )?;
+
+    let r = run.clone();
+    mcp.set(
+        "call",
+        lua.create_function(
+            move |lua, (server, tool, args): (String, String, Option<Table>)| {
+                let access = r.granted()?;
+                let arguments = match args {
+                    Some(table) => normalize_arguments(lua.from_value(Value::Table(table))?),
+                    None => serde_json::Value::Null,
+                };
+                r.log(format!("Calling {server}/{tool}…"));
+                access
+                    .call(&server, &tool, arguments)
+                    .map_err(mlua::Error::runtime)
+            },
+        )?,
+    )?;
+
+    Ok(mcp)
+}
+
+/// An empty Lua table is indistinguishable from an empty list, and comes back
+/// from serde as `[]`. A tool call with no arguments means an empty object.
+fn normalize_arguments(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) if items.is_empty() => serde_json::json!({}),
+        other => other,
+    }
+}
+
 struct Options {
     model: String,
     system: Option<String>,
@@ -348,10 +426,51 @@ mod tests {
         }
     }
 
+    /// An MCP grant that records what a script asked for, so a test can check
+    /// that a call arrived intact -- and that one never arrives when the grant
+    /// was withheld.
+    #[derive(Default)]
+    struct MockMcp {
+        calls: Mutex<Vec<(String, String, serde_json::Value)>>,
+    }
+
+    impl McpAccess for MockMcp {
+        fn tools(&self) -> Vec<crate::mcp::client::RemoteTool> {
+            vec![crate::mcp::client::RemoteTool {
+                server: "files".to_owned(),
+                tool: "read".to_owned(),
+                def: crate::script::model::ToolDef {
+                    name: "files__read".to_owned(),
+                    description: "Read a file".to_owned(),
+                    parameters: serde_json::json!({"type": "object"}),
+                },
+            }]
+        }
+
+        fn call(
+            &self,
+            server: &str,
+            tool: &str,
+            arguments: serde_json::Value,
+        ) -> Result<String, String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((server.to_owned(), tool.to_owned(), arguments));
+            if tool == "explode" {
+                return Err("the server said no".to_owned());
+            }
+            Ok("the file's contents".to_owned())
+        }
+    }
+
     struct Harness {
         status: Arc<Mutex<ScriptStatus>>,
         cancel: Arc<AtomicBool>,
         calls: Arc<AtomicUsize>,
+        /// What this run is allowed to reach. `None` is the default, and the
+        /// state every existing test runs in.
+        mcp: Option<Arc<MockMcp>>,
     }
 
     impl Harness {
@@ -360,6 +479,22 @@ mod tests {
                 status: Arc::new(Mutex::new(ScriptStatus::default())),
                 cancel: Arc::new(AtomicBool::new(false)),
                 calls: Arc::new(AtomicUsize::new(0)),
+                mcp: None,
+            }
+        }
+
+        /// The same harness with MCP granted, as ticking the box does.
+        fn with_mcp() -> Self {
+            Self {
+                mcp: Some(Arc::new(MockMcp::default())),
+                ..Self::new()
+            }
+        }
+
+        fn mcp_calls(&self) -> Vec<(String, String, serde_json::Value)> {
+            match &self.mcp {
+                Some(mcp) => mcp.calls.lock().unwrap().clone(),
+                None => Vec::new(),
             }
         }
 
@@ -394,6 +529,7 @@ mod tests {
                     reply: reply.to_owned(),
                     calls: self.calls.clone(),
                 }),
+                mcp: self.mcp.clone().map(|mcp| mcp as Arc<dyn McpAccess>),
                 status: self.status.clone(),
                 cancel: self.cancel.clone(),
                 ctx: egui::Context::default(),
@@ -574,6 +710,122 @@ mod tests {
             .expect("run");
         assert_eq!(docs.len(), 3);
         assert_eq!(docs[2].title, "Doc 3");
+    }
+
+    /// The default is no access. Both entry points have to refuse, and the
+    /// refusal has to name the switch: a script that is told "nil value" leaves
+    /// its author with nothing to do about it.
+    #[test]
+    fn without_consent_the_mcp_api_refuses_and_says_how_to_grant_it() {
+        let h = Harness::new();
+        for expr in [
+            "evo.mcp.tools()",
+            r#"evo.mcp.call("files", "read", { path = "/etc/passwd" })"#,
+        ] {
+            let err = h.run(expr).expect_err(&format!("{expr} should be refused"));
+            assert!(
+                err.contains("not granted"),
+                "{expr} should say it was not granted, but: {err}"
+            );
+            assert!(
+                err.contains("Allow MCP"),
+                "{expr} should name the switch, but: {err}"
+            );
+        }
+        assert!(
+            h.mcp_calls().is_empty(),
+            "nothing may reach a server without consent"
+        );
+    }
+
+    /// The table itself is always there, so a script can be written against it
+    /// and fail with a sentence rather than with "index a nil value".
+    #[test]
+    fn the_mcp_table_exists_even_when_access_was_withheld() {
+        let h = Harness::new();
+        h.run(r#"evo.log(type(evo.mcp) .. " " .. type(evo.mcp.call))"#)
+            .expect("run");
+        assert!(
+            h.log().contains(&"table function".to_owned()),
+            "{:?}",
+            h.log()
+        );
+    }
+
+    #[test]
+    fn with_consent_a_script_can_list_and_run_a_tool() {
+        let h = Harness::with_mcp();
+        h.run(
+            r#"
+            local tools = evo.mcp.tools()
+            evo.log(tools[1].server .. "/" .. tools[1].name)
+            local out = evo.mcp.call("files", "read", { path = "/tmp/x", lines = 3 })
+            evo.log(out)
+            "#,
+        )
+        .expect("run");
+        assert!(h.log().contains(&"files/read".to_owned()), "{:?}", h.log());
+        assert!(
+            h.log().contains(&"the file's contents".to_owned()),
+            "{:?}",
+            h.log()
+        );
+
+        // The arguments crossed from Lua to JSON as written.
+        let calls = h.mcp_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "files");
+        assert_eq!(calls[0].1, "read");
+        assert_eq!(calls[0].2["path"], "/tmp/x");
+        assert_eq!(calls[0].2["lines"], 3);
+    }
+
+    /// A call with no arguments is a call with an empty object, not with an
+    /// empty list: an empty Lua table is both, and only one of them is valid.
+    #[test]
+    fn a_call_without_arguments_sends_an_object() {
+        let h = Harness::with_mcp();
+        h.run(r#"evo.mcp.call("files", "read", {}); evo.mcp.call("files", "read")"#)
+            .expect("run");
+        let calls = h.mcp_calls();
+        assert!(calls[0].2.is_object(), "{:?}", calls[0].2);
+        assert!(calls[1].2.is_null(), "{:?}", calls[1].2);
+    }
+
+    /// A server's own failure is the script's to handle, so it arrives as an
+    /// ordinary Lua error that `pcall` can catch.
+    #[test]
+    fn a_failing_tool_is_an_error_the_script_can_catch() {
+        let h = Harness::with_mcp();
+        h.run(
+            r#"
+            local ok, err = pcall(function() evo.mcp.call("files", "explode", {}) end)
+            evo.log(tostring(ok) .. ": " .. tostring(err))
+            "#,
+        )
+        .expect("run");
+        let logged = h.log().join("\n");
+        assert!(logged.contains("false"), "{logged}");
+        assert!(logged.contains("the server said no"), "{logged}");
+    }
+
+    /// Consent to MCP is not consent to anything else: the rest of the sandbox
+    /// is exactly as tight with it as without.
+    #[test]
+    fn granting_mcp_does_not_open_the_filesystem() {
+        let h = Harness::with_mcp();
+        for expr in [
+            "io.open('/etc/passwd')",
+            "os.execute('id')",
+            "dofile('/etc/passwd')",
+            "loadfile('/etc/passwd')",
+        ] {
+            let err = h.run(expr).expect_err(&format!("{expr} should not work"));
+            assert!(
+                err.contains("nil value"),
+                "{expr} should still be a missing global, but: {err}"
+            );
+        }
     }
 
     #[test]

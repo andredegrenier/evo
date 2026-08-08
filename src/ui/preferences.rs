@@ -8,6 +8,7 @@ use crate::library::enrich::AssistantPrefs;
 use crate::llm;
 use crate::llm::download::Downloads;
 use crate::mcp::McpPrefs;
+use crate::mcp::client::{ClientEntry, McpClients, Probe};
 use crate::mcp::runtime::McpStatus;
 use crate::script::ScriptPrefs;
 use crate::script::model::Api;
@@ -59,8 +60,7 @@ pub fn show(
     scripts: &mut ScriptPrefs,
     assistant: &mut AssistantPrefs,
     downloads: &mut Downloads,
-    mcp: &mut McpPrefs,
-    mcp_status: Option<McpStatus>,
+    mcp: McpPane<'_>,
 ) -> bool {
     if !st.open {
         st.capturing = None;
@@ -70,6 +70,7 @@ pub fn show(
 
     let mut changed = false;
     let mut open = st.open;
+    let mut mcp = mcp;
     egui::Window::new("Preferences")
         .open(&mut open)
         .resizable(true)
@@ -96,7 +97,7 @@ pub fn show(
                 Tab::Ribbon => changed |= ribbon_tab(ui, ribbon),
                 Tab::Model => changed |= model_tab(ui, scripts, assistant, downloads),
                 Tab::Scripting => changed |= scripting_tab(ui, scripts),
-                Tab::Mcp => changed |= mcp_tab(ui, mcp, mcp_status.clone()),
+                Tab::Mcp => changed |= mcp_tab(ui, &mut mcp),
             }
         });
     st.open = open;
@@ -667,7 +668,17 @@ fn scripting_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs) -> bool {
 
 /// The MCP server: whether other programs on this machine may drive evo, and
 /// the token they have to present to do it.
-fn mcp_tab(ui: &mut egui::Ui, prefs: &mut McpPrefs, status: Option<McpStatus>) -> bool {
+/// Everything the MCP tab needs: what is configured, what the server is
+/// actually doing, and the client connections to test against.
+pub struct McpPane<'a> {
+    pub prefs: &'a mut McpPrefs,
+    pub server: Option<McpStatus>,
+    pub clients: &'a std::sync::Arc<McpClients>,
+}
+
+fn mcp_tab(ui: &mut egui::Ui, pane: &mut McpPane<'_>) -> bool {
+    let prefs = &mut *pane.prefs;
+    let status = pane.server.clone();
     let before = prefs.clone();
 
     ui.heading("MCP Server");
@@ -761,7 +772,112 @@ fn mcp_tab(ui: &mut egui::Ui, prefs: &mut McpPrefs, status: Option<McpStatus>) -
         .size(11.0),
     );
 
+    ui.add_space(14.0);
+    client_section(ui, prefs, pane.clients);
+
     *prefs != before
+}
+
+/// The other direction: MCP servers evo starts and uses itself.
+fn client_section(ui: &mut egui::Ui, prefs: &mut McpPrefs, clients: &std::sync::Arc<McpClients>) {
+    ui.separator();
+    ui.label(egui::RichText::new("Servers evo can use").strong());
+    ui.label(
+        egui::RichText::new(
+            "Programs evo starts and asks for tools. Chat can use them when you \
+             tick “Allow tools” in the chat panel, and a script when you tick \
+             “Allow MCP” in the Scripts window — never otherwise.",
+        )
+        .weak(),
+    );
+    ui.add_space(6.0);
+
+    let mut remove: Option<usize> = None;
+    for i in 0..prefs.clients.len() {
+        ui.push_id(("mcp-client", i), |ui| {
+            let name = prefs.clients[i].name.clone();
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut prefs.clients[i].name)
+                        .hint_text("name")
+                        .desired_width(90.0),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut prefs.clients[i].command)
+                        .hint_text("command")
+                        .desired_width(110.0),
+                );
+                let mut args = prefs.clients[i].args.join(" ");
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut args)
+                            .hint_text("arguments")
+                            .desired_width(150.0),
+                    )
+                    .changed()
+                {
+                    prefs.clients[i].args = args.split_whitespace().map(str::to_owned).collect();
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("✕").on_hover_text("Remove").clicked() {
+                        remove = Some(i);
+                    }
+                    let runnable = prefs.clients[i].is_runnable();
+                    if ui
+                        .add_enabled(runnable, egui::Button::new("Test").small())
+                        .on_hover_text("Start it and ask what tools it has")
+                        .clicked()
+                    {
+                        // Saved first: testing what is on screen, not what was
+                        // last written out.
+                        clients.configure(&prefs.clients);
+                        clients.start_probe(&prefs.clients[i].name, ui.ctx());
+                    }
+                });
+            });
+            match clients.probe(&name) {
+                Some(Probe::Running) => {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new().size(12.0));
+                        ui.label(egui::RichText::new("Starting…").weak().size(11.0));
+                    });
+                }
+                Some(Probe::Ok(count)) => {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{count} tool{}",
+                            if count == 1 { "" } else { "s" }
+                        ))
+                        .weak()
+                        .size(11.0),
+                    );
+                }
+                Some(Probe::Failed(e)) => {
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        egui::RichText::new(e).size(11.0),
+                    );
+                }
+                None => {}
+            }
+        });
+        ui.add_space(4.0);
+    }
+    if let Some(i) = remove {
+        prefs.clients.remove(i);
+    }
+
+    if ui.button("Add a server").clicked() {
+        prefs.clients.push(ClientEntry::default());
+    }
+    ui.label(
+        egui::RichText::new(
+            "For example: name `everything`, command `npx`, arguments \
+             `-y @modelcontextprotocol/server-everything`.",
+        )
+        .weak()
+        .size(11.0),
+    );
 }
 
 #[cfg(test)]
@@ -815,7 +931,15 @@ mod tests {
     /// the one where the port was taken.
     #[test]
     fn the_mcp_tab_draws_running_stopped_and_broken() {
-        let mut prefs = McpPrefs::default();
+        let mut prefs = McpPrefs {
+            clients: vec![ClientEntry {
+                name: "everything".into(),
+                command: "npx".into(),
+                args: vec!["-y".into(), "server-everything".into()],
+            }],
+            ..Default::default()
+        };
+        let clients = std::sync::Arc::new(McpClients::default());
         for status in [
             None,
             Some(McpStatus::default()),
@@ -830,13 +954,19 @@ mod tests {
         ] {
             let ctx = egui::Context::default();
             let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut pane = McpPane {
+                    prefs: &mut prefs,
+                    server: status.clone(),
+                    clients: &clients,
+                };
                 assert!(
-                    !mcp_tab(ui, &mut prefs, status.clone()),
+                    !mcp_tab(ui, &mut pane),
                     "drawing the tab must not change a setting"
                 );
             });
         }
         assert!(!prefs.server_enabled, "and must not switch the server on");
+        assert_eq!(prefs.clients.len(), 1, "nor add or remove a server");
     }
 
     #[test]

@@ -53,6 +53,9 @@ pub struct EvoApp {
     /// the only place they can be answered: the app is a single thread and this
     /// is the only moment it is not halfway through something.
     mcp_rx: Option<std::sync::mpsc::Receiver<crate::mcp::bridge::AppCommand>>,
+    /// The MCP servers evo may itself use, shared with the chat and script
+    /// workers. Connections start on first use and there usually are none.
+    mcp_clients: std::sync::Arc<crate::mcp::client::McpClients>,
 }
 
 pub const ZOOM_STEP: f32 = 1.25;
@@ -176,7 +179,9 @@ impl EvoApp {
             mcp_prefs,
             mcp: None,
             mcp_rx: None,
+            mcp_clients: std::sync::Arc::new(crate::mcp::client::McpClients::default()),
         };
+        app.mcp_clients.configure(&app.mcp_prefs.clients);
         // A server that was on when evo last quit comes back on, and one that
         // was off stays off.
         app.reconcile_mcp(&cc.egui_ctx);
@@ -624,7 +629,11 @@ impl EvoApp {
         );
 
         match action {
-            Some(ui::scripts::ScriptsAction::Run { name, source }) => {
+            Some(ui::scripts::ScriptsAction::Run {
+                name,
+                source,
+                allow_mcp,
+            }) => {
                 if let Some(reason) = self.model_unavailable() {
                     // A script that asks for text would fail seconds in; say
                     // so before it starts.
@@ -635,8 +644,13 @@ impl EvoApp {
                         source: dc.doc.source.clone(),
                         page_count: dc.doc.pages.len(),
                     });
+                    // Consent is per run: `None` unless the box was ticked
+                    // for this one.
+                    let mcp = allow_mcp.then(|| {
+                        self.mcp_clients.clone() as std::sync::Arc<dyn crate::mcp::McpAccess>
+                    });
                     if let Some(engine) = &self.script_engine {
-                        engine.run(name, source, snapshot, self.script_prefs.clone());
+                        engine.run(name, source, snapshot, self.script_prefs.clone(), mcp);
                     }
                 }
             }
@@ -737,6 +751,8 @@ impl EvoApp {
             return;
         };
         let unavailable = self.model_unavailable();
+        let tools_configured = self.mcp_clients.is_configured();
+        let mcp_clients = self.mcp_clients.clone();
         let Some(dc) = &mut self.dc else { return };
         if let Some(reason) = unavailable {
             dc.chat.error = Some(reason);
@@ -755,6 +771,9 @@ impl EvoApp {
         };
         dc.chat.error = None;
         dc.chat.last_pages.clear();
+        dc.chat.last_tools.clear();
+        let mcp = (dc.chat.allow_tools && tools_configured)
+            .then_some(mcp_clients as std::sync::Arc<dyn crate::mcp::McpAccess>);
         let history = crate::chat::history_for(&dc.chat.messages);
         dc.chat
             .messages
@@ -769,6 +788,7 @@ impl EvoApp {
             question,
             history,
             config: self.script_prefs.model.clone(),
+            mcp,
         });
     }
 
@@ -789,6 +809,7 @@ impl EvoApp {
         match outcome.result {
             Ok(answer) => {
                 dc.chat.last_pages = answer.pages;
+                dc.chat.last_tools = answer.tools_used;
                 dc.chat
                     .messages
                     .push(crate::script::model::ChatMessage::new(
@@ -828,6 +849,7 @@ impl EvoApp {
                 if let Some(dc) = &mut self.dc {
                     dc.chat.messages.clear();
                     dc.chat.last_pages.clear();
+                    dc.chat.last_tools.clear();
                     dc.chat.error = None;
                 }
                 self.save_sidecar();
@@ -1462,8 +1484,11 @@ impl eframe::App for EvoApp {
             &mut self.script_prefs,
             &mut self.assistant_prefs,
             &mut self.llm_downloads,
-            &mut self.mcp_prefs,
-            self.mcp.as_ref().map(|server| server.status()),
+            ui::preferences::McpPane {
+                prefs: &mut self.mcp_prefs,
+                server: self.mcp.as_ref().map(|server| server.status()),
+                clients: &self.mcp_clients,
+            },
         ) {
             // Turning enrichment on (or changing the model) is the worker's
             // cue to start; it is the only place either can change.
@@ -1471,6 +1496,7 @@ impl eframe::App for EvoApp {
                 lib.set_assistant(&self.assistant_prefs, &self.script_prefs.model);
             }
             self.reconcile_mcp(ctx);
+            self.mcp_clients.configure(&self.mcp_prefs.clients);
             if let Some(storage) = frame.storage_mut() {
                 self.save(storage);
                 storage.flush();
@@ -1533,11 +1559,12 @@ impl eframe::App for EvoApp {
             // the inspector about one piece of markup inside it.
             if dc.chat.open {
                 let engine = self.chat_engine.as_ref();
+                let tools = self.mcp_clients.is_configured();
                 chat_action = egui::Panel::right("chat")
                     .resizable(true)
                     .default_size(340.0)
                     .min_size(240.0)
-                    .show(ui, |ui| ui::chat::show(ui, dc, engine))
+                    .show(ui, |ui| ui::chat::show(ui, dc, engine, tools))
                     .inner;
             }
             egui::Panel::right("inspector")

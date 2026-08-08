@@ -153,8 +153,14 @@ pub fn context_block(pages: &[String], selected: &[usize]) -> String {
 /// The instructions the model answers under. Kept here beside the retrieval so
 /// the promise it makes ("only these pages") is the same one `select_pages`
 /// keeps.
-pub fn system_prompt(title: &str) -> String {
-    format!(
+///
+/// Plus what to do with tools when the user has allowed some.
+///
+/// The document instruction is deliberately not softened: the tools are for
+/// looking things up *outside* the document, and a fact from the document still
+/// has to come from a quoted page.
+pub fn system_prompt_with_tools(title: &str, tools: bool) -> String {
+    let mut prompt = format!(
         "You are answering questions about a PDF document titled \"{title}\". \
          The pages quoted in the user's message are the only source you have; \
          do not use anything else you may know about this document. Cite the \
@@ -162,7 +168,15 @@ pub fn system_prompt(title: &str) -> String {
          the quoted text. If the quoted pages do not answer the question, say \
          so plainly and say what they do cover instead of guessing. Answer in \
          a few sentences unless asked for more."
-    )
+    );
+    if tools {
+        prompt.push_str(
+            " Tools are available for things outside the document; use one only \
+             when the quoted pages cannot answer the question, and say what you \
+             found with it.",
+        );
+    }
+    prompt
 }
 
 /// The user message: the quoted pages, then the question.
@@ -297,9 +311,19 @@ mod tests {
 
     #[test]
     fn the_prompts_say_where_the_answer_must_come_from() {
-        let system = system_prompt("Plans.pdf");
+        let system = system_prompt_with_tools("Plans.pdf", false);
         assert!(system.contains("Plans.pdf"));
         assert!(system.contains("[p.N]"));
+        assert!(
+            !system.contains("Tools"),
+            "no tools were offered, so none are mentioned"
+        );
+
+        // With tools allowed the document instruction still stands: they are
+        // for looking things up outside it, not for guessing what is in it.
+        let with_tools = system_prompt_with_tools("Plans.pdf", true);
+        assert!(with_tools.starts_with(&system), "{with_tools}");
+        assert!(with_tools.contains("outside the document"), "{with_tools}");
 
         let user = user_prompt("Plans.pdf", "[Page 1]\nhello", "what is this?");
         assert!(user.contains("[Page 1]"));

@@ -40,6 +40,9 @@ pub struct ChatJob {
     /// Earlier turns, oldest first, without their quoted pages.
     pub history: Vec<ChatMessage>,
     pub config: ModelConfig,
+    /// The MCP servers this question may use. `None` -- the default -- means
+    /// the model answers from the document alone.
+    pub mcp: Option<Arc<dyn crate::mcp::McpAccess>>,
 }
 
 /// A finished request, waiting for the UI thread to take it.
@@ -49,10 +52,12 @@ pub struct ChatOutcome {
 }
 
 /// A complete reply and the pages it was allowed to draw on (1-based).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Answer {
     pub text: String,
     pub pages: Vec<usize>,
+    /// Tools the model ran on the way to it, in order.
+    pub tools_used: Vec<String>,
 }
 
 #[derive(Default)]
@@ -63,6 +68,10 @@ pub struct ChatStatus {
     pub streaming: String,
     /// What the worker is doing before the first token shows up.
     pub stage: Option<&'static str>,
+    /// What the model has had evo do this turn, newest last. Shown in the
+    /// transcript so a tool run is something the reader watches rather than
+    /// something they find out about afterwards.
+    pub activity: Vec<String>,
     pub outcome: Option<ChatOutcome>,
 }
 
@@ -96,6 +105,7 @@ impl ChatEngine {
             status.running = Some(job.doc_key.clone());
             status.streaming.clear();
             status.stage = Some("Reading the document…");
+            status.activity.clear();
             status.outcome = None;
         }
         let _ = self.tx.send(job);
@@ -170,14 +180,30 @@ fn answer(
 
     let selected = retrieval::select_pages(pages, &job.question);
     let context = retrieval::context_block(pages, &selected);
+
+    // What the model may ask evo to do, if this panel was allowed tools. The
+    // list is fetched here, on the worker, because starting a server can take
+    // a moment and the UI thread must not wait for it.
+    let remote: Vec<crate::mcp::client::RemoteTool> = match &job.mcp {
+        Some(access) => {
+            let mut s = status.lock().unwrap();
+            s.stage = Some("Asking the tool servers what they can do…");
+            drop(s);
+            ctx.request_repaint();
+            access.tools()
+        }
+        None => Vec::new(),
+    };
+
     let request = GenerateRequest {
         model: job.config.model.clone(),
         prompt: retrieval::user_prompt(&job.title, &context, &job.question),
-        system: Some(retrieval::system_prompt(&job.title)),
+        system: Some(retrieval::system_prompt_with_tools(
+            &job.title,
+            !remote.is_empty(),
+        )),
         history: job.history.clone(),
-        // No tools yet: the panel answers from the quoted pages alone. The
-        // loop is still the way through, so there is one path to keep working.
-        tools: Vec::new(),
+        tools: remote.iter().map(|tool| tool.def.clone()).collect(),
         temperature: Some(TEMPERATURE),
         max_tokens: None,
     };
@@ -203,11 +229,32 @@ fn answer(
     };
 
     let pages: Vec<usize> = selected.iter().map(|p| p + 1).collect();
+    let mut used: Vec<String> = Vec::new();
+    let mut execute = |call: &crate::script::model::ToolCall| {
+        let Some(access) = &job.mcp else {
+            return Err(format!("evo has no tool called “{}”", call.name));
+        };
+        let Some(tool) = resolve(&remote, &call.name) else {
+            return Err(format!("evo has no tool called “{}”", call.name));
+        };
+        used.push(call.name.clone());
+        note(status, ctx, format!("Running {}…", call.name));
+        let result = access.call(&tool.server, &tool.tool, call.arguments.clone());
+        match &result {
+            Ok(text) => note(
+                status,
+                ctx,
+                format!("{} answered ({} characters).", call.name, text.len()),
+            ),
+            Err(e) => note(status, ctx, format!("{} failed: {e}", call.name)),
+        }
+        result
+    };
+
     let result = agent::run_agent(
         backend.as_ref(),
         request,
-        // Nothing is on offer, so nothing can be asked for.
-        &mut |call| Err(format!("evo has no tool called “{}”", call.name)),
+        &mut execute,
         agent::MAX_ITERATIONS,
         &mut on_token,
         cancel,
@@ -216,6 +263,7 @@ fn answer(
         Ok(outcome) => Ok(Answer {
             text: outcome.text,
             pages,
+            tools_used: used,
         }),
         Err(e) => {
             // A cancelled request still produced whatever had arrived; throwing
@@ -225,12 +273,31 @@ fn answer(
                 Ok(Answer {
                     text: partial,
                     pages,
+                    tools_used: used,
                 })
             } else {
                 Err(e.to_string())
             }
         }
     }
+}
+
+/// Which remote tool a model's call names.
+///
+/// The model sees `server__tool`, so the match is on the qualified name and
+/// nothing else: two servers may both have a `search`, and picking the wrong
+/// one would be a quiet, expensive mistake.
+fn resolve<'a>(
+    tools: &'a [crate::mcp::client::RemoteTool],
+    called: &str,
+) -> Option<&'a crate::mcp::client::RemoteTool> {
+    tools.iter().find(|tool| tool.def.name == called)
+}
+
+/// Put a line about what the model is having evo do in front of the reader.
+fn note(status: &Arc<Mutex<ChatStatus>>, ctx: &egui::Context, line: String) {
+    status.lock().unwrap().activity.push(line);
+    ctx.request_repaint();
 }
 
 /// The user's side of a conversation, as the model should see it: the earlier
@@ -246,6 +313,39 @@ pub fn history_for(messages: &[ChatMessage]) -> Vec<ChatMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::client::{RemoteTool, qualified_name};
+    use crate::script::model::ToolDef;
+
+    fn remote(server: &str, tool: &str) -> RemoteTool {
+        RemoteTool {
+            server: server.to_owned(),
+            tool: tool.to_owned(),
+            def: ToolDef {
+                name: qualified_name(server, tool),
+                description: String::new(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+        }
+    }
+
+    /// Two servers may both have a `search`; the model names which one, and the
+    /// wrong choice would be quiet and expensive.
+    #[test]
+    fn a_call_resolves_to_the_server_it_named() {
+        let tools = [remote("files", "search"), remote("web", "search")];
+        assert_eq!(
+            resolve(&tools, "web__search").map(|t| t.server.as_str()),
+            Some("web")
+        );
+        assert_eq!(
+            resolve(&tools, "files__search").map(|t| t.server.as_str()),
+            Some("files")
+        );
+        // The server's own name for the tool is not what the model calls it.
+        assert!(resolve(&tools, "search").is_none());
+        assert!(resolve(&tools, "other__search").is_none());
+        assert!(resolve(&[], "web__search").is_none());
+    }
 
     #[test]
     fn history_keeps_the_conversation_and_drops_anything_else() {
