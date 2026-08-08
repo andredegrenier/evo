@@ -100,6 +100,12 @@ export function closeDocument() {
   indicator.textContent = "";
 }
 
+/// Turn to a page. What a citation in an answer does: chat has a page number
+/// and no idea how a page is drawn, which is the right way round.
+export function showPage(number) {
+  if (open) goTo(number);
+}
+
 function message(text) {
   document.getElementById("doc-message").textContent = text || "";
 }

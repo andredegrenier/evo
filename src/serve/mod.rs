@@ -12,6 +12,7 @@
 //! and never opens an index of its own.
 
 pub mod auth;
+pub mod chat_api;
 pub mod library_api;
 pub mod markup_api;
 pub mod pages;
@@ -321,6 +322,13 @@ pub struct ServeState {
     /// the blob is content-addressed, so the same id is the same bytes for
     /// ever. Small enough (two floats a page) that nothing is evicted.
     pub page_sizes: Mutex<HashMap<String, Arc<Vec<library_api::PageSize>>>>,
+    /// The text of the documents most recently asked questions about. Unlike
+    /// the page sizes this is megabytes rather than bytes, so it has a lid.
+    pub pages_text: Mutex<chat_api::PageText>,
+    /// One model generation at a time. A language model is the largest thing
+    /// this process does and the least willing to share: a queue of one is
+    /// slower for the second reader and survivable for the machine.
+    pub generation: tokio::sync::Semaphore,
 }
 
 pub type Shared = Arc<ServeState>;
@@ -387,6 +395,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
         logins: Mutex::new(auth::RateLimiter::default()),
         setup: Mutex::new(None),
         page_sizes: Mutex::new(HashMap::new()),
+        pages_text: Mutex::new(chat_api::PageText::default()),
+        generation: tokio::sync::Semaphore::new(1),
     });
 
     // Four workers: enough that a slow render or a model turn does not stall

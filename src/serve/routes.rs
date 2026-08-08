@@ -12,7 +12,7 @@ use axum::routing::{get, post};
 use rust_embed::Embed;
 use serde_json::json;
 
-use super::{Shared, auth, library_api, markup_api, pages};
+use super::{Shared, auth, chat_api, library_api, markup_api, pages};
 
 /// The web app, read from `assets/web/` at build time.
 ///
@@ -64,6 +64,11 @@ pub fn router(state: Shared) -> axum::Router {
             get(markup_api::get_markup).put(markup_api::put_markup),
         )
         .route("/api/docs/{id}/markup.svg", get(markup_api::markup_svg))
+        .route("/api/docs/{id}/chat", post(chat_api::chat))
+        .route(
+            "/api/docs/{id}/chatlog",
+            get(chat_api::get_chatlog).put(chat_api::put_chatlog),
+        )
         .fallback(asset)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -184,9 +189,17 @@ mod tests {
                 // window to repaint.
                 library.start_indexer(&eframe::egui::Context::default());
             }
+            // No test may reach a real language model. Port 1 is not one
+            // anything listens on, so a test that asks a question gets the
+            // failure path deterministically -- on a machine with Ollama
+            // running and on one without.
+            let mut config = ServeConfig::default();
+            config.model.base_url = "http://127.0.0.1:1".to_owned();
+            config.model.timeout_secs = 5;
+
             let state = Arc::new(ServeState {
                 library: Arc::new(Mutex::new(library)),
-                config: ServeConfig::default(),
+                config,
                 paths,
                 // Plain HTTP, because that is what a test client speaks; the
                 // cookie is `evo` rather than `__Host-evo` as a result.
@@ -199,6 +212,8 @@ mod tests {
                 logins: Mutex::new(auth::RateLimiter::default()),
                 setup: Mutex::new(None),
                 page_sizes: Mutex::new(std::collections::HashMap::new()),
+                pages_text: Mutex::new(chat_api::PageText::default()),
+                generation: tokio::sync::Semaphore::new(1),
             });
 
             let cancel = CancellationToken::new();
@@ -595,6 +610,7 @@ mod tests {
             ("/api.js", "javascript"),
             ("/app.js", "javascript"),
             ("/viewer.js", "javascript"),
+            ("/chat.js", "javascript"),
             ("/sw.js", "javascript"),
             ("/offline.html", "text/html"),
             ("/manifest.webmanifest", "manifest+json"),
@@ -948,6 +964,118 @@ mod tests {
         assert_eq!(store.alloc_id(), 3);
 
         let _ = std::fs::remove_dir_all(&evo.dir);
+    }
+
+    /// Chat: what the browser gets before the model is reached, what it gets
+    /// when the model cannot be reached at all, and the transcript either way.
+    ///
+    /// The failure is the interesting half. There is no model in CI and there
+    /// must not be one in a test, so the harness points at a dead port -- which
+    /// exercises the whole stream: the answer is a 200 with events in it, and
+    /// the thing that went wrong arrives as one of them rather than as a
+    /// status, because by the time it is known the status has been sent.
+    #[test]
+    fn a_question_streams_events_and_the_conversation_is_kept() {
+        let evo = Harness::start("chat");
+        let session = sign_in(&evo);
+        let docs = format!("{}/api/docs", evo.url);
+        let id = post_bytes(&docs, &session, &[], fixture()).json()["id"]
+            .as_str()
+            .expect("an id")
+            .to_owned();
+
+        // A question about nothing, and nothing of a question: both are facts
+        // about the request, so both are statuses.
+        let absent = post_json(
+            &format!("{docs}/{}/chat", "f".repeat(64)),
+            Some(&session),
+            json!({"question": "what is this?"}),
+        );
+        assert_eq!(absent.status, 404, "{}", absent.text());
+        let blank = post_json(
+            &format!("{docs}/{id}/chat"),
+            Some(&session),
+            json!({"question": "   "}),
+        );
+        assert_eq!(blank.status, 400, "{}", blank.text());
+        assert!(blank.text().contains("no question"), "{}", blank.text());
+
+        // A real question. The model is unreachable, so what comes back is the
+        // stream up to the point where that was discovered.
+        let asked = post_json(
+            &format!("{docs}/{id}/chat"),
+            Some(&session),
+            json!({"question": "what is the fox doing?", "history": [], "tools": false}),
+        );
+        assert_eq!(asked.status, 200, "{}", asked.text());
+        assert!(
+            asked.content_type.starts_with("text/event-stream"),
+            "{}",
+            asked.content_type
+        );
+        let stream = asked.text();
+        assert!(stream.contains("event: stage"), "{stream}");
+        assert!(stream.contains("Reading the document"), "{stream}");
+        assert!(stream.contains("event: error"), "{stream}");
+        assert!(!stream.contains("event: done"), "{stream}");
+        // Every frame's data is one line of JSON: that is what stops a model's
+        // paragraph break from ending the event.
+        for line in stream.lines().filter(|l| l.starts_with("data:")) {
+            let data: Value = serde_json::from_str(line.trim_start_matches("data:").trim())
+                .unwrap_or_else(|e| panic!("{line} is not JSON: {e}"));
+            assert!(data.is_object(), "{line}");
+        }
+
+        // The transcript is the desktop app's CHATS table, reached over HTTP.
+        let empty = get(&format!("{docs}/{id}/chatlog"), Some(&session));
+        assert_eq!(empty.status, 200, "{}", empty.text());
+        assert_eq!(empty.json()["messages"].as_array().map(Vec::len), Some(0));
+
+        let kept = put_json(
+            &format!("{docs}/{id}/chatlog"),
+            &session,
+            &[],
+            json!({"messages": [
+                {"role": "user", "content": "what is the fox doing?"},
+                {"role": "assistant", "content": "Jumping. [p.1]"}
+            ]}),
+        );
+        assert_eq!(kept.status, 200, "{}", kept.text());
+
+        let read_back = get(&format!("{docs}/{id}/chatlog"), Some(&session));
+        assert_eq!(read_back.json()["messages"][1]["content"], "Jumping. [p.1]");
+        assert_eq!(read_back.json()["messages"][1]["role"], "assistant");
+        assert_eq!(
+            get(&format!("{docs}/{id}/manifest"), Some(&session)).json()["chat_len"],
+            2,
+            "the manifest says there is a conversation to reopen"
+        );
+
+        // Clearing it is saying nothing was said.
+        put_json(
+            &format!("{docs}/{id}/chatlog"),
+            &session,
+            &[],
+            json!({"messages": []}),
+        );
+        assert_eq!(
+            get(&format!("{docs}/{id}/chatlog"), Some(&session)).json()["messages"]
+                .as_array()
+                .map(Vec::len),
+            Some(0)
+        );
+
+        // And a transcript nobody could have had is refused rather than kept.
+        let flood: Vec<Value> = (0..600)
+            .map(|n| json!({"role": "user", "content": format!("{n}")}))
+            .collect();
+        let refused = put_json(
+            &format!("{docs}/{id}/chatlog"),
+            &session,
+            &[],
+            json!({ "messages": flood }),
+        );
+        assert_eq!(refused.status, 413, "{}", refused.text());
     }
 
     /// An id becomes a filename in three places, so nothing that is not a

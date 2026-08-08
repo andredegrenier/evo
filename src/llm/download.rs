@@ -137,7 +137,12 @@ impl Downloads {
 }
 
 /// Try each mirror in turn. The first one whose bytes match its checksum wins.
-fn run(
+///
+/// `pub(crate)` because `evo fetch-model` runs it directly: a headless server
+/// has no Preferences pane to press a button in, but it wants exactly the same
+/// download, with the same mirrors and the same checksum, rather than a second
+/// implementation that agrees with this one until it does not.
+pub(crate) fn run(
     entry: &CatalogEntry,
     dir: &Path,
     status: &Arc<Mutex<DownloadStatus>>,
@@ -308,6 +313,147 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+// ---------------------------------------------------------------------------
+// `evo fetch-model` -- the same download, without a window
+// ---------------------------------------------------------------------------
+
+/// How often the progress line is reprinted, in whole percent. Every chunk
+/// would be a wall of text in a journal; a line every twentieth of the file is
+/// enough to see that a download on a slow server is still moving.
+const PROGRESS_STEP: u64 = 5;
+
+pub fn usage() -> String {
+    let mut out = String::from(
+        "usage: evo fetch-model [id]\n\n  \
+         Downloads a model's weights so `evo serve` can answer questions with\n  \
+         them. With no id, the catalogue's default.\n\nModels:\n",
+    );
+    for entry in &super::CATALOG {
+        let default = if entry.id == super::DEFAULT_MODEL {
+            "  (default)"
+        } else {
+            ""
+        };
+        out.push_str(&format!(
+            "  {:<24} {} \u{2014} {}{default}\n",
+            entry.id,
+            super::human_size(entry.size()),
+            entry.label,
+        ));
+    }
+    out
+}
+
+/// Which model the arguments name.
+fn chosen(args: &[String]) -> Result<&'static CatalogEntry, String> {
+    let id = match args {
+        [] => super::DEFAULT_MODEL,
+        [one] if one == "--help" || one == "-h" => return Err(usage()),
+        [one] if !one.starts_with('-') => one.as_str(),
+        _ => {
+            return Err(format!(
+                "evo fetch-model takes one model id.\n\n{}",
+                usage()
+            ));
+        }
+    };
+    super::entry(id).ok_or_else(|| {
+        format!(
+            "evo has no model called \u{201c}{id}\u{201d}.\n\n{}",
+            usage()
+        )
+    })
+}
+
+/// The `evo fetch-model` entry point. Never returns: the process exists to
+/// fetch one file.
+pub fn main() -> ! {
+    // Skip the binary and the `fetch-model` word itself.
+    let args: Vec<String> = std::env::args().skip(2).collect();
+    match fetch_model(&args) {
+        Ok(()) => std::process::exit(0),
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn fetch_model(args: &[String]) -> Result<(), String> {
+    let entry = chosen(args)?;
+    let dir = super::llm_models_dir()
+        .ok_or_else(|| "evo could not find a data directory to keep models in.".to_owned())?;
+
+    if let Some(path) = entry.installed_in(&dir) {
+        println!("{} is already here: {}", entry.label, path.display());
+        return Ok(());
+    }
+    println!(
+        "Fetching {} ({}) into {}.",
+        entry.label,
+        super::human_size(entry.size()),
+        dir.display()
+    );
+
+    let status = Arc::new(Mutex::new(DownloadStatus {
+        total: entry.size(),
+        ..Default::default()
+    }));
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    // The download reports itself through the same shared status the
+    // Preferences pane polls, so the progress line is a second reader of it
+    // rather than anything new in the download path.
+    let watched = status.clone();
+    let finished = Arc::new(AtomicBool::new(false));
+    let stop = finished.clone();
+    let printer = std::thread::Builder::new()
+        .name("evo-fetch-progress".into())
+        .spawn(move || {
+            let mut last = u64::MAX;
+            while !stop.load(Ordering::Relaxed) {
+                let seen = watched.lock().unwrap().clone();
+                if let Some(percent) = percent(&seen)
+                    && (last == u64::MAX || percent >= last + PROGRESS_STEP)
+                {
+                    println!(
+                        "  {percent}% \u{2014} {} of {}",
+                        super::human_size(seen.received),
+                        super::human_size(seen.total)
+                    );
+                    last = percent;
+                }
+                std::thread::sleep(Duration::from_millis(400));
+            }
+        })
+        .map_err(|e| format!("could not start the progress thread: {e}"))?;
+
+    // No window, so a detached context: nothing is listening for the repaints
+    // the download asks for, which is exactly the point.
+    let result = run(entry, &dir, &status, &cancel, &egui::Context::default());
+    finished.store(true, Ordering::Relaxed);
+    let _ = printer.join();
+    result?;
+
+    let path = entry.path_in(&dir);
+    println!(
+        "{} is ready: {} ({}).",
+        entry.label,
+        path.display(),
+        super::human_size(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0))
+    );
+    println!("Point `evo serve` at it with `\"api\": \"Builtin\"` in serve/config.json.");
+    Ok(())
+}
+
+/// Whole percent downloaded, once there is a size to be a percentage of.
+/// Widened first: a model is gigabytes, and gigabytes times a hundred is not
+/// a number to trust to 64 bits.
+fn percent(status: &DownloadStatus) -> Option<u64> {
+    (status.total > 0)
+        .then(|| (u128::from(status.received) * 100 / u128::from(status.total)) as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,6 +578,60 @@ mod tests {
         assert!(
             !path.with_extension("part").exists(),
             "a part file was left"
+        );
+    }
+
+    /// `evo fetch-model` is typed once, over SSH, by somebody who has just
+    /// built evo on a server -- so the id has to be optional and a wrong one
+    /// has to print what the right ones are.
+    #[test]
+    fn fetch_model_defaults_to_the_catalogue_default_and_names_the_rest() {
+        let args = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+
+        assert_eq!(
+            chosen(&[]).expect("the default").id,
+            crate::llm::DEFAULT_MODEL
+        );
+        assert_eq!(
+            chosen(&args(&["qwen3-1.7b"])).expect("by id").id,
+            "qwen3-1.7b"
+        );
+
+        let unknown = chosen(&args(&["llama3"])).expect_err("no such model");
+        assert!(unknown.contains("llama3"), "{unknown}");
+        for entry in &crate::llm::CATALOG {
+            assert!(unknown.contains(entry.id), "{unknown} does not list them");
+        }
+
+        let help = chosen(&args(&["--help"])).expect_err("usage is not a model");
+        assert!(help.starts_with("usage: evo fetch-model"), "{help}");
+        assert!(help.contains("(default)"), "{help}");
+
+        let flag = chosen(&args(&["--everything"])).expect_err("not a flag it knows");
+        assert!(flag.contains("one model id"), "{flag}");
+        let two = chosen(&args(&["a", "b"])).expect_err("one at a time");
+        assert!(two.contains("one model id"), "{two}");
+    }
+
+    #[test]
+    fn progress_is_whole_percent_and_only_once_the_size_is_known() {
+        assert_eq!(percent(&DownloadStatus::default()), None);
+        assert_eq!(
+            percent(&DownloadStatus {
+                received: 25,
+                total: 200,
+                ..Default::default()
+            }),
+            Some(12)
+        );
+        // A file bigger than u64::MAX / 100 must not overflow into nonsense.
+        assert_eq!(
+            percent(&DownloadStatus {
+                received: u64::MAX,
+                total: u64::MAX,
+                ..Default::default()
+            }),
+            Some(100)
         );
     }
 

@@ -46,6 +46,13 @@ fn main() -> eframe::Result {
         serve::main();
     }
 
+    // And `evo fetch-model`: the Preferences pane's download, for a machine
+    // with no Preferences pane. Whoever is setting up a server needs the
+    // weights on it before `evo serve` can answer anything.
+    if first_arg.as_deref() == Some("fetch-model") {
+        llm::download::main();
+    }
+
     let initial_file = first_arg.map(std::path::PathBuf::from);
 
     let options = eframe::NativeOptions {

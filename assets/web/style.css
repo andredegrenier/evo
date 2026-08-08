@@ -449,3 +449,85 @@ button:focus-visible,
   border: 2px dashed var(--accent);
   border-radius: 2px;
 }
+
+/* --------------------------------------------------------------------------
+   Chat
+   -------------------------------------------------------------------------- */
+
+/* A sheet over the bottom of the pages, not a view of its own: the answer is
+   about what is behind it, and a citation turns the page under it. */
+.chat {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  max-height: 70%;
+  background: var(--mantle);
+  border-top: 1px solid var(--surface);
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: 0 -2px 12px var(--shadow);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.chat[hidden] {
+  display: none;
+}
+
+.viewer {
+  position: relative;
+}
+
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 6rem;
+}
+
+.turn {
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  max-width: 85%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.turn.user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.turn.assistant {
+  align-self: flex-start;
+  background: var(--base);
+}
+
+/* A citation is a link back into the document, so it looks like one rather
+   than like a button. */
+.cite {
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  min-height: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.chat-ask {
+  gap: 0.5rem;
+  border-bottom: none;
+  border-top: 1px solid var(--surface);
+}
+
+.chat-ask input {
+  flex: 1;
+}

@@ -1771,6 +1771,7 @@ dependencies = [
  "tantivy",
  "thiserror 2.0.19",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "totp-rs",
  "ureq",

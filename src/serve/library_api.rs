@@ -455,6 +455,10 @@ pub async fn status(State(state): State<Shared>) -> Response {
     };
     body["enrich_enabled"] = json!(state.config.assistant.enrich_enabled);
     body["max_upload_mb"] = json!(state.config.max_upload_mb);
+    // Whether a question is being answered right now. The permit is taken for
+    // exactly as long as the model is running, so this is also how one watches
+    // a closed tab stop a generation: it goes back to false on its own.
+    body["generating"] = json!(state.generation.available_permits() == 0);
     Json(body).into_response()
 }
 

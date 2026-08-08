@@ -44,6 +44,7 @@ sha2 = "0.11.0"
 tantivy = "0.26.1"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal", "fs"] }
+tokio-stream = "0.1"
 tokio-util = "0.7"
 totp-rs = { version = "6", default-features = false, features = ["std", "qr"] }
 ureq = "3.3.0"

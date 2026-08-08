@@ -6,6 +6,7 @@
 
 import { api, get, postJson, reason, isDocId, thumbUrl } from "./api.js";
 import { openDocument, closeDocument } from "./viewer.js";
+import { openChat, closeChat } from "./chat.js";
 
 const views = {
   login: document.getElementById("view-login"),
@@ -312,15 +313,30 @@ document.getElementById("back").addEventListener("click", () => {
   location.hash = "#library";
 });
 
+// Chat is a sheet over the document rather than a view, so opening it does not
+// change the route. `#chat/<id>` exists all the same, for a link that means
+// "ask about this": it opens the document and the sheet together, and the
+// viewer's own `replaceState` then settles the URL on the page being read.
+document.getElementById("open-chat").addEventListener("click", () => {
+  const parts = location.hash.replace(/^#/, "").split("/").filter(Boolean);
+  if (isDocId(parts[1])) openChat(parts[1]);
+});
+
 async function route() {
   const parts = location.hash.replace(/^#/, "").split("/").filter(Boolean);
-  if (parts[0] === "doc" && isDocId(parts[1])) {
+  const chatting = parts[0] === "chat";
+  if ((parts[0] === "doc" || chatting) && isDocId(parts[1])) {
     const page = Math.max(1, parseInt(parts[2], 10) || 1);
     show("doc");
     const opened = await openDocument(parts[1], page);
-    if (!opened) location.hash = "#library";
+    if (!opened) {
+      location.hash = "#library";
+      return;
+    }
+    if (chatting) await openChat(parts[1]);
     return;
   }
+  closeChat();
   closeDocument();
   show("library");
 }

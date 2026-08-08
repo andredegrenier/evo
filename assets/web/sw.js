@@ -10,7 +10,7 @@
 // in it. Everything here is an improvement on being slow; nothing here is
 // required for the app to work.
 
-const CACHE = "evo-shell-v1";
+const CACHE = "evo-shell-v2";
 
 const SHELL = [
   "/",
@@ -19,6 +19,7 @@ const SHELL = [
   "/api.js",
   "/app.js",
   "/viewer.js",
+  "/chat.js",
   "/offline.html",
   "/manifest.webmanifest",
   "/icons/icon-192.png",

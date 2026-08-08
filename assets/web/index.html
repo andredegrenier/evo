@@ -93,6 +93,7 @@
         </button>
         <h1 id="doc-title"></h1>
         <span id="page-indicator" class="indicator"></span>
+        <button id="open-chat" class="button quiet" type="button">Chat</button>
       </header>
       <!-- Markup. A tool is on or off; while one is on, a drag draws and a
            tap picks something already there. -->
@@ -110,6 +111,29 @@
       </div>
       <div id="pages" class="pages"></div>
       <p id="doc-message" class="message" role="status"></p>
+
+      <!-- Chat, over the bottom of the pages it is about. A citation in an
+           answer is a button that turns to that page. -->
+      <section id="chat" class="chat" hidden>
+        <header class="bar">
+          <h2>Ask this document</h2>
+          <span class="spacer"></span>
+          <button id="chat-close" class="button quiet" type="button">Close</button>
+        </header>
+        <div id="transcript" class="transcript"></div>
+        <p id="chat-status" class="message" role="status"></p>
+        <form id="chat-form" class="bar chat-ask">
+          <input
+            id="chat-question"
+            type="text"
+            placeholder="What is this about?"
+            autocomplete="off"
+            enterkeyhint="send"
+          />
+          <button id="chat-send" class="primary" type="submit">Ask</button>
+          <button id="chat-stop" class="button danger" type="button" hidden>Stop</button>
+        </form>
+      </section>
     </section>
 
     <!-- What a note says. A sheet rather than `prompt()`: a phone keyboard
