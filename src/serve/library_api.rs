@@ -447,7 +447,7 @@ pub async fn status(State(state): State<Shared>) -> Response {
     };
     let model = &state.config.model;
     body["version"] = json!(env!("CARGO_PKG_VERSION"));
-    body["blobs"] = json!(state.config.blobs);
+    body["blobs"] = json!(state.config.blobs.name());
     body["model"] = if model.api.is_http() {
         json!({ "kind": "http", "model": model.model, "base_url": model.base_url })
     } else {

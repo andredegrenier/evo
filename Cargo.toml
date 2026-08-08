@@ -23,6 +23,11 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 llama-cpp-2 = { version = "=0.1.154", default-features = false, optional = true }
 lopdf = "0.44"
 mlua = { version = "0.12.0", features = ["lua54", "vendored", "serialize"] }
+# Only the AWS store, and none of object_store's own default backends: the
+# local one here is `LocalBlobStore`, which was already written.
+object_store = { version = "0.14", default-features = false, features = [
+    "aws",
+], optional = true }
 ocrs = "0.12.2"
 redb = "4.1.0"
 rfd = "0.17"
@@ -68,6 +73,10 @@ winresource = "0.1.31"
 default = ["builtin-llm"]
 # Embedded small language model (llama.cpp). Pulls in a C++ toolchain build.
 builtin-llm = ["dep:llama-cpp-2"]
+# Blobs in an S3 bucket instead of on local disk. Off by default: it pulls in
+# reqwest and rustls, which nobody serving a library off their own disk should
+# have to compile. `cargo build --features s3`.
+s3 = ["dep:object_store"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros", "rt"] }

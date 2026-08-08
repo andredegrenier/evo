@@ -6,6 +6,8 @@ pub mod enrich;
 pub mod extract;
 pub mod indexer;
 pub mod ocr;
+#[cfg(feature = "s3")]
+pub mod s3;
 pub mod search;
 pub mod store;
 pub mod textjob;
@@ -183,8 +185,22 @@ impl Library {
     }
 
     pub fn open_at(root: PathBuf) -> Result<Self, LibraryError> {
-        std::fs::create_dir_all(root.join("thumbs"))?;
         let blobs = Arc::new(LocalBlobStore::new(root.join("docs"))?);
+        Self::open_at_with_blobs(root, blobs)
+    }
+
+    /// The same library with its documents kept somewhere else -- an S3 bucket,
+    /// say (see [`s3`], behind the `s3` feature).
+    ///
+    /// Only the blobs move. The metadata database, the search index, the page
+    /// cache and the thumbnails stay under `root` whatever this is given: they
+    /// are memory-mapped files and directories of small writes, and neither is
+    /// something object storage does.
+    pub fn open_at_with_blobs(
+        root: PathBuf,
+        blobs: Arc<dyn BlobStore>,
+    ) -> Result<Self, LibraryError> {
+        std::fs::create_dir_all(root.join("thumbs"))?;
         let db = Arc::new(store::MetaDb::open(&root.join("meta.redb"))?);
         Ok(Self {
             root,

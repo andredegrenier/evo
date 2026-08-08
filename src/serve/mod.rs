@@ -51,14 +51,39 @@ pub fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// Where the blobs live. An enum with one arm today because M28 adds S3 and the
-/// config file it writes should not have to change shape when it does.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+/// Where the documents themselves live.
+///
+/// Only the documents: the metadata database, the search index and the page
+/// cache are on local disk whichever of these is chosen, because they are
+/// memory-mapped files and object storage is not a filesystem.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BlobBackend {
     /// Files under `<library>/docs`, the same as the desktop app.
     #[default]
     Local,
+    /// An S3 bucket, if this evo was built with the `s3` feature.
+    ///
+    /// No credentials here. They come from the environment -- the ordinary
+    /// `AWS_*` variables, or the instance role on a machine that has one --
+    /// so a configuration file is never a thing to keep a secret out of.
+    S3 {
+        bucket: String,
+        /// Where in the bucket, if it holds something else as well.
+        #[serde(default)]
+        prefix: Option<String>,
+    },
+}
+
+impl BlobBackend {
+    /// What to call this in `/api/status`. The bucket's name is the operator's
+    /// business and not the phone's.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::S3 { .. } => "s3",
+        }
+    }
 }
 
 /// The biggest upload accepted, in megabytes. A scanned book is tens of
@@ -353,6 +378,34 @@ pub struct ServeState {
 
 pub type Shared = Arc<ServeState>;
 
+/// Open the library, with its documents wherever the configuration says.
+///
+/// The S3 arm exists whether or not this evo was built with the feature, so a
+/// configuration that asks for a bucket on a binary that cannot reach one is
+/// told exactly that instead of quietly serving an empty library off the disk.
+fn open_library(paths: &ServePaths, config: &ServeConfig) -> Result<Library, String> {
+    let root = paths.library_root.clone();
+    match &config.blobs {
+        BlobBackend::Local => Library::open_at(root).map_err(explain),
+        BlobBackend::S3 { bucket, prefix } => {
+            #[cfg(feature = "s3")]
+            {
+                let blobs = crate::library::s3::S3BlobStore::from_env(bucket, prefix.as_deref())?;
+                Library::open_at_with_blobs(root, Arc::new(blobs)).map_err(explain)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = prefix;
+                Err(format!(
+                    "the configuration asks for documents in the S3 bucket \u{201c}{bucket}\u{201d}, \
+                     but this evo was built without S3 support. Rebuild it with \
+                     `cargo build --release --features s3`, or set \"blobs\" back to \"local\"."
+                ))
+            }
+        }
+    }
+}
+
 /// Turn a failure to open the library into something worth reading. The
 /// overwhelmingly likely cause is that the desktop app has the database open,
 /// and the answer to that is not "try again" but "quit the app".
@@ -396,7 +449,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let config = ServeConfig::load(&paths.config)?;
     let sessions = auth::Sessions::load(&paths.sessions)?;
 
-    let mut library = Library::open_at(paths.library_root.clone()).map_err(explain)?;
+    let mut library = open_library(&paths, &config)?;
     // The indexer wants somewhere to ask for a repaint. There is no window, so
     // it gets a detached context: the same answer `mcp::client` gives.
     library.start_indexer(&egui::Context::default());
@@ -472,6 +525,9 @@ async fn serve(state: Shared, bind: &str, port: u16) -> Result<(), String> {
         println!("  model: {} at {}", model.model, model.base_url);
     } else {
         println!("  model: built-in {}", model.builtin_model);
+    }
+    if let BlobBackend::S3 { bucket, .. } = &state.config.blobs {
+        println!("  documents: the S3 bucket {bucket}");
     }
     let servers = state.config.mcp_clients.len();
     if servers > 0 {
@@ -640,6 +696,60 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The blob backend is a configuration file's business, so what matters is
+    /// that a hand-written one round-trips and that the phone is told the kind
+    /// and not the bucket.
+    #[test]
+    fn the_documents_can_be_pointed_at_a_bucket_in_the_configuration() {
+        let local: ServeConfig =
+            serde_json::from_str(r#"{"blobs": "local"}"#).expect("the ordinary case");
+        assert_eq!(local.blobs, BlobBackend::Local);
+        assert_eq!(local.blobs.name(), "local");
+
+        let s3: ServeConfig =
+            serde_json::from_str(r#"{"blobs": {"s3": {"bucket": "evo-docs"}}}"#).expect("a bucket");
+        assert_eq!(
+            s3.blobs,
+            BlobBackend::S3 {
+                bucket: "evo-docs".to_owned(),
+                prefix: None,
+            }
+        );
+        assert_eq!(
+            s3.blobs.name(),
+            "s3",
+            "the bucket's name is not the phone's"
+        );
+
+        // And what evo writes is what evo reads.
+        let written = serde_json::to_string(&s3).expect("serializable");
+        assert!(
+            written.contains(r#""blobs":{"s3":{"bucket":"evo-docs""#),
+            "{written}"
+        );
+        let read: ServeConfig = serde_json::from_str(&written).expect("round trip");
+        assert_eq!(read.blobs, s3.blobs);
+    }
+
+    /// A binary built without S3 support that is asked for a bucket must say
+    /// so. Serving an empty library off the local disk instead would look like
+    /// the documents had been lost.
+    #[cfg(not(feature = "s3"))]
+    #[test]
+    fn asking_for_a_bucket_without_s3_support_says_how_to_get_it() {
+        let paths = ServePaths::new(Some(PathBuf::from("/srv/evo")), None).expect("paths");
+        let config = ServeConfig {
+            blobs: BlobBackend::S3 {
+                bucket: "evo-docs".to_owned(),
+                prefix: None,
+            },
+            ..Default::default()
+        };
+        let message = open_library(&paths, &config).err().expect("refused");
+        assert!(message.contains("evo-docs"), "{message}");
+        assert!(message.contains("--features s3"), "{message}");
     }
 
     /// The expected failure, and the one worth explaining: the desktop app has
