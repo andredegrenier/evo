@@ -1,17 +1,19 @@
 # evo
 
-A simple PDF editor written entirely in Rust — Preview-like viewing with
-Bluebeam-style precision markup.
+A PDF editor in Rust — Preview-like viewing with Bluebeam-style precision
+markup, a searchable document library, and a local AI assistant.
 
 evo aims for the feel of macOS Preview (open, scroll, zoom, mark up, print)
 combined with the thing Preview never gives you: **exact control over your
 markups** — numeric X/Y/W/H editing, snapping with alignment guides, and
 one-click centering on the page.
 
-**Pure Rust.** No PDFium, no MuPDF, no native PDF library at all. Rendering is
-[hayro](https://github.com/LaurenzV/hayro), editing/writing is
-[lopdf](https://github.com/J-F-Liu/lopdf), and the UI is
-[egui](https://github.com/emilk/egui).
+**Pure-Rust PDF pipeline.** No PDFium, no MuPDF, no native PDF library at all:
+rendering is [hayro](https://github.com/LaurenzV/hayro), editing/writing is
+[lopdf](https://github.com/J-F-Liu/lopdf), the UI is
+[egui](https://github.com/emilk/egui). (Scripting embeds Lua 5.4 and the
+optional built-in model runs on [llama.cpp](https://github.com/ggml-org/llama.cpp) —
+the only non-Rust components, both vendored.)
 
 ## Features
 
@@ -64,13 +66,33 @@ one-click centering on the page.
 - Stored under the platform data directory (`~/Library/Application Support/evo`
   on macOS, `%APPDATA%` on Windows, `~/.local/share/evo` on Linux)
 
+**Assistant**
+- **Chat with your document** (⌘⇧C): ask questions about the open PDF in a
+  side panel. Answers are grounded in the pages (retrieved per question),
+  stream in live, and cite pages as clickable `[p.3]` links. Chat history is
+  kept with library documents
+- **A built-in local model**: download Qwen3-4B-Instruct (~2.5 GB, Apache-2.0)
+  from Preferences ▸ Model — inference runs entirely on your machine via
+  llama.cpp. Or point evo at Ollama / LM Studio / any OpenAI-compatible server
+  instead. Nothing leaves your computer either way
+- **Summaries & auto-tags** (opt-in): imported documents are summarized and
+  tagged in the background; both appear on library cards and are searchable
+
+**MCP**
+- **evo is an MCP server**: enable it in Preferences ▸ MCP and agents like
+  Claude can search your library, read page text, open documents, add markup,
+  and export — over localhost HTTP with a bearer token. `evo mcp-serve` also
+  offers a headless stdio mode for library access
+- **evo is an MCP client**: configure external MCP servers and the chat
+  assistant can use their tools (off by default, per-panel toggle). Lua
+  scripts can too — but only when you tick "Allow MCP" for that run
+
 **Scripting** — Tools ▸ Scripts
 - Embedded **Lua**, with an `evo` table for reading the open document's text
   and asking a **local language model** to write something from it. The
   result is laid out as a PDF and added to your library
-- The model runs on your machine: point Preferences ▸ Scripting at Ollama,
-  LM Studio, llama.cpp's server or anything else speaking either dialect.
-  Nothing is sent anywhere else
+- Uses the same model as chat (built-in or your own server, Preferences ▸
+  Model). Nothing is sent anywhere else
 - Scripts are sandboxed — no filesystem, no processes, no other network
   access — and are stopped by a Cancel button or a configurable time limit.
   Three worked examples are written into the scripts folder on first use
@@ -115,9 +137,13 @@ Ctrl elsewhere.
   `text-detection.rten` and `text-recognition.rten` there manually.
 - Saving always re-serializes through lopdf (use *Save As*; evo never
   overwrites your original in place).
-- Scripting needs a model server you run yourself; evo ships no weights. A
-  generated document uses the same standard-14 Helvetica as text boxes, so
+- evo ships no model weights. The built-in model (Qwen3-4B-Instruct-2507,
+  © Alibaba Cloud, Apache-2.0, quantized GGUF from community repos) downloads
+  on first use into the library's `models/llm/` folder and is sha256-verified.
+  A generated document uses the same standard-14 Helvetica as text boxes, so
   characters outside its encoding are written as `?` (the log says when).
+- The MCP server binds 127.0.0.1 only and is off by default; treat the bearer
+  token like a password.
 
 ## License
 
