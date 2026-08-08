@@ -25,6 +25,10 @@ pub enum ModelError {
     Status { status: u16, body: String },
     #[error("could not read the model's reply: {0}")]
     Read(String),
+    /// The backend cannot run at all: no weights, no such model, or a build
+    /// without the built-in engine.
+    #[error("{0}")]
+    Unavailable(String),
     #[error("cancelled")]
     Cancelled,
 }
@@ -102,15 +106,19 @@ pub enum Api {
     /// `/v1/chat/completions`, server-sent events. llama.cpp's server,
     /// LM Studio, vLLM and others speak this.
     OpenAiCompatible,
+    /// A model evo downloaded itself and runs in process. No server, no
+    /// network, nothing to install.
+    Builtin,
 }
 
 impl Api {
-    pub const ALL: [Api; 2] = [Self::Ollama, Self::OpenAiCompatible];
+    pub const ALL: [Api; 3] = [Self::Ollama, Self::OpenAiCompatible, Self::Builtin];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Ollama => "Ollama",
             Self::OpenAiCompatible => "OpenAI-compatible",
+            Self::Builtin => "Built-in (downloaded model)",
         }
     }
 
@@ -118,7 +126,13 @@ impl Api {
         match self {
             Self::Ollama => "http://localhost:11434",
             Self::OpenAiCompatible => "http://localhost:8080",
+            Self::Builtin => "",
         }
+    }
+
+    /// Whether this dialect talks to a server the user has to point evo at.
+    pub fn is_http(self) -> bool {
+        !matches!(self, Self::Builtin)
     }
 }
 
@@ -129,6 +143,10 @@ pub struct ModelConfig {
     pub api: Api,
     pub base_url: String,
     pub model: String,
+    /// Which catalogue entry [`Api::Builtin`] runs. Kept alongside the HTTP
+    /// settings so switching between them does not lose either.
+    #[serde(default = "default_builtin_model")]
+    pub builtin_model: String,
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
 }
@@ -137,12 +155,17 @@ fn default_timeout() -> u64 {
     120
 }
 
+fn default_builtin_model() -> String {
+    crate::llm::DEFAULT_MODEL.to_owned()
+}
+
 impl Default for ModelConfig {
     fn default() -> Self {
         Self {
             api: Api::Ollama,
             base_url: Api::Ollama.default_url().to_owned(),
             model: "llama3.2".to_owned(),
+            builtin_model: default_builtin_model(),
             timeout_secs: default_timeout(),
         }
     }
@@ -150,15 +173,65 @@ impl Default for ModelConfig {
 
 impl ModelConfig {
     pub fn build(&self) -> Box<dyn ModelBackend> {
-        Box::new(HttpBackend {
-            config: self.clone(),
-        })
+        match self.api {
+            Api::Builtin => builtin(&self.builtin_model),
+            _ => Box::new(HttpBackend {
+                config: self.clone(),
+            }),
+        }
+    }
+}
+
+#[cfg(feature = "builtin-llm")]
+fn builtin(model_id: &str) -> Box<dyn ModelBackend> {
+    Box::new(crate::llm::backend::BuiltinBackend::new(model_id))
+}
+
+/// Without the `builtin-llm` feature there is no engine to run, so the
+/// setting still exists but says so plainly rather than failing obscurely.
+#[cfg(not(feature = "builtin-llm"))]
+fn builtin(_model_id: &str) -> Box<dyn ModelBackend> {
+    Box::new(UnavailableBackend)
+}
+
+#[cfg(not(feature = "builtin-llm"))]
+struct UnavailableBackend;
+
+#[cfg(not(feature = "builtin-llm"))]
+impl UnavailableBackend {
+    fn error() -> ModelError {
+        ModelError::Unavailable(
+            "this build of evo was compiled without the built-in model; \
+             point Preferences ▸ Model at a local server instead"
+                .to_owned(),
+        )
+    }
+}
+
+#[cfg(not(feature = "builtin-llm"))]
+impl ModelBackend for UnavailableBackend {
+    fn generate(
+        &self,
+        _req: &GenerateRequest,
+        _on_token: &mut dyn FnMut(&str) -> ControlFlow<()>,
+    ) -> Result<String, ModelError> {
+        Err(Self::error())
+    }
+
+    fn list_models(&self) -> Result<Vec<String>, ModelError> {
+        Ok(Vec::new())
+    }
+
+    fn describe(&self) -> String {
+        "no built-in model in this build".to_owned()
     }
 }
 
 pub struct HttpBackend {
     config: ModelConfig,
 }
+
+const BUILTIN_NOT_HTTP: &str = "the built-in model does not run over HTTP";
 
 impl HttpBackend {
     fn agent(&self) -> ureq::Agent {
@@ -186,6 +259,9 @@ impl ModelBackend for HttpBackend {
         let (path, body) = match self.config.api {
             Api::Ollama => ("api/chat", ollama_body(req)),
             Api::OpenAiCompatible => ("v1/chat/completions", openai_body(req)),
+            // `ModelConfig::build` sends this dialect elsewhere; a config that
+            // reached here anyway has no server to talk to.
+            Api::Builtin => return Err(ModelError::Unavailable(BUILTIN_NOT_HTTP.to_owned())),
         };
         let url = self.url(path);
 
@@ -237,6 +313,7 @@ impl ModelBackend for HttpBackend {
         let path = match self.config.api {
             Api::Ollama => "api/tags",
             Api::OpenAiCompatible => "v1/models",
+            Api::Builtin => return Err(ModelError::Unavailable(BUILTIN_NOT_HTTP.to_owned())),
         };
         let url = self.url(path);
         let body = self
@@ -359,6 +436,8 @@ pub fn parse_chunk(api: Api, line: &str) -> Option<Chunk> {
                 done: v["choices"][0]["finish_reason"].is_string(),
             })
         }
+        // The built-in model streams through a callback, not over the wire.
+        Api::Builtin => None,
     }
 }
 
@@ -366,13 +445,11 @@ pub fn parse_model_list(api: Api, body: &str) -> Vec<String> {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
         return Vec::new();
     };
-    let key = match api {
-        Api::Ollama => "models",
-        Api::OpenAiCompatible => "data",
-    };
-    let field = match api {
-        Api::Ollama => "name",
-        Api::OpenAiCompatible => "id",
+    let (key, field) = match api {
+        Api::Ollama => ("models", "name"),
+        Api::OpenAiCompatible => ("data", "id"),
+        // Nothing is served, so there is no list to read.
+        Api::Builtin => return Vec::new(),
     };
     v[key]
         .as_array()
@@ -610,6 +687,7 @@ mod tests {
             // default the caller starts from.
             model: "from-config".into(),
             timeout_secs: 10,
+            ..Default::default()
         }
         .build();
         let mut req = request("where is it?");
@@ -648,6 +726,7 @@ mod tests {
             base_url: url,
             model: "m".into(),
             timeout_secs: 10,
+            ..Default::default()
         }
         .build();
 
@@ -659,6 +738,49 @@ mod tests {
         assert!(matches!(result, Err(ModelError::Cancelled)));
         assert_eq!(seen, 1, "the stream stopped at the first chunk");
         let _ = server.join();
+    }
+
+    /// Preferences saved before the built-in model existed must still load,
+    /// with the default model selected.
+    #[test]
+    fn older_preferences_load_with_the_default_builtin_model() {
+        let saved = r#"{"api":"Ollama","base_url":"http://localhost:11434","model":"llama3.2"}"#;
+        let config: ModelConfig = serde_json::from_str(saved).expect("deserialize");
+        assert_eq!(config.builtin_model, crate::llm::DEFAULT_MODEL);
+        assert_eq!(config.timeout_secs, default_timeout());
+        assert_eq!(config.api, Api::Ollama);
+    }
+
+    #[test]
+    fn every_dialect_is_listed_once_with_a_label() {
+        assert_eq!(Api::ALL.len(), 3);
+        for api in Api::ALL {
+            assert!(!api.label().is_empty());
+            assert_eq!(Api::ALL.iter().filter(|a| **a == api).count(), 1);
+        }
+        // Only the served dialects have an address to point at.
+        assert!(Api::Ollama.is_http() && Api::OpenAiCompatible.is_http());
+        assert!(!Api::Builtin.is_http());
+        assert!(Api::Builtin.default_url().is_empty());
+    }
+
+    /// Whichever way evo was built, asking the built-in backend for something
+    /// it cannot do must produce a sentence, not a panic. With the feature on
+    /// and nothing downloaded that is "not downloaded yet"; with it off it is
+    /// "compiled without".
+    #[test]
+    fn an_unusable_builtin_model_explains_itself() {
+        let config = ModelConfig {
+            api: Api::Builtin,
+            builtin_model: "no-such-model".into(),
+            ..Default::default()
+        };
+        let err = config
+            .build()
+            .generate(&request("hello"), &mut |_: &str| ControlFlow::Continue(()))
+            .expect_err("no such model");
+        assert!(matches!(err, ModelError::Unavailable(_)), "{err}");
+        assert!(!err.to_string().is_empty());
     }
 
     #[test]

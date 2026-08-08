@@ -1,8 +1,11 @@
-//! Preferences: keyboard shortcuts and ribbon layout.
+//! Preferences: keyboard shortcuts, ribbon layout, the language model and
+//! scripting.
 
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 
 use crate::keymap::{Action, Category, Keymap};
+use crate::llm;
+use crate::llm::download::Downloads;
 use crate::script::ScriptPrefs;
 use crate::script::model::Api;
 use crate::ui::ribbon::RibbonConfig;
@@ -12,6 +15,7 @@ pub enum Tab {
     #[default]
     Shortcuts,
     Ribbon,
+    Model,
     Scripting,
 }
 
@@ -45,6 +49,7 @@ pub fn show(
     keymap: &mut Keymap,
     ribbon: &mut RibbonConfig,
     scripts: &mut ScriptPrefs,
+    downloads: &mut Downloads,
 ) -> bool {
     if !st.open {
         st.capturing = None;
@@ -64,6 +69,7 @@ pub fn show(
                 for (tab, label) in [
                     (Tab::Shortcuts, "Shortcuts"),
                     (Tab::Ribbon, "Ribbon"),
+                    (Tab::Model, "Model"),
                     (Tab::Scripting, "Scripting"),
                 ] {
                     if ui.selectable_label(st.tab == tab, label).clicked() {
@@ -76,6 +82,7 @@ pub fn show(
             match st.tab {
                 Tab::Shortcuts => changed |= shortcuts_tab(ctx, ui, st, keymap),
                 Tab::Ribbon => changed |= ribbon_tab(ui, ribbon),
+                Tab::Model => changed |= model_tab(ui, scripts, downloads),
                 Tab::Scripting => changed |= scripting_tab(ui, scripts),
             }
         });
@@ -348,15 +355,239 @@ fn ribbon_tab(ui: &mut egui::Ui, cfg: &mut RibbonConfig) -> bool {
     changed
 }
 
+/// Is this build able to run a model itself?
+const BUILTIN: bool = cfg!(feature = "builtin-llm");
+
+/// Where chat and scripts get their answers from: a model evo downloads and
+/// runs itself, or a server on the machine.
+fn model_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs, downloads: &mut Downloads) -> bool {
+    let before = prefs.clone();
+
+    ui.heading("Model");
+    ui.label(
+        egui::RichText::new(if BUILTIN {
+            "Chat and scripts ask a language model on this machine. evo can \
+             download and run one itself, or talk to a server you already have."
+        } else {
+            "Chat and scripts ask a language model on this machine. This build \
+             has no model of its own: point it at a local server such as \
+             Ollama, LM Studio or llama.cpp."
+        })
+        .weak(),
+    );
+    ui.add_space(10.0);
+
+    ui.horizontal_wrapped(|ui| {
+        for api in Api::ALL {
+            if api == Api::Builtin && !BUILTIN {
+                continue;
+            }
+            if ui
+                .selectable_label(prefs.model.api == api, api.label())
+                .clicked()
+            {
+                // Moving between dialects almost always means a different
+                // server, so offer its usual address.
+                let was_default = prefs.model.base_url == prefs.model.api.default_url();
+                prefs.model.api = api;
+                if was_default && api.is_http() {
+                    prefs.model.base_url = api.default_url().to_owned();
+                }
+            }
+        }
+    });
+    ui.add_space(10.0);
+
+    if prefs.model.api.is_http() {
+        egui::Grid::new("model-server-grid")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Server");
+                ui.add(
+                    egui::TextEdit::singleline(&mut prefs.model.base_url)
+                        .hint_text(prefs.model.api.default_url())
+                        .desired_width(260.0),
+                );
+                ui.end_row();
+
+                ui.label("Model");
+                ui.add(
+                    egui::TextEdit::singleline(&mut prefs.model.model)
+                        .hint_text("llama3.2")
+                        .desired_width(260.0),
+                );
+                ui.end_row();
+
+                ui.label("Reply timeout");
+                ui.add(
+                    egui::DragValue::new(&mut prefs.model.timeout_secs)
+                        .range(5..=3600)
+                        .suffix(" s"),
+                )
+                .on_hover_text("How long to wait for the model before giving up");
+                ui.end_row();
+            });
+    }
+
+    if BUILTIN {
+        ui.add_space(8.0);
+        catalog_section(ui, prefs, downloads);
+    }
+
+    *prefs != before
+}
+
+/// The downloadable models: what they cost in disk, what licence they carry,
+/// and a button to get or remove each.
+fn catalog_section(ui: &mut egui::Ui, prefs: &mut ScriptPrefs, downloads: &mut Downloads) {
+    let Some(dir) = llm::llm_models_dir() else {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            "evo could not find a data directory to keep models in.",
+        );
+        return;
+    };
+
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Downloaded models").strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let used = llm::disk_usage(&dir);
+            if used > 0 {
+                ui.label(egui::RichText::new(llm::human_size(used)).weak())
+                    .on_hover_text(dir.display().to_string());
+            }
+        });
+    });
+    ui.label(
+        egui::RichText::new(
+            "Weights are not part of evo and are downloaded from Hugging Face \
+             on request. Nothing you type is sent anywhere: the model runs on \
+             this machine.",
+        )
+        .weak(),
+    );
+    ui.add_space(6.0);
+
+    // A finished download becomes an ordinary installed model.
+    downloads.forget_finished();
+
+    for entry in &llm::CATALOG {
+        ui.add_space(6.0);
+        let installed = entry.installed_in(&dir).is_some();
+        ui.horizontal(|ui| {
+            if ui
+                .selectable_label(prefs.model.builtin_model == entry.id, entry.label)
+                .on_hover_text("Use this model")
+                .clicked()
+            {
+                prefs.model.builtin_model = entry.id.to_owned();
+            }
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} · {}",
+                    llm::human_size(entry.size()),
+                    entry.license
+                ))
+                .weak(),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                catalog_buttons(ui, entry, &dir, installed, downloads);
+            });
+        });
+        ui.label(egui::RichText::new(entry.summary).weak().size(11.0));
+
+        if let Some(status) = downloads.status(entry.id) {
+            if let Some(error) = &status.error {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+            } else {
+                let bar = match status.fraction() {
+                    Some(f) => egui::ProgressBar::new(f)
+                        .text(format!(
+                            "{} of {}",
+                            llm::human_size(status.received),
+                            llm::human_size(status.total)
+                        ))
+                        .desired_height(12.0),
+                    None => egui::ProgressBar::new(0.0)
+                        .animate(true)
+                        .desired_height(12.0),
+                };
+                ui.add(bar);
+            }
+        } else if !installed {
+            ui.label(
+                egui::RichText::new(format!("Not downloaded — {}", entry.attribution))
+                    .weak()
+                    .size(11.0),
+            );
+        } else {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(entry.attribution).weak().size(11.0));
+                ui.hyperlink_to(
+                    egui::RichText::new("model card").size(11.0),
+                    entry.attribution_url,
+                );
+            });
+        }
+    }
+}
+
+fn catalog_buttons(
+    ui: &mut egui::Ui,
+    entry: &'static llm::CatalogEntry,
+    dir: &std::path::Path,
+    installed: bool,
+    downloads: &mut Downloads,
+) {
+    let status = downloads.status(entry.id);
+    match status {
+        Some(s) if !s.done => {
+            if ui.button("Stop").clicked() {
+                downloads.cancel(entry.id);
+            }
+        }
+        Some(s) if s.error.is_some() => {
+            if ui.button("Try Again").clicked() {
+                downloads.dismiss(entry.id);
+                downloads.start(entry, dir.to_path_buf(), ui.ctx());
+            }
+        }
+        _ if installed => {
+            if ui
+                .button("Delete")
+                .on_hover_text("Remove the weights from this machine")
+                .clicked()
+                && let Err(e) = llm::delete_model(dir, entry)
+            {
+                // Nothing else is watching this; say it where it happened.
+                ui.colored_label(ui.visuals().error_fg_color, e.to_string());
+            }
+        }
+        _ => {
+            if ui
+                .button("Download")
+                .on_hover_text(format!(
+                    "About {} over the network",
+                    llm::human_size(entry.size())
+                ))
+                .clicked()
+            {
+                downloads.start(entry, dir.to_path_buf(), ui.ctx());
+            }
+        }
+    }
+}
+
 fn scripting_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs) -> bool {
     let before = prefs.clone();
 
     ui.heading("Scripting");
     ui.label(
         egui::RichText::new(
-            "Scripts talk to a language model running on your own machine. \
-             evo does not ship one: point this at a local server such as \
-             Ollama, LM Studio or llama.cpp.",
+            "Scripts run over the open document and can ask the language model \
+             for text. Which model that is lives in the Model tab.",
         )
         .weak(),
     );
@@ -366,50 +597,6 @@ fn scripting_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs) -> bool {
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("API");
-            ui.horizontal(|ui| {
-                for api in Api::ALL {
-                    if ui
-                        .selectable_label(prefs.model.api == api, api.label())
-                        .clicked()
-                    {
-                        // Moving between dialects almost always means a
-                        // different server, so offer its usual address.
-                        let was_default = prefs.model.base_url == prefs.model.api.default_url();
-                        prefs.model.api = api;
-                        if was_default {
-                            prefs.model.base_url = api.default_url().to_owned();
-                        }
-                    }
-                }
-            });
-            ui.end_row();
-
-            ui.label("Server");
-            ui.add(
-                egui::TextEdit::singleline(&mut prefs.model.base_url)
-                    .hint_text(prefs.model.api.default_url())
-                    .desired_width(260.0),
-            );
-            ui.end_row();
-
-            ui.label("Model");
-            ui.add(
-                egui::TextEdit::singleline(&mut prefs.model.model)
-                    .hint_text("llama3.2")
-                    .desired_width(260.0),
-            );
-            ui.end_row();
-
-            ui.label("Reply timeout");
-            ui.add(
-                egui::DragValue::new(&mut prefs.model.timeout_secs)
-                    .range(5..=3600)
-                    .suffix(" s"),
-            )
-            .on_hover_text("How long to wait for the model before giving up");
-            ui.end_row();
-
             ui.label("Script time limit");
             ui.add(
                 egui::DragValue::new(&mut prefs.deadline_secs)
@@ -425,7 +612,7 @@ fn scripting_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs) -> bool {
     ui.label(
         egui::RichText::new(
             "Scripts run sandboxed: no filesystem, no processes, and no network \
-             beyond the server above.",
+             beyond the model.",
         )
         .weak(),
     );
@@ -436,6 +623,31 @@ fn scripting_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Model tab lays out differently for each dialect and for each state
+    /// a catalogue row can be in; drawing it is the only way to find out that
+    /// it lays out at all.
+    #[test]
+    fn the_model_tab_draws_for_every_dialect() {
+        let mut prefs = ScriptPrefs::default();
+        let mut downloads = Downloads::default();
+        for api in Api::ALL {
+            prefs.model.api = api;
+            let ctx = egui::Context::default();
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                model_tab(ui, &mut prefs, &mut downloads);
+            });
+        }
+    }
+
+    #[test]
+    fn the_scripting_tab_still_draws_after_the_model_moved_out_of_it() {
+        let mut prefs = ScriptPrefs::default();
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            assert!(!scripting_tab(ui, &mut prefs), "nothing was touched");
+        });
+    }
 
     #[test]
     fn platform_modifiers_collapse_into_command() {

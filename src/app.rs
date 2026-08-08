@@ -42,6 +42,8 @@ pub struct EvoApp {
     scripts_ui: ui::scripts::ScriptsState,
     /// Spawned the first time the chat panel is opened.
     chat_engine: Option<crate::chat::ChatEngine>,
+    /// Model weights being fetched, if the user asked for any this session.
+    llm_downloads: crate::llm::download::Downloads,
 }
 
 pub const ZOOM_STEP: f32 = 1.25;
@@ -152,6 +154,7 @@ impl EvoApp {
             script_prefs,
             scripts_ui: ui::scripts::ScriptsState::default(),
             chat_engine: None,
+            llm_downloads: crate::llm::download::Downloads::default(),
         };
         if let Some(path) = initial_file {
             app.open_path(path, &cc.egui_ctx);
@@ -598,13 +601,19 @@ impl EvoApp {
 
         match action {
             Some(ui::scripts::ScriptsAction::Run { name, source }) => {
-                let snapshot = self.dc.as_ref().map(|dc| crate::script::DocSnapshot {
-                    title: dc.title(),
-                    source: dc.doc.source.clone(),
-                    page_count: dc.doc.pages.len(),
-                });
-                if let Some(engine) = &self.script_engine {
-                    engine.run(name, source, snapshot, self.script_prefs.clone());
+                if let Some(reason) = self.model_unavailable() {
+                    // A script that asks for text would fail seconds in; say
+                    // so before it starts.
+                    self.error = Some(reason);
+                } else {
+                    let snapshot = self.dc.as_ref().map(|dc| crate::script::DocSnapshot {
+                        title: dc.title(),
+                        source: dc.doc.source.clone(),
+                        page_count: dc.doc.pages.len(),
+                    });
+                    if let Some(engine) = &self.script_engine {
+                        engine.run(name, source, snapshot, self.script_prefs.clone());
+                    }
                 }
             }
             Some(ui::scripts::ScriptsAction::Cancel) => {
@@ -688,12 +697,28 @@ impl EvoApp {
         }
     }
 
+    /// Why the configured model cannot answer, if it cannot. Asked before a
+    /// job is submitted: a missing download is something to say up front, not
+    /// a failure to report a thread later.
+    fn model_unavailable(&self) -> Option<String> {
+        let config = &self.script_prefs.model;
+        (config.api == crate::script::model::Api::Builtin)
+            .then(|| crate::llm::unavailable_reason(&config.builtin_model))
+            .flatten()
+    }
+
     /// Send a question to the chat worker, recording it in the transcript.
     fn ask_chat(&mut self, question: String) {
         let Some(engine) = &self.chat_engine else {
             return;
         };
+        let unavailable = self.model_unavailable();
         let Some(dc) = &mut self.dc else { return };
+        if let Some(reason) = unavailable {
+            dc.chat.error = Some(reason);
+            dc.chat.input = question;
+            return;
+        }
         // The worker caches page text under this key. A library document has
         // one already; anything else is identified by its bytes.
         let doc_key = match &dc.chat.doc_key {
@@ -758,7 +783,7 @@ impl EvoApp {
                     dc.chat.input = last.content;
                 }
                 let hint = if e.contains("could not reach the model") {
-                    "\n\nThe model endpoint is set in Preferences ▸ Scripting."
+                    "\n\nThe model is chosen in Preferences ▸ Model."
                 } else {
                     ""
                 };
@@ -1076,6 +1101,9 @@ impl eframe::App for EvoApp {
         for path in self.temp_print_files.drain(..) {
             let _ = std::fs::remove_file(path);
         }
+        // Model weights have to be released before the process tears itself
+        // down, or llama.cpp's own shutdown asserts on them.
+        crate::llm::unload();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
@@ -1167,6 +1195,7 @@ impl eframe::App for EvoApp {
             &mut self.keymap,
             &mut self.ribbon,
             &mut self.script_prefs,
+            &mut self.llm_downloads,
         ) && let Some(storage) = frame.storage_mut()
         {
             self.save(storage);

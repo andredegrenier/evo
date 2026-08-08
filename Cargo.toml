@@ -17,6 +17,7 @@ egui-phosphor = "0.13"
 hayro = "0.7"
 hayro-svg = "0.7"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+llama-cpp-2 = { version = "=0.1.154", default-features = false, optional = true }
 lopdf = "0.44"
 mlua = { version = "0.12.0", features = ["lua54", "vendored"] }
 ocrs = "0.12.2"
@@ -44,3 +45,8 @@ members = [".", "xtask"]
 
 [build-dependencies]
 winresource = "0.1.31"
+
+[features]
+default = ["builtin-llm"]
+# Embedded small language model (llama.cpp). Pulls in a C++ toolchain build.
+builtin-llm = ["dep:llama-cpp-2"]
