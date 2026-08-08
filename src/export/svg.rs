@@ -119,7 +119,7 @@ fn xml_escape(s: &str) -> String {
 }
 
 /// Our markup as an SVG group. SVG y is top-down: `svg_y = page_h - pdf_y`.
-fn markup_group(store: &AnnotationStore, page: usize, page_h: f32) -> String {
+pub(crate) fn markup_group(store: &AnnotationStore, page: usize, page_h: f32) -> String {
     let mut g = String::from("<g id=\"evo-markup\">");
     for ann in store.on_page(page) {
         let _ = write_annotation(&mut g, ann, page_h);
@@ -128,7 +128,28 @@ fn markup_group(store: &AnnotationStore, page: usize, page_h: f32) -> String {
     g
 }
 
-fn write_annotation(g: &mut String, ann: &Annotation, page_h: f32) -> std::fmt::Result {
+/// The markup of one page as a standalone SVG document, with no page content
+/// under it.
+///
+/// `evo serve` draws a page as a PNG with this laid over the top, so the
+/// overlay has to describe the same box the raster does: the viewBox is the
+/// page in PDF points, and the browser scales it to whatever size the image
+/// ended up. `annotations` are the ones on that page, already selected --
+/// this function does not know which page it is being asked about, only how
+/// tall it is, because that is all the y-flip needs.
+pub(crate) fn svg_overlay(annotations: &[Annotation], page_w: f32, page_h: f32) -> String {
+    let mut svg = format!(
+        "<svg viewBox=\"0 0 {page_w} {page_h}\" xmlns=\"http://www.w3.org/2000/svg\">\
+         <g id=\"evo-markup\">"
+    );
+    for ann in annotations {
+        let _ = write_annotation(&mut svg, ann, page_h);
+    }
+    svg.push_str("</g></svg>");
+    svg
+}
+
+pub(crate) fn write_annotation(g: &mut String, ann: &Annotation, page_h: f32) -> std::fmt::Result {
     let style = &ann.style;
     let opacity = style.opacity;
     let sy = |y: f32| page_h - y;
@@ -299,5 +320,40 @@ mod tests {
         assert!(first.contains("evo-markup"));
         assert!(first.ends_with("</svg>"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The overlay `evo serve` lays over a page PNG. Annotations are in PDF
+    /// points with y up from the bottom; SVG counts down from the top, so a
+    /// highlight 100pt above the bottom of a 792pt page is 692 down from its
+    /// top -- and the box the browser stretches has to be the page itself.
+    #[test]
+    fn an_overlay_is_the_page_box_with_the_markup_flipped_into_it() {
+        let annotations = vec![Annotation {
+            id: 1,
+            page: 0,
+            kind: AnnotationKind::Highlight,
+            rect: PdfRect::from_points(PdfPoint::new(72.0, 100.0), PdfPoint::new(172.0, 120.0)),
+            style: Style {
+                fill: Color::rgb(255, 235, 59),
+                opacity: 0.35,
+                ..Style::default()
+            },
+        }];
+
+        let svg = svg_overlay(&annotations, 612.0, 792.0);
+        assert!(svg.starts_with("<svg viewBox=\"0 0 612 792\""), "{svg}");
+        assert!(svg.contains("id=\"evo-markup\""), "{svg}");
+        assert!(svg.ends_with("</svg>"), "{svg}");
+        // y = 792 - 120 (the *top* edge in PDF space), height 20.
+        assert!(
+            svg.contains("x=\"72\" y=\"672\" width=\"100\" height=\"20\""),
+            "{svg}"
+        );
+        assert!(svg.contains("opacity=\"0.35\""), "{svg}");
+
+        // No markup is still a well-formed overlay: the viewer always asks for
+        // one, and an empty group is cheaper to draw than a special case.
+        let empty = svg_overlay(&[], 200.0, 400.0);
+        assert!(empty.contains("<g id=\"evo-markup\"></g>"), "{empty}");
     }
 }

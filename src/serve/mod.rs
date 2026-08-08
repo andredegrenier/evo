@@ -12,8 +12,12 @@
 //! and never opens an index of its own.
 
 pub mod auth;
+pub mod library_api;
+pub mod markup_api;
+pub mod pages;
 pub mod routes;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -55,11 +59,19 @@ pub enum BlobBackend {
     Local,
 }
 
+/// The biggest upload accepted, in megabytes. A scanned book is tens of
+/// megabytes; anything past this is a mistake or an attempt to fill the disk.
+pub const DEFAULT_MAX_UPLOAD_MB: usize = 200;
+
+fn default_max_upload_mb() -> usize {
+    DEFAULT_MAX_UPLOAD_MB
+}
+
 /// What the desktop app keeps in eframe storage, for a process that has none.
 ///
 /// Every field is optional on the way in: a config file someone wrote by hand
 /// should not have to name settings they do not care about.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ServeConfig {
     /// Which model answers chat and writes summaries (M26 onwards).
@@ -70,6 +82,31 @@ pub struct ServeConfig {
     /// programs to run, which is not something an HTTP API should accept.
     pub mcp_clients: Vec<ClientEntry>,
     pub blobs: BlobBackend,
+    /// The upload size limit. Configurable because "how big is a document"
+    /// is a question about the library, not about evo.
+    #[serde(default = "default_max_upload_mb")]
+    pub max_upload_mb: usize,
+}
+
+impl Default for ServeConfig {
+    fn default() -> Self {
+        Self {
+            model: ModelConfig::default(),
+            assistant: AssistantPrefs::default(),
+            mcp_clients: Vec::new(),
+            blobs: BlobBackend::default(),
+            max_upload_mb: DEFAULT_MAX_UPLOAD_MB,
+        }
+    }
+}
+
+impl ServeConfig {
+    /// The upload limit in bytes, never zero: a limit of nothing would make
+    /// the server refuse every document, which is not a configuration anyone
+    /// means to write.
+    pub fn upload_limit(&self) -> usize {
+        self.max_upload_mb.max(1) * 1024 * 1024
+    }
 }
 
 impl ServeConfig {
@@ -278,6 +315,12 @@ pub struct ServeState {
     /// The short-lived permission to fetch the enrolment QR code, held in
     /// memory only: it is worth less than a session and outlives nothing.
     pub setup: Mutex<Option<auth::SetupToken>>,
+    /// Page dimensions per document, worked out by parsing the PDF once.
+    ///
+    /// The viewer asks for them on every page turn and they cannot change --
+    /// the blob is content-addressed, so the same id is the same bytes for
+    /// ever. Small enough (two floats a page) that nothing is evicted.
+    pub page_sizes: Mutex<HashMap<String, Arc<Vec<library_api::PageSize>>>>,
 }
 
 pub type Shared = Arc<ServeState>;
@@ -343,6 +386,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         sessions: Mutex::new(sessions),
         logins: Mutex::new(auth::RateLimiter::default()),
         setup: Mutex::new(None),
+        page_sizes: Mutex::new(HashMap::new()),
     });
 
     // Four workers: enough that a slow render or a model turn does not stall
