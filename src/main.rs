@@ -10,6 +10,7 @@ mod llm;
 mod mcp;
 mod render;
 mod script;
+mod serve;
 mod state;
 mod tools;
 mod ui;
@@ -37,6 +38,12 @@ fn main() -> eframe::Result {
     // gets anywhere near opening one.
     if first_arg.as_deref() == Some("mcp-serve") {
         mcp::headless::main();
+    }
+
+    // So is `evo serve`: the library over HTTP for a phone, with its own
+    // configuration file because there is no eframe storage to read.
+    if first_arg.as_deref() == Some("serve") {
+        serve::main();
     }
 
     let initial_file = first_arg.map(std::path::PathBuf::from);

@@ -10,7 +10,8 @@ categories = ["gui", "graphics"]
 keywords = ["pdf", "editor", "markup", "annotation"]
 
 [dependencies]
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+argon2 = "0.5"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 catppuccin = "2.8"
 directories = "6.0.0"
 eframe = { version = "0.35", features = ["persistence"] }
@@ -35,14 +36,16 @@ rmcp = { version = "3.1", features = [
     "transport-child-process",
 ]  }
 rten = "0.24.0"
+rust-embed = { version = "8", features = ["mime-guess"] }
 schemars = "1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
 tantivy = "0.26.1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
 tokio-util = "0.7"
+totp-rs = { version = "6", default-features = false, features = ["std", "qr"] }
 ureq = "3.3.0"
 window-vibrancy = "0.8.0"
 

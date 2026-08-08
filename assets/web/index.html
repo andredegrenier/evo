@@ -1,0 +1,95 @@
+<!doctype html>
+<!--
+  The placeholder app shell. M24 replaces this with the real PWA; until then it
+  exists so the login flow can be walked in a browser rather than only in curl.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>evo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>evo</h1>
+
+      <form id="login" autocomplete="on">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+        <label for="code">Authenticator code</label>
+        <input
+          id="code"
+          name="code"
+          type="text"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          pattern="[0-9]*"
+          placeholder="000000"
+        />
+
+        <button type="submit">Sign in</button>
+      </form>
+
+      <section id="enroll" hidden>
+        <p>
+          Scan this with an authenticator app, then enter the code it shows to
+          finish setting up.
+        </p>
+        <img id="qr" alt="Setup QR code" width="240" height="240" />
+      </section>
+
+      <p id="message" role="status"></p>
+    </main>
+
+    <script type="module">
+      const form = document.getElementById("login");
+      const message = document.getElementById("message");
+      const enroll = document.getElementById("enroll");
+      const qr = document.getElementById("qr");
+
+      /// Every mutation carries `X-Evo: 1`; the server refuses without it, which
+      /// is what stops another site's form from posting here.
+      async function api(path, body) {
+        const response = await fetch(path, {
+          method: "POST",
+          headers: { "content-type": "application/json", "X-Evo": "1" },
+          body: JSON.stringify(body),
+        });
+        let payload = {};
+        try {
+          payload = await response.json();
+        } catch {
+          // A body-less error is still an error; the status carries it.
+        }
+        return { status: response.status, payload };
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        message.textContent = "";
+        const password = document.getElementById("password").value;
+        const code = document.getElementById("code").value.trim();
+        const { status, payload } = await api("/api/login", {
+          password,
+          code: code === "" ? null : code,
+        });
+
+        if (payload.enroll) {
+          enroll.hidden = false;
+          qr.src = "/api/setup-qr?t=" + encodeURIComponent(payload.setup);
+          message.textContent = "Scan the code, then sign in again with a code.";
+          return;
+        }
+        if (status === 200) {
+          enroll.hidden = true;
+          message.textContent = "Signed in. The library is coming in a later release.";
+          return;
+        }
+        message.textContent = payload.error ?? "Sign in failed.";
+      });
+    </script>
+  </body>
+</html>

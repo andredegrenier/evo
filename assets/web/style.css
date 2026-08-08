@@ -1,0 +1,97 @@
+/* Placeholder styling for the login shell. M24 brings the real thing. */
+:root {
+  --bg: #eff1f5;
+  --panel: #ffffff;
+  --text: #4c4f69;
+  --muted: #6c6f85;
+  --accent: #1e66f5;
+  --line: #ccd0da;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e2e;
+    --panel: #313244;
+    --text: #cdd6f4;
+    --muted: #a6adc8;
+    --accent: #89b4fa;
+    --line: #45475a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main {
+  width: min(24rem, 100% - 2rem);
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--panel);
+}
+
+h1 {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+
+label {
+  display: block;
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+input {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  width: 100%;
+  margin-top: 1.25rem;
+  padding: 0.7rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: var(--panel);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#enroll {
+  margin-top: 1.5rem;
+  text-align: center;
+}
+
+#enroll img {
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 0.5rem;
+}
+
+#message {
+  margin: 1rem 0 0;
+  min-height: 1.5rem;
+  color: var(--muted);
+}
