@@ -151,7 +151,7 @@ fn counter_hover(dc: &DocState) -> Option<String> {
 }
 
 /// A little of the matched line around the match, on char boundaries.
-fn snippet(line: &LineLayout, range: &Range<usize>) -> String {
+pub fn snippet(line: &LineLayout, range: &Range<usize>) -> String {
     const CONTEXT: usize = 24;
     let text = &line.text;
     let mut start = range.start.saturating_sub(CONTEXT);
@@ -174,7 +174,10 @@ fn snippet(line: &LineLayout, range: &Range<usize>) -> String {
 }
 
 /// Move finished pages from the worker into the cache.
-fn drain_worker(dc: &mut DocState) {
+///
+/// The MCP server's find tool calls this too: it reads the same cache, and a
+/// caller that asks twice should see the pages that arrived in between.
+pub fn drain_worker(dc: &mut DocState) {
     let Some(worker) = &dc.text_worker else {
         return;
     };
@@ -194,9 +197,17 @@ fn drain_worker(dc: &mut DocState) {
 /// Rebuild the match list in display order, visiting each source page once.
 fn recompute(dc: &mut DocState) {
     let query = dc.find.query.trim().to_owned();
+    dc.find.matches = matches_for(dc, &query);
+}
+
+/// Every match for `query` in the text read so far, in display order and
+/// visiting each source page once.
+///
+/// Shared with the MCP find tool, so what an assistant is told is where the
+/// find bar would take the user.
+pub fn matches_for(dc: &DocState, query: &str) -> Vec<FindMatch> {
     if query.is_empty() {
-        dc.find.matches.clear();
-        return;
+        return Vec::new();
     }
     let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
     let mut matches = Vec::new();
@@ -209,7 +220,7 @@ fn recompute(dc: &mut DocState) {
             continue;
         };
         for (index, line) in layout.lines.iter().enumerate() {
-            for range in extract::find_in_line(&line.text, &query) {
+            for range in extract::find_in_line(&line.text, query) {
                 if let Some(rect) = extract::rect_for_range(line, range.clone()) {
                     matches.push(FindMatch {
                         source_page: source,
@@ -221,7 +232,7 @@ fn recompute(dc: &mut DocState) {
             }
         }
     }
-    dc.find.matches = matches;
+    matches
 }
 
 fn step(dc: &mut DocState, delta: i32) {

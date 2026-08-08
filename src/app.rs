@@ -46,6 +46,13 @@ pub struct EvoApp {
     chat_engine: Option<crate::chat::ChatEngine>,
     /// Model weights being fetched, if the user asked for any this session.
     llm_downloads: crate::llm::download::Downloads,
+    mcp_prefs: crate::mcp::McpPrefs,
+    /// The MCP server, while the user has it switched on.
+    mcp: Option<crate::mcp::runtime::McpServer>,
+    /// Where its tool calls arrive. Drained at the top of every frame, which is
+    /// the only place they can be answered: the app is a single thread and this
+    /// is the only moment it is not halfway through something.
+    mcp_rx: Option<std::sync::mpsc::Receiver<crate::mcp::bridge::AppCommand>>,
 }
 
 pub const ZOOM_STEP: f32 = 1.25;
@@ -103,7 +110,7 @@ impl EvoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
         let vibrancy = apply_window_effects(cc);
-        let (theme, glass_pref, keymap, mut ribbon, script_prefs, assistant_prefs) =
+        let (theme, glass_pref, keymap, mut ribbon, script_prefs, assistant_prefs, mcp_prefs) =
             match cc.storage {
                 Some(storage) => (
                     eframe::get_value(storage, "theme").unwrap_or_default(),
@@ -115,6 +122,7 @@ impl EvoApp {
                     eframe::get_value(storage, "ribbon").unwrap_or_default(),
                     eframe::get_value(storage, "script_prefs").unwrap_or_default(),
                     eframe::get_value(storage, "assistant_prefs").unwrap_or_default(),
+                    eframe::get_value(storage, "mcp_prefs").unwrap_or_default(),
                 ),
                 None => (
                     ThemeChoice::default(),
@@ -123,6 +131,7 @@ impl EvoApp {
                     ui::ribbon::RibbonConfig::default(),
                     crate::script::ScriptPrefs::default(),
                     crate::library::enrich::AssistantPrefs::default(),
+                    crate::mcp::McpPrefs::default(),
                 ),
             };
         // A stored layout predates any item added since it was written.
@@ -164,7 +173,13 @@ impl EvoApp {
             scripts_ui: ui::scripts::ScriptsState::default(),
             chat_engine: None,
             llm_downloads: crate::llm::download::Downloads::default(),
+            mcp_prefs,
+            mcp: None,
+            mcp_rx: None,
         };
+        // A server that was on when evo last quit comes back on, and one that
+        // was off stays off.
+        app.reconcile_mcp(&cc.egui_ctx);
         if let Some(path) = initial_file {
             app.open_path(path, &cc.egui_ctx);
         }
@@ -832,6 +847,241 @@ impl EvoApp {
         }
     }
 
+    /// Start, stop or restart the MCP server so it matches the preferences.
+    fn reconcile_mcp(&mut self, ctx: &egui::Context) {
+        let wanted = self.mcp_prefs.server_enabled;
+        let matches = self.mcp.as_ref().is_some_and(|server| {
+            server.port == self.mcp_prefs.port && server.token == self.mcp_prefs.token
+        });
+        if wanted == matches && (wanted || self.mcp.is_none()) {
+            return;
+        }
+        // Dropping the old server cancels it and waits for its thread, so the
+        // port is free before the new one asks for it.
+        self.mcp = None;
+        self.mcp_rx = None;
+        if wanted {
+            let (server, rx) = crate::mcp::runtime::McpServer::spawn(
+                self.mcp_prefs.port,
+                self.mcp_prefs.token.clone(),
+                ctx,
+            );
+            self.mcp = Some(server);
+            self.mcp_rx = Some(rx);
+        }
+    }
+
+    /// Answer whatever the MCP server has asked for since the last frame.
+    fn drain_mcp(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.mcp_rx else { return };
+        // Collected first: answering a command needs `&mut self`, and the
+        // receiver is borrowed from it.
+        let mut pending = Vec::new();
+        while let Ok(command) = rx.try_recv() {
+            pending.push(command);
+        }
+        for command in pending {
+            self.handle_mcp_command(command, ctx);
+        }
+    }
+
+    fn handle_mcp_command(&mut self, command: crate::mcp::bridge::AppCommand, ctx: &egui::Context) {
+        use crate::mcp::bridge::AppCommand;
+        use crate::mcp::library_tools;
+
+        match command {
+            AppCommand::ListLibrary { reply } => {
+                let _ = reply.send(self.with_library(library_tools::list_library));
+            }
+            AppCommand::SearchLibrary {
+                query,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(
+                    self.with_library(|lib| library_tools::search_library(lib, &query, limit)),
+                );
+            }
+            AppCommand::GetDocumentText {
+                doc_id,
+                first,
+                last,
+                reply,
+            } => {
+                let _ =
+                    reply.send(self.with_library(|lib| {
+                        library_tools::document_text(lib, &doc_id, first, last)
+                    }));
+            }
+            AppCommand::OpenDocument {
+                doc_id,
+                page,
+                reply,
+            } => {
+                let _ = reply.send(self.mcp_open_document(&doc_id, page, ctx));
+            }
+            AppCommand::AddMarkup { req, reply } => {
+                let _ = reply.send(self.mcp_add_markup(&req));
+            }
+            AppCommand::ExportPdf {
+                path,
+                flatten,
+                reply,
+            } => {
+                let _ = reply.send(self.mcp_export_pdf(&path, flatten));
+            }
+            AppCommand::FindMatches { query, reply } => {
+                let _ = reply.send(self.mcp_find_matches(&query, ctx));
+            }
+        }
+    }
+
+    /// Run a library tool, or say that this evo has no library.
+    fn with_library<T>(
+        &self,
+        f: impl FnOnce(&crate::library::Library) -> Result<T, String>,
+    ) -> Result<T, String> {
+        match &self.library {
+            Some(lib) => f(lib),
+            None => Err("this copy of evo has no library (it could not open its \
+                         data directory), so there is nothing to search"
+                .to_owned()),
+        }
+    }
+
+    fn mcp_open_document(
+        &mut self,
+        doc_id: &str,
+        page: Option<usize>,
+        ctx: &egui::Context,
+    ) -> Result<serde_json::Value, String> {
+        let meta = self
+            .with_library(|lib| lib.doc(doc_id).map_err(|e| e.to_string()))?
+            .ok_or_else(|| {
+                format!(
+                    "there is no document with id {doc_id} in the library; \
+                     list_library gives the ids"
+                )
+            })?;
+        // The tool speaks in page numbers; the document is indexed from zero.
+        self.open_library_doc_at(doc_id, page.map(|p| p.saturating_sub(1)), ctx);
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
+        Ok(serde_json::json!({
+            "opened": meta.title,
+            "doc_id": meta.id,
+            "pages": meta.page_count,
+            "showing_page": page,
+        }))
+    }
+
+    fn mcp_add_markup(
+        &mut self,
+        req: &crate::mcp::bridge::MarkupReq,
+    ) -> Result<serde_json::Value, String> {
+        let Some(dc) = &mut self.dc else {
+            return Err("no document is open; open_document opens one".to_owned());
+        };
+        let pages = dc.doc.pages.len();
+        if req.page > pages {
+            return Err(format!(
+                "this document has {pages} page{}, so there is no page {}",
+                if pages == 1 { "" } else { "s" },
+                req.page
+            ));
+        }
+        let id = dc.store.alloc_id();
+        let annotation =
+            crate::mcp::bridge::annotation_from(req, id, dc.current_style, dc.current_font_size)?;
+        let (kind, page) = (req.kind.clone(), req.page);
+        // Through the history, so the user can undo what an assistant drew.
+        dc.history.apply(
+            Command::AddAnnotation(annotation),
+            &mut dc.store,
+            &mut dc.pages,
+        );
+        dc.selection = Some(id);
+        Ok(serde_json::json!({ "added": kind, "page": page, "annotation_id": id }))
+    }
+
+    fn mcp_export_pdf(&mut self, path: &str, flatten: bool) -> Result<serde_json::Value, String> {
+        let Some(dc) = &self.dc else {
+            return Err("no document is open; open_document opens one".to_owned());
+        };
+        let path = PathBuf::from(path);
+        if path.extension().is_none() {
+            return Err("the path needs a filename ending in .pdf".to_owned());
+        }
+        let options = crate::export::pdf::ExportOptions {
+            flatten,
+            ocr_layers: None,
+        };
+        crate::export::pdf::export_pdf(&dc.doc, &dc.pages, &dc.store, options, &path)
+            .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+        Ok(serde_json::json!({
+            "written": path.display().to_string(),
+            "flattened": flatten,
+        }))
+    }
+
+    fn mcp_find_matches(
+        &mut self,
+        query: &str,
+        ctx: &egui::Context,
+    ) -> Result<serde_json::Value, String> {
+        /// More than this and the answer is a wall of coordinates nobody reads.
+        const MAX: usize = 50;
+
+        let models_dir = self.library.as_ref().map(|lib| lib.root.join("models"));
+        let Some(dc) = &mut self.dc else {
+            return Err("no document is open; open_document opens one".to_owned());
+        };
+        let query = query.trim();
+        if query.is_empty() {
+            return Err("a search needs something to search for".to_owned());
+        }
+        // Reading the document's text is what ⌘F does too, and it happens on a
+        // worker; a caller that asks again in a moment sees more of it.
+        if dc.text_worker.is_none() && dc.page_text.len() < dc.doc.pages.len() {
+            dc.text_worker = Some(crate::library::textjob::TextWorker::spawn(
+                dc.doc.source.clone(),
+                models_dir,
+                ctx.clone(),
+            ));
+        }
+        ui::findbar::drain_worker(dc);
+
+        let found = ui::findbar::matches_for(dc, query);
+        let matches: Vec<serde_json::Value> = found
+            .iter()
+            .take(MAX)
+            .map(|m| {
+                let text = dc
+                    .page_text
+                    .get(&m.source_page)
+                    .and_then(|layout| layout.lines.get(m.line))
+                    .map(|line| ui::findbar::snippet(line, &m.range))
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "page": m.source_page + 1,
+                    "text": text,
+                    "x0": m.rect.min.x,
+                    "y0": m.rect.min.y,
+                    "x1": m.rect.max.x,
+                    "y1": m.rect.max.y,
+                })
+            })
+            .collect();
+        let unread = dc.doc.pages.len().saturating_sub(dc.page_text.len());
+        Ok(serde_json::json!({
+            "query": query,
+            "count": found.len(),
+            "matches": matches,
+            "pages_still_being_read": unread,
+        }))
+    }
+
     fn menu_bar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
@@ -1104,6 +1354,7 @@ impl eframe::App for EvoApp {
         eframe::set_value(storage, "ribbon", &self.ribbon);
         eframe::set_value(storage, "script_prefs", &self.script_prefs);
         eframe::set_value(storage, "assistant_prefs", &self.assistant_prefs);
+        eframe::set_value(storage, "mcp_prefs", &self.mcp_prefs);
     }
 
     fn on_exit(&mut self) {
@@ -1172,6 +1423,10 @@ impl eframe::App for EvoApp {
             }
         }
 
+        // Before anything else this frame: a tool call is waiting on an answer
+        // that only `&mut self` can give.
+        self.drain_mcp(ctx);
+
         self.handle_shortcuts(ctx);
 
         if let Some(dc) = &mut self.dc {
@@ -1207,12 +1462,15 @@ impl eframe::App for EvoApp {
             &mut self.script_prefs,
             &mut self.assistant_prefs,
             &mut self.llm_downloads,
+            &mut self.mcp_prefs,
+            self.mcp.as_ref().map(|server| server.status()),
         ) {
             // Turning enrichment on (or changing the model) is the worker's
             // cue to start; it is the only place either can change.
             if let Some(lib) = &self.library {
                 lib.set_assistant(&self.assistant_prefs, &self.script_prefs.model);
             }
+            self.reconcile_mcp(ctx);
             if let Some(storage) = frame.storage_mut() {
                 self.save(storage);
                 storage.flush();

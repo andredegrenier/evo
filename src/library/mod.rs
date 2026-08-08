@@ -284,17 +284,40 @@ impl Library {
         Ok(())
     }
 
+    /// The search index, opened on first use.
+    fn index(&self) -> Result<&search::SearchIndex, LibraryError> {
+        if let Some(index) = self.search_index.get() {
+            return Ok(index);
+        }
+        let index = search::SearchIndex::open_or_create(&self.root.join("index"))?;
+        let _ = self.search_index.set(index);
+        Ok(self.search_index.get().expect("just set"))
+    }
+
     /// Full-text search over indexed documents.
     pub fn search(&self, query: &str) -> Result<Vec<search::SearchHit>, LibraryError> {
-        let index = match self.search_index.get() {
-            Some(index) => index,
-            None => {
-                let index = search::SearchIndex::open_or_create(&self.root.join("index"))?;
-                let _ = self.search_index.set(index);
-                self.search_index.get().unwrap()
-            }
-        };
-        index.search(query, 50)
+        self.index()?.search(query, 50)
+    }
+
+    /// The stored text of a document's pages, zero-based and half-open. Reading
+    /// it back out of the index costs nothing next to extracting it from the
+    /// PDF again, which is why the MCP server quotes documents from here.
+    pub fn page_texts(
+        &self,
+        doc_id: &str,
+        range: std::ops::Range<usize>,
+    ) -> Result<Vec<String>, LibraryError> {
+        self.index()?.page_texts(doc_id, range)
+    }
+
+    /// Whether the pages of `doc_id` have been indexed.
+    pub fn is_indexed(&self, doc_id: &str) -> Result<bool, LibraryError> {
+        self.index()?.has_document(doc_id)
+    }
+
+    /// One document's metadata, if the library holds it.
+    pub fn doc(&self, id: &str) -> Result<Option<DocMeta>, LibraryError> {
+        self.db.get_doc(id)
     }
 
     pub fn thumb_path(&self, id: &str) -> PathBuf {

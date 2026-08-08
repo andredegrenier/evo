@@ -7,6 +7,7 @@ mod export;
 mod keymap;
 mod library;
 mod llm;
+mod mcp;
 mod render;
 mod script;
 mod state;
@@ -29,7 +30,16 @@ fn load_icon() -> eframe::egui::IconData {
 }
 
 fn main() -> eframe::Result {
-    let initial_file = std::env::args().nth(1).map(std::path::PathBuf::from);
+    let first_arg = std::env::args().nth(1);
+
+    // `evo mcp-serve` is a different program wearing the same binary: an MCP
+    // server on stdin/stdout, with no window at all. Answer it before eframe
+    // gets anywhere near opening one.
+    if first_arg.as_deref() == Some("mcp-serve") {
+        mcp::headless::main();
+    }
+
+    let initial_file = first_arg.map(std::path::PathBuf::from);
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()

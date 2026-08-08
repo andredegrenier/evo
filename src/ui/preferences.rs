@@ -7,6 +7,8 @@ use crate::keymap::{Action, Category, Keymap};
 use crate::library::enrich::AssistantPrefs;
 use crate::llm;
 use crate::llm::download::Downloads;
+use crate::mcp::McpPrefs;
+use crate::mcp::runtime::McpStatus;
 use crate::script::ScriptPrefs;
 use crate::script::model::Api;
 use crate::ui::ribbon::RibbonConfig;
@@ -18,6 +20,7 @@ pub enum Tab {
     Ribbon,
     Model,
     Scripting,
+    Mcp,
 }
 
 #[derive(Default)]
@@ -44,6 +47,10 @@ impl PreferencesState {
 }
 
 /// Returns true when something changed, so the caller knows to persist.
+///
+/// One argument per group of settings. Bundling them into a struct would only
+/// move the list somewhere else, and each one is genuinely separate.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ctx: &egui::Context,
     st: &mut PreferencesState,
@@ -52,6 +59,8 @@ pub fn show(
     scripts: &mut ScriptPrefs,
     assistant: &mut AssistantPrefs,
     downloads: &mut Downloads,
+    mcp: &mut McpPrefs,
+    mcp_status: Option<McpStatus>,
 ) -> bool {
     if !st.open {
         st.capturing = None;
@@ -73,6 +82,7 @@ pub fn show(
                     (Tab::Ribbon, "Ribbon"),
                     (Tab::Model, "Model"),
                     (Tab::Scripting, "Scripting"),
+                    (Tab::Mcp, "MCP"),
                 ] {
                     if ui.selectable_label(st.tab == tab, label).clicked() {
                         st.tab = tab;
@@ -86,6 +96,7 @@ pub fn show(
                 Tab::Ribbon => changed |= ribbon_tab(ui, ribbon),
                 Tab::Model => changed |= model_tab(ui, scripts, assistant, downloads),
                 Tab::Scripting => changed |= scripting_tab(ui, scripts),
+                Tab::Mcp => changed |= mcp_tab(ui, mcp, mcp_status.clone()),
             }
         });
     st.open = open;
@@ -654,6 +665,105 @@ fn scripting_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs) -> bool {
     *prefs != before
 }
 
+/// The MCP server: whether other programs on this machine may drive evo, and
+/// the token they have to present to do it.
+fn mcp_tab(ui: &mut egui::Ui, prefs: &mut McpPrefs, status: Option<McpStatus>) -> bool {
+    let before = prefs.clone();
+
+    ui.heading("MCP Server");
+    ui.label(
+        egui::RichText::new(
+            "Lets an assistant search your library, open a document, mark it up \
+             and export it — the same things you can do, done for you while you \
+             watch. It listens on this machine only (127.0.0.1) and needs the \
+             token below.",
+        )
+        .weak(),
+    );
+    ui.add_space(10.0);
+
+    ui.checkbox(&mut prefs.server_enabled, "Run the MCP server")
+        .on_hover_text("Off by default: evo does not open a port unless you ask it to");
+
+    // What the server is actually doing, which is not always what was asked
+    // for: the port may be taken.
+    if let Some(status) = &status {
+        ui.add_space(4.0);
+        if let Some(error) = &status.error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        } else if let Some(port) = status.listening {
+            ui.label(
+                egui::RichText::new(format!("Listening on 127.0.0.1:{port}"))
+                    .weak()
+                    .size(11.0),
+            );
+        }
+    }
+
+    ui.add_space(8.0);
+    egui::Grid::new("mcp-grid")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Port");
+            ui.add(egui::DragValue::new(&mut prefs.port).range(1024..=65535))
+                .on_hover_text("Change this if something else already uses 8137");
+            ui.end_row();
+
+            ui.label("Token");
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut prefs.token.clone())
+                        .desired_width(240.0)
+                        .font(egui::TextStyle::Monospace)
+                        .interactive(false),
+                );
+                if ui.small_button("Copy").clicked() {
+                    ui.ctx().copy_text(prefs.token.clone());
+                }
+                if ui
+                    .small_button("Regenerate")
+                    .on_hover_text("Any client using the old token stops working")
+                    .clicked()
+                {
+                    prefs.token = crate::mcp::new_token();
+                }
+            });
+            ui.end_row();
+        });
+
+    ui.add_space(12.0);
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Client configuration").strong());
+        if ui.small_button("Copy").clicked() {
+            ui.ctx().copy_text(prefs.client_config());
+        }
+    });
+    ui.label(egui::RichText::new("Paste this into the MCP client you want to connect.").weak());
+    ui.add_space(4.0);
+    ui.add(
+        egui::TextEdit::multiline(&mut prefs.client_config().as_str())
+            .desired_width(f32::INFINITY)
+            .font(egui::TextStyle::Monospace)
+            .interactive(false),
+    );
+
+    ui.add_space(10.0);
+    ui.label(
+        egui::RichText::new(
+            "A client that would rather start its own process can run \
+             `evo mcp-serve` instead, which serves the library over stdin and \
+             stdout. Only one of the two can run at a time: they share the \
+             library's database.",
+        )
+        .weak()
+        .size(11.0),
+    );
+
+    *prefs != before
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -699,6 +809,34 @@ mod tests {
             model_tab(ui, &mut prefs, &mut assistant, &mut downloads);
         });
         assert_eq!(assistant, before, "drawing does not flip the switch");
+    }
+
+    /// The MCP tab has to draw in every state the server can be in, including
+    /// the one where the port was taken.
+    #[test]
+    fn the_mcp_tab_draws_running_stopped_and_broken() {
+        let mut prefs = McpPrefs::default();
+        for status in [
+            None,
+            Some(McpStatus::default()),
+            Some(McpStatus {
+                listening: Some(8137),
+                error: None,
+            }),
+            Some(McpStatus {
+                listening: None,
+                error: Some("port already in use".to_owned()),
+            }),
+        ] {
+            let ctx = egui::Context::default();
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                assert!(
+                    !mcp_tab(ui, &mut prefs, status.clone()),
+                    "drawing the tab must not change a setting"
+                );
+            });
+        }
+        assert!(!prefs.server_enabled, "and must not switch the server on");
     }
 
     #[test]
