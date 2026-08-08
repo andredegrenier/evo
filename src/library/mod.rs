@@ -2,6 +2,7 @@
 //! metadata store, under the platform data directory. Markup made on library
 //! documents persists as a sidecar record — the PDF blob itself is immutable.
 
+pub mod enrich;
 pub mod extract;
 pub mod indexer;
 pub mod ocr;
@@ -97,6 +98,28 @@ pub struct DocMeta {
     /// Why the last indexing attempt failed, if it did.
     #[serde(default)]
     pub index_error: Option<String>,
+    /// A sentence or two the assistant wrote about the document, if
+    /// enrichment is switched on and has got to it.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// Tags the assistant proposed. Kept apart from `tags` so the user's own
+    /// are never overwritten -- or silently claimed as the machine's.
+    #[serde(default)]
+    pub auto_tags: Vec<String>,
+}
+
+impl DocMeta {
+    /// Every tag shown for this document: the user's first, then whatever the
+    /// assistant added that the user had not already thought of.
+    pub fn all_tags(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = self.tags.iter().map(String::as_str).collect();
+        for tag in &self.auto_tags {
+            if !out.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                out.push(tag);
+            }
+        }
+        out
+    }
 }
 
 /// The persisted markup layer for one library document.
@@ -123,8 +146,29 @@ pub struct Library {
     /// Shared with the indexer thread: redb permits only one `Database` per
     /// file, so this handle is the only one that ever exists.
     db: Arc<store::MetaDb>,
-    indexer: Option<indexer::Indexer>,
+    indexer: Option<Arc<indexer::Indexer>>,
+    /// Summaries and tags. Spawned alongside the indexer but a separate
+    /// worker: a model takes seconds where extraction takes milliseconds, and
+    /// nothing that reads a document should wait behind it.
+    enricher: Option<enrich::Enricher>,
     search_index: std::sync::OnceLock<search::SearchIndex>,
+}
+
+/// Throw the tantivy index away when it was written to an older layout. It is
+/// a cache of what the blobs and the metadata store already hold, so the
+/// reconciliation pass refills it; there is nothing to migrate.
+///
+/// Returns whether the index was discarded.
+pub fn migrate_search_index(db: &store::MetaDb, index_dir: &Path) -> Result<bool, LibraryError> {
+    if db.search_schema()? == Some(search::SCHEMA_VERSION) {
+        return Ok(false);
+    }
+    let existed = index_dir.exists();
+    if existed {
+        std::fs::remove_dir_all(index_dir)?;
+    }
+    db.set_search_schema(search::SCHEMA_VERSION)?;
+    Ok(existed)
 }
 
 impl Library {
@@ -147,25 +191,47 @@ impl Library {
             blobs,
             db,
             indexer: None,
+            enricher: None,
             search_index: std::sync::OnceLock::new(),
         })
     }
 
-    /// Start the background text-extraction/indexing worker. Documents from
-    /// previous sessions that were never indexed get picked up here.
+    /// Start the background text-extraction/indexing worker, and the
+    /// enrichment worker it feeds. Documents from previous sessions that were
+    /// never indexed get picked up here.
     pub fn start_indexer(&mut self, ctx: &eframe::egui::Context) {
         if self.indexer.is_some() {
             return;
         }
+        let index_dir = self.root.join("index");
+        if let Err(e) = migrate_search_index(&self.db, &index_dir) {
+            eprintln!("could not rebuild the search index: {e}");
+        }
+
+        // The two workers know about each other in both directions: the
+        // indexer says what it has finished, and enrichment asks it to write
+        // the summary into the index. The channel is created first so neither
+        // has to be built before the other.
+        let (on_indexed, indexed_rx) = std::sync::mpsc::channel::<String>();
         let known = self.list().unwrap_or_default();
-        self.indexer = Some(indexer::Indexer::spawn(
-            self.root.join("index"),
+        let indexer = Arc::new(indexer::Indexer::spawn(
+            index_dir.clone(),
             self.root.join("models"),
             self.blobs.clone(),
             known,
             self.db.clone(),
+            on_indexed.clone(),
             ctx.clone(),
         ));
+        self.enricher = Some(enrich::Enricher::spawn(
+            index_dir,
+            self.db.clone(),
+            indexer.clone(),
+            on_indexed,
+            indexed_rx,
+            ctx.clone(),
+        ));
+        self.indexer = Some(indexer);
     }
 
     pub fn index_status(&self) -> Option<indexer::IndexStatus> {
@@ -176,6 +242,28 @@ impl Library {
     pub fn clear_index_error(&self) {
         if let Some(indexer) = &self.indexer {
             indexer.clear_error();
+        }
+    }
+
+    /// Tell the enrichment worker whether it may run, and which model with.
+    /// Switching it on starts a pass over everything that has no summary yet.
+    pub fn set_assistant(
+        &self,
+        prefs: &enrich::AssistantPrefs,
+        model: &crate::script::model::ModelConfig,
+    ) {
+        if let Some(enricher) = &self.enricher {
+            enricher.configure(prefs.enrich_enabled, model);
+        }
+    }
+
+    pub fn enrich_status(&self) -> Option<enrich::EnrichStatus> {
+        self.enricher.as_ref().map(|e| e.status())
+    }
+
+    pub fn clear_enrich_error(&self) {
+        if let Some(enricher) = &self.enricher {
+            enricher.clear_error();
         }
     }
 
@@ -262,6 +350,8 @@ impl Library {
             tags: Vec::new(),
             text_status: vec![PageTextStatus::Pending; doc.pages.len()],
             index_error: None,
+            summary: None,
+            auto_tags: Vec::new(),
         };
         self.db.put_doc(&meta)?;
         if let Some(indexer) = &self.indexer {
@@ -424,7 +514,71 @@ mod tests {
         assert_eq!(meta.tags, vec!["invoice".to_string()]);
         assert!(meta.text_status.is_empty());
         assert!(meta.index_error.is_none());
+        // Nor did it know about summaries.
+        assert!(meta.summary.is_none());
+        assert!(meta.auto_tags.is_empty());
         assert!(indexer::needs_reindex(&meta, true));
+    }
+
+    #[test]
+    fn enrichment_round_trips_and_leaves_the_users_tags_alone() {
+        let (lib, dir) = temp_library("enrich");
+        let mut meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        assert!(meta.summary.is_none());
+
+        meta.tags = vec!["mine".into()];
+        lib.db.put_doc(&meta).unwrap();
+        lib.db
+            .update_enrichment(
+                &meta.id,
+                Some("A two-page sample."),
+                &["sample".to_owned(), "test".to_owned()],
+            )
+            .unwrap();
+
+        let stored = lib.db.get_doc(&meta.id).unwrap().unwrap();
+        assert_eq!(stored.summary.as_deref(), Some("A two-page sample."));
+        assert_eq!(stored.auto_tags, ["sample", "test"]);
+        assert_eq!(stored.tags, ["mine"], "the user's own tags are untouched");
+        assert_eq!(stored.all_tags(), ["mine", "sample", "test"]);
+        // Updating an unknown document is a no-op, not an error: it may have
+        // been deleted while the worker was describing it.
+        lib.db.update_enrichment("nope", Some("x"), &[]).unwrap();
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// An index written by an older evo is thrown away rather than migrated;
+    /// the reconciliation pass fills the new one in.
+    #[test]
+    fn an_index_from_an_older_schema_is_rebuilt_once() {
+        let (lib, dir) = temp_library("schema");
+        let index_dir = lib.root.join("index");
+        std::fs::create_dir_all(&index_dir).unwrap();
+        std::fs::write(index_dir.join("meta.json"), b"{}").unwrap();
+
+        // No version recorded at all: every library written before v0.4.
+        assert!(lib.db.search_schema().unwrap().is_none());
+        assert!(migrate_search_index(&lib.db, &index_dir).unwrap());
+        assert!(!index_dir.exists(), "the old index was removed");
+        assert_eq!(
+            lib.db.search_schema().unwrap(),
+            Some(search::SCHEMA_VERSION)
+        );
+
+        // Second launch: nothing to do, and the index survives.
+        std::fs::create_dir_all(&index_dir).unwrap();
+        std::fs::write(index_dir.join("meta.json"), b"{}").unwrap();
+        assert!(!migrate_search_index(&lib.db, &index_dir).unwrap());
+        assert!(index_dir.join("meta.json").exists());
+
+        // A version from some other layout also triggers a rebuild.
+        lib.db.set_search_schema(99).unwrap();
+        assert!(migrate_search_index(&lib.db, &index_dir).unwrap());
+        assert_eq!(
+            lib.db.search_schema().unwrap(),
+            Some(search::SCHEMA_VERSION)
+        );
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]

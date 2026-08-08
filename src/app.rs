@@ -39,6 +39,8 @@ pub struct EvoApp {
     /// Spawned on first use: most sessions never run a script.
     script_engine: Option<crate::script::ScriptEngine>,
     script_prefs: crate::script::ScriptPrefs,
+    /// What the model may do unasked: summarizing the library, so far.
+    assistant_prefs: crate::library::enrich::AssistantPrefs,
     scripts_ui: ui::scripts::ScriptsState,
     /// Spawned the first time the chat panel is opened.
     chat_engine: Option<crate::chat::ChatEngine>,
@@ -101,25 +103,28 @@ impl EvoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
         let vibrancy = apply_window_effects(cc);
-        let (theme, glass_pref, keymap, mut ribbon, script_prefs) = match cc.storage {
-            Some(storage) => (
-                eframe::get_value(storage, "theme").unwrap_or_default(),
-                // Solid by default: translucency is a finish, not the design.
-                eframe::get_value(storage, "glass").unwrap_or(false),
-                Keymap::from_stored(
-                    eframe::get_value::<StoredKeymap>(storage, "keymap").unwrap_or_default(),
+        let (theme, glass_pref, keymap, mut ribbon, script_prefs, assistant_prefs) =
+            match cc.storage {
+                Some(storage) => (
+                    eframe::get_value(storage, "theme").unwrap_or_default(),
+                    // Solid by default: translucency is a finish, not the design.
+                    eframe::get_value(storage, "glass").unwrap_or(false),
+                    Keymap::from_stored(
+                        eframe::get_value::<StoredKeymap>(storage, "keymap").unwrap_or_default(),
+                    ),
+                    eframe::get_value(storage, "ribbon").unwrap_or_default(),
+                    eframe::get_value(storage, "script_prefs").unwrap_or_default(),
+                    eframe::get_value(storage, "assistant_prefs").unwrap_or_default(),
                 ),
-                eframe::get_value(storage, "ribbon").unwrap_or_default(),
-                eframe::get_value(storage, "script_prefs").unwrap_or_default(),
-            ),
-            None => (
-                ThemeChoice::default(),
-                false,
-                Keymap::default(),
-                ui::ribbon::RibbonConfig::default(),
-                crate::script::ScriptPrefs::default(),
-            ),
-        };
+                None => (
+                    ThemeChoice::default(),
+                    false,
+                    Keymap::default(),
+                    ui::ribbon::RibbonConfig::default(),
+                    crate::script::ScriptPrefs::default(),
+                    crate::library::enrich::AssistantPrefs::default(),
+                ),
+            };
         // A stored layout predates any item added since it was written.
         ribbon.sanitize();
         let glass = glass_pref && vibrancy;
@@ -127,6 +132,9 @@ impl EvoApp {
         let library = match crate::library::Library::open_default() {
             Ok(mut lib) => {
                 lib.start_indexer(&cc.egui_ctx);
+                // Enrichment starts switched off inside the worker; this is
+                // where a saved "yes" turns it on and starts the first pass.
+                lib.set_assistant(&assistant_prefs, &script_prefs.model);
                 Some(lib)
             }
             Err(e) => {
@@ -152,6 +160,7 @@ impl EvoApp {
             ribbon,
             script_engine: None,
             script_prefs,
+            assistant_prefs,
             scripts_ui: ui::scripts::ScriptsState::default(),
             chat_engine: None,
             llm_downloads: crate::llm::download::Downloads::default(),
@@ -1094,6 +1103,7 @@ impl eframe::App for EvoApp {
         eframe::set_value(storage, "keymap", &self.keymap.to_stored());
         eframe::set_value(storage, "ribbon", &self.ribbon);
         eframe::set_value(storage, "script_prefs", &self.script_prefs);
+        eframe::set_value(storage, "assistant_prefs", &self.assistant_prefs);
     }
 
     fn on_exit(&mut self) {
@@ -1195,11 +1205,18 @@ impl eframe::App for EvoApp {
             &mut self.keymap,
             &mut self.ribbon,
             &mut self.script_prefs,
+            &mut self.assistant_prefs,
             &mut self.llm_downloads,
-        ) && let Some(storage) = frame.storage_mut()
-        {
-            self.save(storage);
-            storage.flush();
+        ) {
+            // Turning enrichment on (or changing the model) is the worker's
+            // cue to start; it is the only place either can change.
+            if let Some(lib) = &self.library {
+                lib.set_assistant(&self.assistant_prefs, &self.script_prefs.model);
+            }
+            if let Some(storage) = frame.storage_mut() {
+                self.save(storage);
+                storage.flush();
+            }
         }
         self.scripts_window(ctx);
 

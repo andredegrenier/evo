@@ -15,6 +15,11 @@ const META: TableDefinition<&str, u64> = TableDefinition::new("meta");
 
 const SCHEMA_VERSION: u64 = 1;
 
+/// Key in [`META`] holding the layout of the tantivy index on disk. The index
+/// is a cache that can always be rebuilt, so a change of layout is handled by
+/// throwing it away rather than by migrating it.
+const SEARCH_SCHEMA: &str = "search_schema";
+
 pub struct MetaDb {
     db: Database,
 }
@@ -86,6 +91,55 @@ impl MetaDb {
                 let json = serde_json::to_vec(&meta).map_err(db_err)?;
                 table.insert(id, json.as_slice()).map_err(db_err)?;
             }
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(())
+    }
+
+    /// Store the summary and automatic tags the assistant produced. Like
+    /// [`Self::update_text_status`] this is a read-modify-write in one
+    /// transaction, and a document deleted meanwhile is not an error.
+    pub fn update_enrichment(
+        &self,
+        id: &str,
+        summary: Option<&str>,
+        auto_tags: &[String],
+    ) -> Result<(), LibraryError> {
+        let tx = self.db.begin_write().map_err(db_err)?;
+        {
+            let mut table = tx.open_table(DOCS).map_err(db_err)?;
+            let current: Option<DocMeta> = match table.get(id).map_err(db_err)? {
+                Some(guard) => Some(serde_json::from_slice(guard.value()).map_err(db_err)?),
+                None => None,
+            };
+            if let Some(mut meta) = current {
+                meta.summary = summary.map(str::to_owned);
+                meta.auto_tags = auto_tags.to_vec();
+                let json = serde_json::to_vec(&meta).map_err(db_err)?;
+                table.insert(id, json.as_slice()).map_err(db_err)?;
+            }
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(())
+    }
+
+    /// The layout of the tantivy index this library last wrote, if it has
+    /// written one. `None` means "before the version was recorded", which is
+    /// every index written by v0.3 and earlier.
+    pub fn search_schema(&self) -> Result<Option<u64>, LibraryError> {
+        let tx = self.db.begin_read().map_err(db_err)?;
+        let table = tx.open_table(META).map_err(db_err)?;
+        Ok(table
+            .get(SEARCH_SCHEMA)
+            .map_err(db_err)?
+            .map(|guard| guard.value()))
+    }
+
+    pub fn set_search_schema(&self, version: u64) -> Result<(), LibraryError> {
+        let tx = self.db.begin_write().map_err(db_err)?;
+        {
+            let mut table = tx.open_table(META).map_err(db_err)?;
+            table.insert(SEARCH_SCHEMA, version).map_err(db_err)?;
         }
         tx.commit().map_err(db_err)?;
         Ok(())

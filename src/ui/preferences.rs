@@ -4,6 +4,7 @@
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 
 use crate::keymap::{Action, Category, Keymap};
+use crate::library::enrich::AssistantPrefs;
 use crate::llm;
 use crate::llm::download::Downloads;
 use crate::script::ScriptPrefs;
@@ -49,6 +50,7 @@ pub fn show(
     keymap: &mut Keymap,
     ribbon: &mut RibbonConfig,
     scripts: &mut ScriptPrefs,
+    assistant: &mut AssistantPrefs,
     downloads: &mut Downloads,
 ) -> bool {
     if !st.open {
@@ -82,7 +84,7 @@ pub fn show(
             match st.tab {
                 Tab::Shortcuts => changed |= shortcuts_tab(ctx, ui, st, keymap),
                 Tab::Ribbon => changed |= ribbon_tab(ui, ribbon),
-                Tab::Model => changed |= model_tab(ui, scripts, downloads),
+                Tab::Model => changed |= model_tab(ui, scripts, assistant, downloads),
                 Tab::Scripting => changed |= scripting_tab(ui, scripts),
             }
         });
@@ -360,8 +362,14 @@ const BUILTIN: bool = cfg!(feature = "builtin-llm");
 
 /// Where chat and scripts get their answers from: a model evo downloads and
 /// runs itself, or a server on the machine.
-fn model_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs, downloads: &mut Downloads) -> bool {
+fn model_tab(
+    ui: &mut egui::Ui,
+    prefs: &mut ScriptPrefs,
+    assistant: &mut AssistantPrefs,
+    downloads: &mut Downloads,
+) -> bool {
     let before = prefs.clone();
+    let assistant_before = *assistant;
 
     ui.heading("Model");
     ui.label(
@@ -430,12 +438,38 @@ fn model_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs, downloads: &mut Downloa
             });
     }
 
+    ui.add_space(10.0);
+    library_section(ui, assistant);
+
     if BUILTIN {
         ui.add_space(8.0);
         catalog_section(ui, prefs, downloads);
     }
 
-    *prefs != before
+    *prefs != before || *assistant != assistant_before
+}
+
+/// What the model is allowed to do on its own, unasked. One switch so far.
+fn library_section(ui: &mut egui::Ui, assistant: &mut AssistantPrefs) {
+    ui.separator();
+    ui.label(egui::RichText::new("Library").strong());
+    ui.checkbox(
+        &mut assistant.enrich_enabled,
+        "Summarize and tag library documents",
+    )
+    .on_hover_text(
+        "Every document is read through the model once, in the background, \
+         and its summary and tags become searchable.",
+    );
+    ui.label(
+        egui::RichText::new(
+            "Off by default: this reads each document you import through the \
+             model, which takes a while on a large library. Nothing leaves \
+             this machine unless the model you chose above is on another one.",
+        )
+        .weak()
+        .size(11.0),
+    );
 }
 
 /// The downloadable models: what they cost in disk, what licence they carry,
@@ -630,14 +664,41 @@ mod tests {
     #[test]
     fn the_model_tab_draws_for_every_dialect() {
         let mut prefs = ScriptPrefs::default();
+        let mut assistant = AssistantPrefs::default();
         let mut downloads = Downloads::default();
         for api in Api::ALL {
             prefs.model.api = api;
             let ctx = egui::Context::default();
             let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-                model_tab(ui, &mut prefs, &mut downloads);
+                model_tab(ui, &mut prefs, &mut assistant, &mut downloads);
             });
         }
+    }
+
+    /// The enrichment switch is a preference like any other: touching it has
+    /// to report a change so the app persists it.
+    #[test]
+    fn turning_enrichment_on_counts_as_a_change() {
+        let mut prefs = ScriptPrefs::default();
+        let mut assistant = AssistantPrefs::default();
+        let mut downloads = Downloads::default();
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            assert!(
+                !model_tab(ui, &mut prefs, &mut assistant, &mut downloads),
+                "nothing was touched"
+            );
+        });
+
+        assistant.enrich_enabled = true;
+        let before = assistant;
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            // Drawn with it on: the change is reported by comparison, and the
+            // tab still lays out.
+            model_tab(ui, &mut prefs, &mut assistant, &mut downloads);
+        });
+        assert_eq!(assistant, before, "drawing does not flip the switch");
     }
 
     #[test]

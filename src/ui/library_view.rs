@@ -7,12 +7,17 @@ use eframe::egui::{self, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind,
 
 use egui_phosphor::regular as icon;
 
+use crate::library::enrich::EnrichStatus;
 use crate::library::indexer::IndexStatus;
 use crate::library::{DocMeta, Library, PageTextStatus, spawn_thumbnail_job};
 use crate::ui::theme::ACCENT;
 
 const CARD_W: f32 = 168.0;
 const THUMB_H: f32 = 190.0;
+/// How much of a summary fits under a card's title before it is cut.
+const SUMMARY_CHARS: usize = 90;
+/// Tags shown in full on a card; the rest become "+n".
+const TAG_CHIPS: usize = 3;
 /// How often to re-poll the indexer while it has work outstanding.
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(600);
 
@@ -29,6 +34,8 @@ pub struct LibraryViewState {
     /// Last observed indexer queue depth; a change means the stored per-page
     /// statuses moved on and the card metadata needs re-reading.
     last_pending: Option<usize>,
+    /// Same idea for summaries: a new one changes the card under it.
+    last_enriched: Option<usize>,
     /// ⌘F on the library home focuses the search field.
     pub focus_search_pending: bool,
 }
@@ -54,12 +61,23 @@ pub fn show(
     let mut action = None;
 
     let status = library.index_status();
+    let enrich = library.enrich_status();
     if let Some(st) = &status {
         if st.pending > 0 || st.ocr_pending > 0 {
             ui.ctx().request_repaint_after(POLL_INTERVAL);
         }
         if state.last_pending != Some(st.pending) {
             state.last_pending = Some(st.pending);
+            state.mark_dirty();
+        }
+    }
+    if let Some(st) = &enrich {
+        if st.pending > 0 {
+            ui.ctx().request_repaint_after(POLL_INTERVAL);
+        }
+        // A finished summary changes a card, so re-read when the count moves.
+        if state.last_enriched != Some(st.done) {
+            state.last_enriched = Some(st.done);
             state.mark_dirty();
         }
     }
@@ -102,6 +120,9 @@ pub fn show(
         }
         if let Some(st) = &status {
             index_activity(ui, library, st);
+        }
+        if let Some(st) = &enrich {
+            enrich_activity(ui, library, st);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(12.0);
@@ -202,6 +223,94 @@ fn index_activity(ui: &mut egui::Ui, library: &Library, status: &IndexStatus) {
             library.clear_index_error();
         }
     }
+}
+
+/// What the summarizer is doing, and why it stopped if it did. Same shape as
+/// the indexer's line so the header does not turn into a status console.
+fn enrich_activity(ui: &mut egui::Ui, library: &Library, status: &EnrichStatus) {
+    if let Some(current) = &status.current {
+        ui.add(egui::Spinner::new().size(14.0));
+        ui.weak(format!("Summarizing {current}"));
+    } else if status.pending > 0 {
+        ui.add(egui::Spinner::new().size(14.0));
+        ui.weak(format!(
+            "Summarizing {} document{}…",
+            status.pending,
+            if status.pending == 1 { "" } else { "s" }
+        ));
+    }
+    if let Some(error) = &status.last_error {
+        ui.label(
+            egui::RichText::new(format!("{} summaries paused", icon::WARNING_CIRCLE))
+                .color(ui.visuals().warn_fg_color),
+        )
+        .on_hover_text(error);
+        if ui
+            .small_button(icon::X)
+            .on_hover_text("Dismiss this message")
+            .clicked()
+        {
+            library.clear_enrich_error();
+        }
+    }
+}
+
+/// The summary and tags a card shows, if the document has been described.
+fn card_summary(ui: &mut egui::Ui, meta: &DocMeta) {
+    if let Some(summary) = &meta.summary {
+        let short = shorten(summary, SUMMARY_CHARS);
+        let label = ui.weak(egui::RichText::new(&short).size(11.0));
+        if short != *summary {
+            label.on_hover_text(summary);
+        }
+    }
+
+    let tags = meta.all_tags();
+    if tags.is_empty() {
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(4.0, 2.0);
+        for tag in tags.iter().take(TAG_CHIPS) {
+            chip(ui, tag);
+        }
+        if tags.len() > TAG_CHIPS {
+            ui.weak(egui::RichText::new(format!("+{}", tags.len() - TAG_CHIPS)).size(10.0))
+                .on_hover_text(tags[TAG_CHIPS..].join(", "));
+        }
+    });
+}
+
+fn chip(ui: &mut egui::Ui, text: &str) {
+    egui::Frame::new()
+        .fill(ui.visuals().faint_bg_color)
+        .stroke(Stroke::new(
+            1.0,
+            ui.visuals().weak_text_color().gamma_multiply(0.4),
+        ))
+        .corner_radius(CornerRadius::same(7))
+        .inner_margin(egui::Margin::symmetric(5, 1))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(text).size(10.0));
+        });
+}
+
+/// `text` cut to `max` characters on a word boundary, with an ellipsis.
+fn shorten(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let cut = text
+        .char_indices()
+        .nth(max)
+        .map(|(i, _)| i)
+        .unwrap_or(text.len());
+    let head = &text[..cut];
+    let head = match head.rfind(char::is_whitespace) {
+        Some(i) if i > max / 2 => &head[..i],
+        _ => head,
+    };
+    format!("{}…", head.trim_end_matches([' ', ',', ';', '.']))
 }
 
 /// Per-document indexing badges, derived from the stored per-page statuses.
@@ -333,6 +442,7 @@ fn doc_card(
                     if meta.page_count == 1 { "" } else { "s" }
                 ));
                 card_badges(ui, meta, status);
+                card_summary(ui, meta);
             });
         });
     });
@@ -399,7 +509,12 @@ fn show_search_results(
                         ui.set_width(ui.available_width() - 24.0);
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new(&hit.title).strong());
-                            ui.weak(format!("p. {}", hit.page + 1));
+                            if hit.is_summary {
+                                ui.weak("summary")
+                                    .on_hover_text("Matched the summary or tags of this document");
+                            } else {
+                                ui.weak(format!("p. {}", hit.page + 1));
+                            }
                         });
                         // Snippet with highlighted match ranges.
                         let mut job = LayoutJob::default();

@@ -16,8 +16,19 @@ use super::store::MetaDb;
 use super::{BlobStore, DocMeta, PageTextStatus};
 
 pub enum IndexJob {
-    Index { id: String, title: String },
-    Delete { id: String },
+    Index {
+        id: String,
+        title: String,
+    },
+    Delete {
+        id: String,
+    },
+    /// (Re)write one document's summary and tags into the index. Enrichment
+    /// stores them in the metadata store and then asks for this: the writer
+    /// belongs to this thread and only this thread writes through it.
+    Meta {
+        id: String,
+    },
 }
 
 #[derive(Default, Clone)]
@@ -58,13 +69,16 @@ pub struct Indexer {
 impl Indexer {
     /// Spawn the worker. `known_docs` seeds a reconciliation pass so documents
     /// imported in previous sessions get indexed too. `models_dir` is where
-    /// OCR models live (downloaded on first need).
+    /// OCR models live (downloaded on first need). Every document whose pages
+    /// are finished is announced on `on_indexed`, which is what gives the
+    /// enrichment worker something to summarize.
     pub fn spawn(
         index_dir: PathBuf,
         models_dir: PathBuf,
         blobs: Arc<dyn BlobStore>,
         known_docs: Vec<DocMeta>,
         db: Arc<MetaDb>,
+        on_indexed: Sender<String>,
         ctx: eframe::egui::Context,
     ) -> Self {
         let (tx, rx) = channel::<IndexJob>();
@@ -104,6 +118,7 @@ impl Indexer {
                     settings: InterpreterSettings::default(),
                     ocr: None,
                     status: shared,
+                    on_indexed,
                     ctx,
                 };
 
@@ -148,6 +163,8 @@ struct Worker {
     /// tried, `Some(Err)` = unavailable (offline or failed init).
     ocr: Option<Result<super::ocr::Ocr, String>>,
     status: Arc<Mutex<IndexStatus>>,
+    /// Documents whose pages are done, for the enrichment worker.
+    on_indexed: Sender<String>,
     ctx: eframe::egui::Context,
 }
 
@@ -181,11 +198,37 @@ impl Worker {
         self.set_error(reason);
     }
 
+    /// The summary and tags of a document as one searchable block, if it has
+    /// been enriched.
+    fn meta_of(&self, id: &str) -> Option<(String, String)> {
+        let meta = self.db.get_doc(id).ok().flatten()?;
+        let body = super::enrich::meta_body(&meta)?;
+        Some((meta.title, body))
+    }
+
     fn handle(&mut self, job: IndexJob, index: &SearchIndex, writer: &mut tantivy::IndexWriter) {
         match job {
             IndexJob::Index { id, title } => self.index_doc(&id, &title, index, writer),
             IndexJob::Delete { id } => {
                 if let Err(e) = index.delete_document(writer, &id) {
+                    self.set_error(e);
+                }
+            }
+            IndexJob::Meta { id } => {
+                let (title, body) = match self.meta_of(&id) {
+                    Some((title, body)) => (title, Some(body)),
+                    // Enrichment was cleared: take the meta document out again.
+                    None => (
+                        self.db
+                            .get_doc(&id)
+                            .ok()
+                            .flatten()
+                            .map(|m| m.title)
+                            .unwrap_or_default(),
+                        None,
+                    ),
+                };
+                if let Err(e) = index.index_meta(writer, &id, &title, body.as_deref()) {
                     self.set_error(e);
                 }
             }
@@ -296,9 +339,14 @@ impl Worker {
             }
         }
 
-        if let Err(e) = index.index_document(writer, id, title, &texts) {
+        // Replacing the pages takes the meta document with them, so whatever
+        // summary the document already had goes straight back in.
+        let meta_body = self.meta_of(id).map(|(_, body)| body);
+        if let Err(e) = index.index_document(writer, id, title, &texts, meta_body.as_deref()) {
             self.set_error(e);
         }
+        // Now that its text is in the index there is something to summarize.
+        let _ = self.on_indexed.send(id.to_owned());
     }
 }
 
@@ -317,6 +365,8 @@ mod tests {
             tags: Vec::new(),
             text_status: statuses,
             index_error: None,
+            summary: None,
+            auto_tags: Vec::new(),
         }
     }
 
