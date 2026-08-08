@@ -289,7 +289,11 @@ pub fn verify_and_commit(
         ));
     }
     // Rename is atomic, but only durable if the bytes are on the disk first.
-    File::open(part)
+    // Windows refuses sync_all on a read-only handle (os error 5), so the
+    // file must be reopened writable for the flush.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(part)
         .and_then(|f| f.sync_all())
         .map_err(|e| format!("could not flush {}: {e}", part.display()))?;
     std::fs::rename(part, dest).map_err(|e| {
