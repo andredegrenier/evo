@@ -1,0 +1,52 @@
+<!doctype html>
+<!--
+  What the service worker shows when the app shell itself is not in the cache
+  and the network is gone. Deliberately one file with nothing to fetch: a page
+  about being offline that needed the network would be a joke.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>evo — offline</title>
+    <style>
+      :root {
+        --base: #eff1f5;
+        --text: #4c4f69;
+        --subtext: #6c6f85;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --base: #1e1e2e;
+          --text: #cdd6f4;
+          --subtext: #a6adc8;
+        }
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 2rem;
+        background: var(--base);
+        color: var(--text);
+        font: 16px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      }
+      p {
+        color: var(--subtext);
+        max-width: 22rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>evo is offline</h1>
+      <p>
+        Your library lives on your own server, so evo needs to be able to reach
+        it. Reconnect and reload.
+      </p>
+    </main>
+  </body>
+</html>

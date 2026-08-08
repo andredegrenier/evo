@@ -1,23 +1,40 @@
 <!doctype html>
 <!--
-  The placeholder app shell. M24 replaces this with the real PWA; until then it
-  exists so the login flow can be walked in a browser rather than only in curl.
+  The whole app shell. Three views live in this file -- sign in, the library,
+  one document -- and the router shows exactly one of them; there is no
+  templating step and no build, so what is served is what is written here.
 -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#1e1e2e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="evo" />
     <title>evo</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" href="/icons/icon-192.png" />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <main>
-      <h1>evo</h1>
-
-      <form id="login" autocomplete="on">
+    <!-- Sign in. Two legs: a password alone offers enrolment, a password and
+         a code give a session. -->
+    <section id="view-login" class="view" hidden>
+      <form id="login" class="card sheet" autocomplete="on">
+        <h1>evo</h1>
         <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <input
+          id="password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          required
+        />
 
         <label for="code">Authenticator code</label>
         <input
@@ -27,69 +44,60 @@
           inputmode="numeric"
           autocomplete="one-time-code"
           pattern="[0-9]*"
+          maxlength="6"
           placeholder="000000"
         />
 
-        <button type="submit">Sign in</button>
+        <button type="submit" class="primary">Sign in</button>
+
+        <div id="enroll" hidden>
+          <p>
+            Scan this with an authenticator app, then enter the code it shows.
+          </p>
+          <img id="qr" alt="Enrolment QR code" width="220" height="220" />
+        </div>
+
+        <p id="login-message" class="message" role="status"></p>
       </form>
+    </section>
 
-      <section id="enroll" hidden>
-        <p>
-          Scan this with an authenticator app, then enter the code it shows to
-          finish setting up.
-        </p>
-        <img id="qr" alt="Setup QR code" width="240" height="240" />
-      </section>
+    <!-- The library. -->
+    <section id="view-library" class="view" hidden>
+      <header class="bar">
+        <h1>evo</h1>
+        <div class="bar-actions">
+          <label class="button" for="file">Add</label>
+          <input id="file" type="file" accept="application/pdf" multiple hidden />
+          <button id="sign-out" class="button quiet" type="button">Sign out</button>
+        </div>
+      </header>
+      <div class="bar search">
+        <input
+          id="search"
+          type="search"
+          placeholder="Search the library"
+          autocomplete="off"
+          enterkeyhint="search"
+        />
+      </div>
+      <p id="library-message" class="message" role="status"></p>
+      <div id="grid" class="grid"></div>
+      <ul id="hits" class="hits" hidden></ul>
+    </section>
 
-      <p id="message" role="status"></p>
-    </main>
+    <!-- One document: pages side by side, one per screen. -->
+    <section id="view-doc" class="view viewer" hidden>
+      <header class="bar viewer-bar">
+        <button id="back" class="button quiet" type="button" aria-label="Back to the library">
+          Back
+        </button>
+        <h1 id="doc-title"></h1>
+        <span id="page-indicator" class="indicator"></span>
+      </header>
+      <div id="pages" class="pages"></div>
+      <p id="doc-message" class="message" role="status"></p>
+    </section>
 
-    <script type="module">
-      const form = document.getElementById("login");
-      const message = document.getElementById("message");
-      const enroll = document.getElementById("enroll");
-      const qr = document.getElementById("qr");
-
-      /// Every mutation carries `X-Evo: 1`; the server refuses without it, which
-      /// is what stops another site's form from posting here.
-      async function api(path, body) {
-        const response = await fetch(path, {
-          method: "POST",
-          headers: { "content-type": "application/json", "X-Evo": "1" },
-          body: JSON.stringify(body),
-        });
-        let payload = {};
-        try {
-          payload = await response.json();
-        } catch {
-          // A body-less error is still an error; the status carries it.
-        }
-        return { status: response.status, payload };
-      }
-
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        message.textContent = "";
-        const password = document.getElementById("password").value;
-        const code = document.getElementById("code").value.trim();
-        const { status, payload } = await api("/api/login", {
-          password,
-          code: code === "" ? null : code,
-        });
-
-        if (payload.enroll) {
-          enroll.hidden = false;
-          qr.src = "/api/setup-qr?t=" + encodeURIComponent(payload.setup);
-          message.textContent = "Scan the code, then sign in again with a code.";
-          return;
-        }
-        if (status === 200) {
-          enroll.hidden = true;
-          message.textContent = "Signed in. The library is coming in a later release.";
-          return;
-        }
-        message.textContent = payload.error ?? "Sign in failed.";
-      });
-    </script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

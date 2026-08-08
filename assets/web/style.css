@@ -1,21 +1,39 @@
-/* Placeholder styling for the login shell. M24 brings the real thing. */
+/*
+  One stylesheet, two palettes. The colours are evo's own -- the same
+  Catppuccin family the desktop app uses -- named once here so a rule says
+  what it means (`--surface`, `--accent`) rather than what it looks like.
+
+  Latte is the default because a phone in daylight is the harder case; Mocha
+  arrives with `prefers-color-scheme: dark`.
+*/
+
 :root {
-  --bg: #eff1f5;
-  --panel: #ffffff;
+  --base: #eff1f5;
+  --mantle: #e6e9ef;
+  --surface: #ccd0da;
+  --overlay: #9ca0b0;
   --text: #4c4f69;
-  --muted: #6c6f85;
+  --subtext: #6c6f85;
   --accent: #1e66f5;
-  --line: #ccd0da;
+  --accent-text: #ffffff;
+  --danger: #d20f39;
+  --shadow: rgba(76, 79, 105, 0.12);
+  --radius: 12px;
+  --bar-height: 3.25rem;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1e1e2e;
-    --panel: #313244;
+    --base: #1e1e2e;
+    --mantle: #181825;
+    --surface: #313244;
+    --overlay: #6c7086;
     --text: #cdd6f4;
-    --muted: #a6adc8;
+    --subtext: #a6adc8;
     --accent: #89b4fa;
-    --line: #45475a;
+    --accent-text: #1e1e2e;
+    --danger: #f38ba8;
+    --shadow: rgba(0, 0, 0, 0.35);
   }
 }
 
@@ -23,75 +41,337 @@
   box-sizing: border-box;
 }
 
+html,
 body {
-  margin: 0;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg);
-  color: var(--text);
-  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  height: 100%;
 }
 
-main {
-  width: min(24rem, 100% - 2rem);
-  padding: 1.5rem;
-  border: 1px solid var(--line);
-  border-radius: 0.75rem;
-  background: var(--panel);
+body {
+  margin: 0;
+  background: var(--base);
+  color: var(--text);
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+  /* The home-screen app runs under the notch and over the home indicator. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overscroll-behavior: none;
 }
 
 h1 {
-  margin: 0 0 1rem;
-  font-size: 1.5rem;
+  font-size: 1.1rem;
+  margin: 0;
 }
 
-label {
-  display: block;
-  margin-top: 0.75rem;
-  font-size: 0.875rem;
-  color: var(--muted);
+h2 {
+  font-size: 1rem;
+  margin: 0.6rem 0 0.2rem;
 }
 
-input {
-  width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.6rem;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--bg);
-  color: inherit;
-  font: inherit;
+.view[hidden] {
+  display: none;
 }
 
+.view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.message {
+  color: var(--subtext);
+  font-size: 0.9rem;
+  margin: 0.75rem 1rem;
+  min-height: 1.2em;
+}
+
+/* --------------------------------------------------------------------------
+   Bars and buttons
+   -------------------------------------------------------------------------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: var(--bar-height);
+  padding: 0 1rem;
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface);
+}
+
+.bar h1 {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.bar.search {
+  padding: 0.5rem 1rem;
+}
+
+.button,
 button {
-  width: 100%;
-  margin-top: 1.25rem;
-  padding: 0.7rem;
-  border: 0;
-  border-radius: 0.5rem;
-  background: var(--accent);
-  color: var(--panel);
   font: inherit;
-  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.5rem 0.9rem;
+  /* Nothing on a phone should need a careful finger. */
+  min-height: 2.5rem;
   cursor: pointer;
 }
 
+.button.quiet,
+button.quiet {
+  background: transparent;
+  color: var(--subtext);
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+input {
+  font: inherit;
+  color: var(--text);
+  background: var(--base);
+  border: 1px solid var(--surface);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  width: 100%;
+  /* 16px or iOS zooms the page when the field is focused. */
+  font-size: 16px;
+}
+
+input:focus-visible,
+button:focus-visible,
+.button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   Signing in
+   -------------------------------------------------------------------------- */
+
+#view-login {
+  justify-content: center;
+  align-items: center;
+  padding: 1.5rem;
+}
+
+.sheet {
+  width: min(24rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sheet label {
+  color: var(--subtext);
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.card {
+  background: var(--mantle);
+  border-radius: var(--radius);
+  padding: 1rem;
+  box-shadow: 0 1px 3px var(--shadow);
+}
+
 #enroll {
-  margin-top: 1.5rem;
+  margin-top: 1rem;
   text-align: center;
 }
 
-#enroll img {
+#qr {
+  background: #ffffff;
+  border-radius: var(--radius);
+  padding: 0.5rem;
   max-width: 100%;
   height: auto;
-  background: #fff;
-  border-radius: 0.5rem;
 }
 
-#message {
-  margin: 1rem 0 0;
-  min-height: 1.5rem;
-  color: var(--muted);
+/* --------------------------------------------------------------------------
+   The library
+   -------------------------------------------------------------------------- */
+
+.grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 1rem;
+  padding: 0 1rem 2rem;
+  align-content: start;
+}
+
+.doc {
+  padding: 0.75rem;
+  /* A long press is a delete, not a text selection. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.thumb {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  object-position: top center;
+  background: var(--surface);
+  border-radius: 6px;
+  display: block;
+}
+
+.meta {
+  color: var(--subtext);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.summary {
+  color: var(--subtext);
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.4rem 0 0;
+}
+
+.tag {
+  font-size: 0.7rem;
+  background: var(--surface);
+  color: var(--subtext);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+
+.hits {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0 1rem 2rem;
+}
+
+.hit {
+  background: var(--mantle);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  cursor: pointer;
+}
+
+.hit-where {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+.hit-snippet {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--subtext);
+  white-space: pre-wrap;
+}
+
+/* --------------------------------------------------------------------------
+   The viewer
+   -------------------------------------------------------------------------- */
+
+.viewer {
+  background: var(--mantle);
+}
+
+.viewer-bar .indicator {
+  color: var(--subtext);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+/* One page per screen, snapped: the swipe is the browser's, which is why it
+   feels like the phone rather than like JavaScript. */
+.pages {
+  flex: 1;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.pages::-webkit-scrollbar {
+  display: none;
+}
+
+/* While a page is zoomed the swipe belongs to that page. */
+.pages.locked {
+  overflow-x: hidden;
+  scroll-snap-type: none;
+}
+
+.page {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 0.5rem;
+  /* Sideways is the browser's; a pinch is ours. */
+  touch-action: pan-x;
+}
+
+.stage {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: 0 0;
+  box-shadow: 0 1px 6px var(--shadow);
+}
+
+.page:not(.zoomed) .stage {
+  transition: transform 120ms ease-out;
+}
+
+.raster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+}
+
+/* The markup, in the same box as the picture: the SVG carries the page's own
+   viewBox, so it stretches with it and never has to be re-fetched to stay
+   lined up. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.overlay svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }

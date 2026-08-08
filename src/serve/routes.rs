@@ -103,9 +103,11 @@ async fn asset(uri: Uri) -> Response {
     (
         [
             (header::CONTENT_TYPE, file.metadata.mimetype().to_owned()),
-            // The shell is small and changes with each release. M24's service
-            // worker is what will make it fast offline; guessing at cache
-            // lifetimes before then only makes upgrades confusing.
+            // The shell is small and changes with each release, and the
+            // service worker is what makes it fast to open -- so the browser
+            // may keep a copy but must always ask whether it is still the
+            // current one. A cache lifetime here would mean an upgrade that
+            // some phone does not see for a week.
             (header::CACHE_CONTROL, "no-cache".to_owned()),
         ],
         file.data,
@@ -426,9 +428,10 @@ mod tests {
         // The shell is public: the browser has to be able to draw the form.
         let shell = get(&evo.url, None);
         assert_eq!(shell.status, 200);
+        assert!(shell.text().contains("id=\"login\""), "the sign-in form");
         assert!(
-            shell.text().contains("/api/login"),
-            "the form posts to the API"
+            shell.text().contains("/app.js"),
+            "and the app that posts it"
         );
         let css = get(&format!("{}/style.css", evo.url), None);
         assert_eq!(css.status, 200);
@@ -559,6 +562,72 @@ mod tests {
             post_json(&url, None, json!({"password": PASSWORD})).status,
             429
         );
+    }
+
+    /// The app is a handful of files with no build step, so "does it load" is
+    /// a question about whether every file the shell names is really there and
+    /// arrives as the sort of thing the browser will run. All of it before a
+    /// session, because the browser fetches the shell in order to ask for one.
+    #[test]
+    fn the_whole_app_shell_is_served_without_a_session() {
+        let evo = Harness::start("shell");
+        let shell = get(&evo.url, None).text();
+
+        // Everything index.html points at, and everything the modules import.
+        for (path, expected) in [
+            ("/index.html", "text/html"),
+            ("/style.css", "text/css"),
+            ("/api.js", "javascript"),
+            ("/app.js", "javascript"),
+            ("/viewer.js", "javascript"),
+            ("/sw.js", "javascript"),
+            ("/offline.html", "text/html"),
+            ("/manifest.webmanifest", "manifest+json"),
+            ("/icons/icon-192.png", "image/png"),
+            ("/icons/icon-512.png", "image/png"),
+            ("/icons/apple-touch-icon.png", "image/png"),
+        ] {
+            let answer = get(&format!("{}{path}", evo.url), None);
+            assert_eq!(answer.status, 200, "{path}");
+            assert!(
+                answer.content_type.contains(expected),
+                "{path} came back as {}",
+                answer.content_type
+            );
+            if path.ends_with(".js") || path.ends_with(".css") || path.ends_with(".html") {
+                assert!(!answer.body.is_empty(), "{path} is empty");
+            }
+        }
+
+        // The shell names them, so a rename that forgot one is caught here.
+        for reference in [
+            "/style.css",
+            "/app.js",
+            "/manifest.webmanifest",
+            "/icons/apple-touch-icon.png",
+        ] {
+            assert!(
+                shell.contains(reference),
+                "the shell does not load {reference}"
+            );
+        }
+
+        // The manifest has to be a manifest, and name icons that exist.
+        let manifest = get(&format!("{}/manifest.webmanifest", evo.url), None);
+        let parsed: Value = serde_json::from_slice(&manifest.body).expect("valid JSON");
+        assert_eq!(parsed["display"], "standalone");
+        assert_eq!(parsed["start_url"], "/");
+        for icon in parsed["icons"].as_array().expect("icons") {
+            let src = icon["src"].as_str().expect("a source");
+            assert_eq!(
+                get(&format!("{}{src}", evo.url), None).status,
+                200,
+                "{src} is named but not served"
+            );
+        }
+
+        // And a file that was never embedded is a 404, not a guess.
+        assert_eq!(get(&format!("{}/nope.js", evo.url), None).status, 404);
     }
 
     /// The walk a phone actually does: put a document in, find it in the list,
