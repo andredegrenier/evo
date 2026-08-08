@@ -10,8 +10,14 @@
 // free) while two fingers come through as pointer events. What a pinch changes
 // is a CSS transform, which is instant; when it settles, a sharper PNG is
 // asked for at the scale the reader ended up at.
+//
+// Markup is the same gesture with a tool switched on. A drag becomes a
+// rectangle in CSS pixels, which becomes a rectangle in PDF points -- the
+// coordinates evo has used since the desktop app's first highlight, counted up
+// from the bottom of the page -- and that is what is saved. Nothing about the
+// zoom, the scale bucket or the screen ends up in the document.
 
-import { get, reason, pageUrl, overlayUrl, scaleFor } from "./api.js";
+import { api, get, reason, pageUrl, overlayUrl, scaleFor } from "./api.js";
 
 const container = document.getElementById("pages");
 const titleEl = document.getElementById("doc-title");
@@ -24,7 +30,32 @@ const PREFETCH = 1;
 /// And how far away a page has to be before its picture is let go of again.
 const FORGET = 4;
 
+/// A drag shorter than this, in PDF points, was a tap: nobody means to draw a
+/// two-point highlight, and picking something already on the page is the more
+/// useful reading of it.
+const TAP = 5;
+/// The smallest note worth drawing text into, in points. A note dragged out
+/// smaller is grown rather than refused -- the box is a container, not the
+/// thing the reader was aiming at.
+const MIN_NOTE = { width: 96, height: 32 };
+/// Note text, in points. About the size of the body text on a letter page.
+const NOTE_FONT = 11;
+
+/// The colours markup is made in. Straight RGBA, 0-255, exactly as
+/// `doc::annotation::Color` is serialized -- these travel into the sidecar and
+/// come back out in the desktop app, so they are the app's colours and not the
+/// stylesheet's.
+const CLEAR = { r: 0, g: 0, b: 0, a: 0 };
+const HIGHLIGHTER = { r: 250, g: 220, b: 50, a: 255 };
+const NOTE_PAPER = { r: 255, g: 245, b: 180, a: 255 };
+const NOTE_INK = { r: 30, g: 30, b: 46, a: 255 };
+
 let open = null;
+/// Which tool is on: `null`, `"highlight"` or `"note"`. Module-level because
+/// the pinch handlers have to stand aside while one is.
+let tool = null;
+/// The annotation the reader has picked, if any: `{ page, id }`.
+let selected = null;
 
 /// Open `id` at `page`. Returns false if the document could not be opened, so
 /// the router can go back to the library.
@@ -46,11 +77,15 @@ export async function openDocument(id, page) {
     sections: [],
     current: 1,
     observer: null,
+    // What is drawn on the document, as the server has it. Kept so a tap can
+    // be answered without a round trip; every *write* re-reads it first.
+    markup: { version: 1, annotations: [] },
   };
   titleEl.textContent = manifest.title || "";
   message("");
   build();
   goTo(page);
+  await readMarkup();
   return true;
 }
 
@@ -59,6 +94,7 @@ export async function openDocument(id, page) {
 export function closeDocument() {
   if (open && open.observer) open.observer.disconnect();
   open = null;
+  setTool(null);
   container.replaceChildren();
   titleEl.textContent = "";
   indicator.textContent = "";
@@ -117,6 +153,7 @@ function section(size, number) {
   element.append(stage);
   element.zoom = { scale: 1, x: 0, y: 0 };
   pinchable(element, stage);
+  drawable(element, stage, number);
   return element;
 }
 
@@ -129,10 +166,17 @@ async function load(number) {
   const raster = element.querySelector(".raster");
   raster.src = pageUrl(open.id, number, scaleFor(element.zoom.scale));
   raster.dataset.scale = String(scaleFor(element.zoom.scale));
+  await drawOverlay(number);
+}
 
-  // The overlay is markup, which changes, so it is fetched rather than cached
-  // -- and injected as an element so it scales with the page instead of
-  // sitting in an <img> at a fixed size.
+/// The markup of one page, as an SVG laid over the picture.
+///
+/// Injected as an element rather than left in an `<img>` so it scales with the
+/// page; the server sends it `no-cache` with a version tag, so asking again
+/// after a change is a revalidation and gets the new one.
+async function drawOverlay(number) {
+  const element = open && open.sections[number - 1];
+  if (!element) return;
   const overlay = element.querySelector(".overlay");
   try {
     const response = await fetch(overlayUrl(open.id, number), {
@@ -194,6 +238,14 @@ function pinchable(element, stage) {
   /// one, or every pinch would undo itself.
   let gestured = false;
 
+  /// While a tool is on, every gesture on the page belongs to the tool.
+  const busy = () => {
+    if (!tool) return false;
+    points.clear();
+    gesture = null;
+    return true;
+  };
+
   const apply = () => {
     const { scale, x, y } = element.zoom;
     stage.style.transform =
@@ -201,10 +253,12 @@ function pinchable(element, stage) {
     const zoomed = scale > 1;
     element.classList.toggle("zoomed", zoomed);
     // While a page is zoomed it owns every gesture on it; otherwise the
-    // sideways swipe belongs to the scroller.
-    element.style.touchAction = zoomed ? "none" : "pan-x";
+    // sideways swipe belongs to the scroller. A tool is the same claim: a
+    // drag across the page is a highlight, not a page turn.
+    element.style.touchAction = zoomed || tool ? "none" : "pan-x";
     container.classList.toggle("locked", zoomed);
   };
+  element.applyZoom = apply;
 
   /// Keep the picture from being dragged off the screen.
   ///
@@ -230,6 +284,7 @@ function pinchable(element, stage) {
   };
 
   element.addEventListener("pointerdown", (event) => {
+    if (busy()) return;
     element.setPointerCapture(event.pointerId);
     points.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
@@ -247,6 +302,7 @@ function pinchable(element, stage) {
   });
 
   element.addEventListener("pointermove", (event) => {
+    if (busy()) return;
     if (!points.has(event.pointerId)) return;
     points.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (!gesture) return;
@@ -282,6 +338,7 @@ function pinchable(element, stage) {
   });
 
   const release = (event) => {
+    if (busy()) return;
     points.delete(event.pointerId);
     if (points.size === 0) {
       gesture = null;
@@ -300,6 +357,7 @@ function pinchable(element, stage) {
   // size, with the spot that was tapped staying where it was. The gesture
   // everybody already knows.
   element.addEventListener("pointerup", (event) => {
+    if (tool) return;
     // A pinch or a drag is not a tap, however it ended.
     if (gestured) {
       lastTap = 0;
@@ -358,3 +416,342 @@ function settleZoom(element) {
   };
   sharper.src = pageUrl(open.id, number, wanted);
 }
+
+// ---------------------------------------------------------------------------
+// Where a finger is, in the document's own coordinates
+// ---------------------------------------------------------------------------
+
+/// A point on the screen, in PDF points on `number`.
+///
+/// The stage's box on screen is the page, whatever the pinch has done to it --
+/// `getBoundingClientRect` reports the transformed box -- so the number of CSS
+/// pixels per point falls straight out of it. PDF counts up from the bottom of
+/// the page and screens count down from the top, which is the flip.
+function pointOn(stage, number, event) {
+  const size = open.pages[number - 1];
+  const box = stage.getBoundingClientRect();
+  const scaleX = box.width / size.width || 1;
+  const scaleY = box.height / size.height || 1;
+  const clamp = (value, limit) => Math.min(Math.max(value, 0), limit);
+  return {
+    x: clamp((event.clientX - box.left) / scaleX, size.width),
+    y: clamp(size.height - (event.clientY - box.top) / scaleY, size.height),
+  };
+}
+
+/// Two corners in any order, as the rectangle they bound.
+function rectangle(from, to) {
+  return {
+    min: { x: Math.min(from.x, to.x), y: Math.min(from.y, to.y) },
+    max: { x: Math.max(from.x, to.x), y: Math.max(from.y, to.y) },
+  };
+}
+
+/// Where a rectangle sits in its page, as percentages -- so a box drawn over
+/// the picture stays lined up through a pinch without being recomputed.
+function place(element, number, rect) {
+  const size = open.pages[number - 1];
+  element.style.left = `${(rect.min.x / size.width) * 100}%`;
+  element.style.width = `${((rect.max.x - rect.min.x) / size.width) * 100}%`;
+  // The top edge of the box is its *higher* y, counted down from the top.
+  element.style.top = `${((size.height - rect.max.y) / size.height) * 100}%`;
+  element.style.height = `${((rect.max.y - rect.min.y) / size.height) * 100}%`;
+}
+
+// ---------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------
+
+const tools = {
+  highlight: document.getElementById("tool-highlight"),
+  note: document.getElementById("tool-note"),
+};
+const deleteButton = document.getElementById("delete-annotation");
+
+for (const [name, button] of Object.entries(tools)) {
+  button.addEventListener("click", () => setTool(tool === name ? null : name));
+}
+
+/// Turn a tool on, off, or over to the other one.
+function setTool(next) {
+  tool = next;
+  for (const [name, button] of Object.entries(tools)) {
+    button.setAttribute("aria-pressed", String(tool === name));
+  }
+  unpick();
+  if (open) {
+    for (const element of open.sections) {
+      if (element.applyZoom) element.applyZoom();
+    }
+  }
+  message(
+    tool === "highlight"
+      ? "Drag across what you want highlighted. Tap a mark to remove it."
+      : tool === "note"
+        ? "Drag a box for the note. Tap a mark to remove it."
+        : "",
+  );
+}
+
+/// A drag on this page draws; a tap picks. Only while a tool is on -- with
+/// none, every listener here stands down and the page is for reading.
+function drawable(element, stage, number) {
+  let drag = null;
+
+  const finish = () => {
+    if (drag && drag.preview) drag.preview.remove();
+    drag = null;
+  };
+
+  element.addEventListener("pointerdown", (event) => {
+    if (!tool || !event.isPrimary || drag) return;
+    element.setPointerCapture(event.pointerId);
+    const preview = document.createElement("div");
+    preview.className = tool === "note" ? "draft note" : "draft";
+    stage.append(preview);
+    drag = { pointer: event.pointerId, from: pointOn(stage, number, event), preview };
+    place(preview, number, rectangle(drag.from, drag.from));
+    event.preventDefault();
+  });
+
+  element.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.pointer) return;
+    place(drag.preview, number, rectangle(drag.from, pointOn(stage, number, event)));
+    event.preventDefault();
+  });
+
+  element.addEventListener("pointercancel", (event) => {
+    if (drag && event.pointerId === drag.pointer) finish();
+  });
+
+  element.addEventListener("pointerup", async (event) => {
+    if (!drag || event.pointerId !== drag.pointer) return;
+    const from = drag.from;
+    const drawn = tool;
+    const to = pointOn(stage, number, event);
+    finish();
+
+    const rect = rectangle(from, to);
+    // A drag that went nowhere is a tap, and a tap asks about what is already
+    // there rather than adding something nobody can see.
+    if (rect.max.x - rect.min.x < TAP && rect.max.y - rect.min.y < TAP) {
+      pick(number, to);
+      return;
+    }
+    unpick();
+    if (drawn === "highlight") await addHighlight(number, rect);
+    else await addNote(number, rect);
+  });
+}
+
+/// The next id nobody is using.
+///
+/// The desktop app hands out `max(id) + 1` when it reloads a sidecar
+/// (`AnnotationStore::restore`), so this has to agree with it or the two would
+/// eventually give two annotations the same number. It is worked out from the
+/// markup the server has just sent, never from a copy held while the reader
+/// was thinking.
+function nextId(annotations) {
+  return annotations.reduce((highest, a) => Math.max(highest, a.id || 0), 0) + 1;
+}
+
+async function addHighlight(number, rect) {
+  const failure = await save((annotations) => [
+    ...annotations,
+    {
+      id: nextId(annotations),
+      page: number - 1,
+      kind: "Highlight",
+      rect,
+      style: {
+        stroke: CLEAR,
+        stroke_width: 0,
+        fill: HIGHLIGHTER,
+        opacity: 0.35,
+      },
+    },
+  ]);
+  await settle(number, failure);
+}
+
+async function addNote(number, rect) {
+  const text = await askForNote();
+  if (text === null) return;
+
+  // A note is a container for words: one dragged too small to hold any is
+  // grown from its top-left corner -- where the text starts -- rather than
+  // turned down, and kept on the page.
+  const size = open.pages[number - 1];
+  const width = Math.min(size.width, Math.max(rect.max.x - rect.min.x, MIN_NOTE.width));
+  const height = Math.min(size.height, Math.max(rect.max.y - rect.min.y, MIN_NOTE.height));
+  const left = Math.min(rect.min.x, size.width - width);
+  const top = Math.max(rect.max.y, height);
+  const box = {
+    min: { x: left, y: top - height },
+    max: { x: left + width, y: top },
+  };
+
+  const failure = await save((annotations) => [
+    ...annotations,
+    {
+      id: nextId(annotations),
+      page: number - 1,
+      kind: { TextBox: { text, font_size: NOTE_FONT, align: "Left" } },
+      rect: box,
+      // The stroke colour is the ink: `write_annotation` draws TextBox text in
+      // it and fills the box with `fill`.
+      style: {
+        stroke: NOTE_INK,
+        stroke_width: 0,
+        fill: NOTE_PAPER,
+        opacity: 0.95,
+      },
+    },
+  ]);
+  await settle(number, failure);
+}
+
+/// Say what went wrong, or redraw the page it went right on.
+async function settle(number, failure) {
+  if (failure) {
+    message(failure);
+    return;
+  }
+  message("");
+  await drawOverlay(number);
+}
+
+// ---------------------------------------------------------------------------
+// Picking something already there
+// ---------------------------------------------------------------------------
+
+/// What the reader tapped, if anything: the topmost annotation on the page
+/// whose rectangle holds that point.
+///
+/// The hit test is ours rather than the SVG's because the overlay is not
+/// interactive -- it sits under `pointer-events: none` so a pinch on a
+/// highlight is still a pinch -- and because the rectangles are already here.
+function pick(number, point) {
+  unpick();
+  const on = (open.markup.annotations || []).filter((a) => a.page === number - 1);
+  const hit = [...on].reverse().find((a) => holds(a.rect, point));
+  if (!hit) return;
+
+  selected = { page: number, id: hit.id };
+  const element = open.sections[number - 1];
+  const outline = document.createElement("div");
+  outline.className = "selection";
+  place(outline, number, hit.rect);
+  element.querySelector(".stage").append(outline);
+  deleteButton.hidden = false;
+}
+
+function holds(rect, point) {
+  return (
+    point.x >= rect.min.x &&
+    point.x <= rect.max.x &&
+    point.y >= rect.min.y &&
+    point.y <= rect.max.y
+  );
+}
+
+function unpick() {
+  selected = null;
+  deleteButton.hidden = true;
+  for (const outline of container.querySelectorAll(".selection")) outline.remove();
+}
+
+deleteButton.addEventListener("click", async () => {
+  if (!selected) return;
+  const { page, id } = selected;
+  unpick();
+  const failure = await save((annotations) => annotations.filter((a) => a.id !== id));
+  await settle(page, failure);
+});
+
+// ---------------------------------------------------------------------------
+// Saving
+// ---------------------------------------------------------------------------
+
+/// Read the markup, change it, and write it back if nobody else did first.
+///
+/// `change` is given the annotations the server has *now* and returns what they
+/// should become; it is called again on a conflict, so it must not depend on
+/// anything worked out earlier -- which is why ids are allocated inside it.
+/// One retry: a second conflict is two writers, not a stale read, and the
+/// reader should hear about it rather than watch evo loop.
+///
+/// Returns a sentence on failure and nothing at all on success.
+async function save(change) {
+  const url = `/api/docs/${open.id}/markup`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const current = await get(url);
+    if (!current.ok) {
+      return reason(current, "evo could not read this document's markup.");
+    }
+    const markup = current.data;
+    const annotations = change(markup.annotations || []);
+    const answer = await api(url, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        // What was just read. The server refuses the write if the markup has
+        // moved on since, which is the whole reason this is a round trip.
+        "If-Match": current.headers.get("etag") || "*",
+      },
+      body: JSON.stringify({ version: markup.version, annotations }),
+    });
+    if (answer.ok) {
+      open.markup = { ...markup, annotations };
+      return null;
+    }
+    if (answer.status !== 409) {
+      return reason(answer, "evo could not save that markup.");
+    }
+  }
+  return "Somebody else is changing this document's markup. Try that again.";
+}
+
+/// The markup as the server has it, for hit-testing. Failing is not worth a
+/// message: the page is still readable and the next write re-reads it anyway.
+async function readMarkup() {
+  const answer = await get(`/api/docs/${open.id}/markup`);
+  if (answer.ok) open.markup = answer.data;
+}
+
+// ---------------------------------------------------------------------------
+// The note sheet
+// ---------------------------------------------------------------------------
+
+const noteSheet = document.getElementById("note-sheet");
+const noteForm = document.getElementById("note-form");
+const noteText = document.getElementById("note-text");
+let askingForNote = null;
+
+/// What the note should say, or `null` if the reader thought better of it.
+function askForNote() {
+  noteText.value = "";
+  noteSheet.hidden = false;
+  noteText.focus();
+  return new Promise((resolve) => {
+    askingForNote = resolve;
+  });
+}
+
+function answerNote(text) {
+  noteSheet.hidden = true;
+  const resolve = askingForNote;
+  askingForNote = null;
+  if (resolve) resolve(text);
+}
+
+noteForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = noteText.value.trim();
+  // An empty note is a rectangle with nothing in it; that is a cancellation.
+  answerNote(text === "" ? null : text);
+});
+
+document
+  .getElementById("note-cancel")
+  .addEventListener("click", () => answerNote(null));

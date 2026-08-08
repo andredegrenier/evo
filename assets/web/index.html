@@ -94,9 +94,36 @@
         <h1 id="doc-title"></h1>
         <span id="page-indicator" class="indicator"></span>
       </header>
+      <!-- Markup. A tool is on or off; while one is on, a drag draws and a
+           tap picks something already there. -->
+      <div class="bar markup-bar">
+        <button id="tool-highlight" class="button" type="button" aria-pressed="false">
+          Highlight
+        </button>
+        <button id="tool-note" class="button" type="button" aria-pressed="false">
+          Note
+        </button>
+        <span class="spacer"></span>
+        <button id="delete-annotation" class="button danger" type="button" hidden>
+          Delete
+        </button>
+      </div>
       <div id="pages" class="pages"></div>
       <p id="doc-message" class="message" role="status"></p>
     </section>
+
+    <!-- What a note says. A sheet rather than `prompt()`: a phone keyboard
+         wants somewhere to put more than one line. -->
+    <div id="note-sheet" class="backdrop" hidden>
+      <form id="note-form" class="card sheet">
+        <label for="note-text">Note</label>
+        <textarea id="note-text" rows="3" placeholder="What is worth saying here?"></textarea>
+        <div class="bar-actions">
+          <button type="submit" class="primary">Add note</button>
+          <button id="note-cancel" type="button" class="button quiet">Cancel</button>
+        </div>
+      </form>
+    </div>
 
     <script type="module" src="/app.js"></script>
   </body>

@@ -241,6 +241,21 @@ mod tests {
             }
         }
 
+        /// Stop the server and let go of the library, leaving what is on disk
+        /// where it is.
+        ///
+        /// redb permits one `Database` per file, so a test that wants to open
+        /// the library the way the desktop app would has to wait for the
+        /// server to have finished with it. Joining the thread is that wait:
+        /// the router owns the only `ServeState`, so the `Library` is dropped
+        /// with it.
+        fn stop(&mut self) {
+            self.cancel.cancel();
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+
         /// A code the authenticator app would be showing right now.
         fn code(&self) -> String {
             let store = auth::AuthStore {
@@ -827,6 +842,112 @@ mod tests {
             get(&format!("{docs}/{id}/markup.svg?page=9"), Some(&session)).status,
             404
         );
+    }
+
+    /// The promise the whole markup format is for: a highlight drawn on a
+    /// phone is a highlight the desktop app opens.
+    ///
+    /// It cannot be checked by starting the app, so it is checked where the
+    /// compatibility actually lives -- the sidecar. The server writes it
+    /// through the API the phone uses; then the server stops, and the library
+    /// is opened and read exactly as `state.rs` opens it, including the id
+    /// allocation, which is where two writers would collide if the phone
+    /// numbered annotations its own way.
+    #[test]
+    fn a_highlight_made_over_http_is_one_the_desktop_app_can_open() {
+        use crate::doc::annotation::AnnotationKind;
+        use crate::doc::store::AnnotationStore;
+
+        let mut evo = Harness::start("sidecar");
+        let session = sign_in(&evo);
+        let docs = format!("{}/api/docs", evo.url);
+        let id = post_bytes(&docs, &session, &[], fixture()).json()["id"]
+            .as_str()
+            .expect("an id")
+            .to_owned();
+        let markup = format!("{docs}/{id}/markup");
+
+        // What viewer.js sends for a drag with the highlighter on: page 1,
+        // yellow, a third opaque, and the id it worked out from what the
+        // server had (nothing, so 1).
+        let tag = get(&markup, Some(&session))
+            .headers
+            .get("etag")
+            .expect("a version tag")
+            .to_owned();
+        let saved = put_json(
+            &markup,
+            &session,
+            &[("If-Match", &tag)],
+            json!({
+                "version": 1,
+                "annotations": [{
+                    "id": 1,
+                    "page": 0,
+                    "kind": "Highlight",
+                    "rect": {"min": {"x": 72.0, "y": 572.0}, "max": {"x": 172.0, "y": 592.0}},
+                    "style": {
+                        "stroke": {"r": 0, "g": 0, "b": 0, "a": 0},
+                        "stroke_width": 0.0,
+                        "fill": {"r": 250, "g": 220, "b": 50, "a": 255},
+                        "opacity": 0.35
+                    }
+                }, {
+                    "id": 2,
+                    "page": 1,
+                    "kind": {"TextBox": {"text": "check this", "font_size": 11.0, "align": "Left"}},
+                    "rect": {"min": {"x": 72.0, "y": 500.0}, "max": {"x": 240.0, "y": 540.0}},
+                    "style": {
+                        "stroke": {"r": 30, "g": 30, "b": 46, "a": 255},
+                        "stroke_width": 0.0,
+                        "fill": {"r": 255, "g": 245, "b": 180, "a": 255},
+                        "opacity": 0.95
+                    }
+                }]
+            }),
+        );
+        assert_eq!(saved.status, 200, "{}", saved.text());
+
+        // The phone is put down and the server stopped -- which is what has to
+        // happen before the desktop app can have this library at all.
+        evo.stop();
+
+        let library = Library::open_at(evo.dir.join("library")).expect("the library, unlocked");
+        let sidecar = library
+            .load_markup(&id)
+            .expect("reading the sidecar")
+            .expect("the phone wrote one");
+        assert_eq!(sidecar.version, 1);
+        assert_eq!(sidecar.pages.order.len(), 2, "the page order survived");
+
+        let mut store = AnnotationStore::restore(sidecar.annotations);
+        let first = store.get(1).expect("the highlight");
+        assert_eq!(first.page, 0);
+        assert!(matches!(first.kind, AnnotationKind::Highlight));
+        assert_eq!(first.rect.min.y, 572.0, "in PDF points, up from the bottom");
+        assert_eq!(first.style.fill.r, 250);
+        assert!((first.style.opacity - 0.35).abs() < 1e-6);
+        assert!(
+            !first.style.stroke.is_visible(),
+            "a highlight has no outline"
+        );
+
+        let note = store.get(2).expect("the note");
+        match &note.kind {
+            AnnotationKind::TextBox {
+                text, font_size, ..
+            } => {
+                assert_eq!(text, "check this");
+                assert!(*font_size > 0.0);
+            }
+            other => panic!("the note came back as {other:?}"),
+        }
+
+        // And the next annotation the app draws does not land on top of one of
+        // the phone's: both sides number from the highest id there is.
+        assert_eq!(store.alloc_id(), 3);
+
+        let _ = std::fs::remove_dir_all(&evo.dir);
     }
 
     /// An id becomes a filename in three places, so nothing that is not a

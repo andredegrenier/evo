@@ -141,7 +141,25 @@ button.quiet {
   font-weight: 600;
 }
 
-input {
+.button[aria-pressed="true"],
+button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.danger {
+  background: var(--danger);
+  color: var(--base);
+  font-weight: 600;
+}
+
+.spacer {
+  flex: 1;
+}
+
+input,
+textarea {
   font: inherit;
   color: var(--text);
   background: var(--base);
@@ -153,11 +171,33 @@ input {
   font-size: 16px;
 }
 
+textarea {
+  resize: vertical;
+}
+
 input:focus-visible,
+textarea:focus-visible,
 button:focus-visible,
 .button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* A sheet over everything: the note editor, and whatever else later needs an
+   answer before the app carries on. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.backdrop[hidden] {
+  display: none;
 }
 
 /* --------------------------------------------------------------------------
@@ -374,4 +414,38 @@ button:focus-visible,
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* --------------------------------------------------------------------------
+   Making markup
+   -------------------------------------------------------------------------- */
+
+.markup-bar {
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  border-bottom: 1px solid var(--surface);
+}
+
+/* The rectangle under the finger, and the one around what has been picked.
+   Both are positioned as percentages of the page box, so the CSS transform a
+   pinch applies carries them along with the picture. */
+.draft,
+.selection {
+  position: absolute;
+  pointer-events: none;
+}
+
+.draft {
+  background: rgba(250, 220, 50, 0.35);
+  border: 1px solid rgba(250, 220, 50, 0.9);
+}
+
+.draft.note {
+  background: rgba(255, 245, 180, 0.5);
+  border-color: var(--accent);
+}
+
+.selection {
+  border: 2px dashed var(--accent);
+  border-radius: 2px;
 }

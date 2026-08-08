@@ -356,4 +356,71 @@ mod tests {
         let empty = svg_overlay(&[], 200.0, 400.0);
         assert!(empty.contains("<g id=\"evo-markup\"></g>"), "{empty}");
     }
+
+    /// The whole trip a highlight drawn on a phone makes, in arithmetic.
+    ///
+    /// `viewer.js` turns a drag in CSS pixels into PDF points -- `pdf_y =
+    /// page_h - css_y / scale` -- and the server turns those points back into
+    /// an SVG the browser lays over the very picture that was dragged on. The
+    /// two flips have to cancel: whatever the reader dragged over is what ends
+    /// up under the yellow. This is the test that says so, because the flip is
+    /// written twice, in two languages, and only one of them is compiled.
+    #[test]
+    fn a_drag_in_css_pixels_lands_back_where_it_started() {
+        // A US Letter page shown 306 CSS pixels wide: half a pixel per point.
+        let (page_w, page_h) = (612.0f32, 792.0f32);
+        let scale = 306.0 / page_w;
+
+        // The drag, in CSS pixels from the top-left corner of the picture.
+        let (from_x, from_y) = (36.0f32, 100.0f32);
+        let (to_x, to_y) = (86.0f32, 110.0f32);
+
+        // What viewer.js sends: the same two corners, in points, counted up
+        // from the bottom of the page.
+        let corner = |x: f32, y: f32| PdfPoint::new(x / scale, page_h - y / scale);
+        let highlight = Annotation {
+            id: 1,
+            page: 0,
+            kind: AnnotationKind::Highlight,
+            rect: crate::doc::geometry::PdfRect::from_points(
+                corner(from_x, from_y),
+                corner(to_x, to_y),
+            ),
+            style: Style {
+                stroke: Color::TRANSPARENT,
+                stroke_width: 0.0,
+                fill: Color::rgb(250, 220, 50),
+                opacity: 0.35,
+            },
+        };
+        // Bottom-left at (72, 572), top-right at (172, 592) in points.
+        assert_eq!(highlight.rect.min.x, 72.0);
+        assert_eq!(highlight.rect.min.y, 572.0);
+        assert_eq!(highlight.rect.max.y, 592.0);
+
+        let svg = svg_overlay(&[highlight], page_w, page_h);
+        // y is measured from the top of the page, so the *higher* PDF edge:
+        // 792 - 592 = 200 points down, which at half a pixel per point is the
+        // 100 CSS pixels the finger started at.
+        assert!(
+            svg.contains("x=\"72\" y=\"200\" width=\"100\" height=\"20\""),
+            "{svg}"
+        );
+        for (attribute, css) in [("y", from_y), ("height", to_y - from_y)] {
+            let points = attribute_of(&svg, attribute);
+            assert!(
+                (points * scale - css).abs() < 0.01,
+                "{attribute} came back as {points}pt, which is {}px and not {css}px",
+                points * scale
+            );
+        }
+    }
+
+    /// The value of one attribute of the first element in an overlay.
+    fn attribute_of(svg: &str, name: &str) -> f32 {
+        let start = svg.find(&format!("{name}=\"")).expect("the attribute") + name.len() + 2;
+        let rest = &svg[start..];
+        let end = rest.find('"').expect("a closing quote");
+        rest[..end].parse().expect("a number")
+    }
 }
