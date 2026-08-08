@@ -258,6 +258,12 @@ enum RowAction {
     Move(usize, usize),
 }
 
+/// The index of the row being dragged. A newtype because egui matches
+/// drag payloads by type, and a bare `usize` would collide with any other
+/// payload in the app.
+#[derive(Clone, Copy)]
+struct DragFile(usize);
+
 fn file_list(
     ui: &mut egui::Ui,
     st: &mut MergeWizardState,
@@ -306,12 +312,12 @@ fn file_list(
                             .push_id(index, |ui| row(ui, st, index, id, &mut action))
                             .inner;
 
-                        if let Some(from) = resp.dnd_release_payload::<usize>()
-                            && *from != index
+                        if let Some(from) = resp.dnd_release_payload::<DragFile>()
+                            && from.0 != index
                         {
-                            action = Some(RowAction::Move(*from, index));
+                            action = Some(RowAction::Move(from.0, index));
                         }
-                        if resp.dnd_hover_payload::<usize>().is_some() {
+                        if resp.dnd_hover_payload::<DragFile>().is_some() {
                             ui.painter().rect_stroke(
                                 resp.rect,
                                 CornerRadius::same(4),
@@ -378,7 +384,7 @@ fn row(
     });
 
     let resp = ui.interact(inner.response.rect, id, Sense::click_and_drag());
-    resp.dnd_set_drag_payload(index);
+    resp.dnd_set_drag_payload(DragFile(index));
     resp
 }
 

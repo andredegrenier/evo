@@ -918,7 +918,7 @@ impl eframe::App for EvoApp {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
 
@@ -994,18 +994,24 @@ impl eframe::App for EvoApp {
                 .show(ui, |ui| ui::ribbon::show(ui, dc, ribbon, keymap, &tokens))
                 .inner;
         }
-        match ribbon_action {
-            Some(ui::ribbon::RibbonAction::GoToLibrary) => self.close_document(),
-            None => {}
+        if let Some(ui::ribbon::RibbonAction::GoToLibrary) = ribbon_action {
+            self.close_document();
         }
 
-        ui::preferences::show(
+        // Shortcuts, ribbon layout and script settings are only worth writing
+        // out when the user actually changed one; autosave would otherwise be
+        // up to 30s behind a force-quit.
+        if ui::preferences::show(
             ctx,
             &mut self.prefs,
             &mut self.keymap,
             &mut self.ribbon,
             &mut self.script_prefs,
-        );
+        ) && let Some(storage) = frame.storage_mut()
+        {
+            self.save(storage);
+            storage.flush();
+        }
         self.scripts_window(ctx);
 
         let (wizard_title, wizard_pages) = match &self.dc {
