@@ -68,6 +68,7 @@
         <div class="bar-actions">
           <label class="button" for="file">Add</label>
           <input id="file" type="file" accept="application/pdf" multiple hidden />
+          <button id="open-agent" class="button quiet" type="button">Agent</button>
           <button id="sign-out" class="button quiet" type="button">Sign out</button>
         </div>
       </header>
@@ -111,17 +112,33 @@
       </div>
       <div id="pages" class="pages"></div>
       <p id="doc-message" class="message" role="status"></p>
+    </section>
 
-      <!-- Chat, over the bottom of the pages it is about. A citation in an
-           answer is a button that turns to that page. -->
-      <section id="chat" class="chat" hidden>
-        <header class="bar">
-          <h2>Ask this document</h2>
-          <span class="spacer"></span>
-          <button id="chat-close" class="button quiet" type="button">Close</button>
-        </header>
+    <!-- Asking. A sheet over whatever is behind it, with two conversations in
+         it: one about the document on screen, and one about the library, which
+         can drive the app -- open a document, mark a page -- while you watch it
+         happen behind the sheet. That is why it is not a view of its own. -->
+    <section id="chat" class="chat" hidden>
+      <header class="bar chat-tabs">
+        <button id="tab-doc" class="tab" type="button" aria-selected="true">
+          This document
+        </button>
+        <button id="tab-agent" class="tab" type="button" aria-selected="false">
+          Agent
+        </button>
+        <span class="spacer"></span>
+        <button id="chat-close" class="button quiet" type="button">Close</button>
+      </header>
+
+      <div id="panel-doc" class="panel">
         <div id="transcript" class="transcript"></div>
         <p id="chat-status" class="message" role="status"></p>
+        <div class="bar allow">
+          <label for="chat-tools">
+            <input id="chat-tools" type="checkbox" />
+            Allow tools
+          </label>
+        </div>
         <form id="chat-form" class="bar chat-ask">
           <input
             id="chat-question"
@@ -133,7 +150,29 @@
           <button id="chat-send" class="primary" type="submit">Ask</button>
           <button id="chat-stop" class="button danger" type="button" hidden>Stop</button>
         </form>
-      </section>
+      </div>
+
+      <div id="panel-agent" class="panel" hidden>
+        <div id="agent-transcript" class="transcript"></div>
+        <p id="agent-status" class="message" role="status"></p>
+        <div class="bar allow">
+          <label for="agent-tools">
+            <input id="agent-tools" type="checkbox" />
+            Allow tools
+          </label>
+        </div>
+        <form id="agent-form" class="bar chat-ask">
+          <input
+            id="agent-question"
+            type="text"
+            placeholder="Find something, and open or mark it"
+            autocomplete="off"
+            enterkeyhint="send"
+          />
+          <button id="agent-send" class="primary" type="submit">Ask</button>
+          <button id="agent-stop" class="button danger" type="button" hidden>Stop</button>
+        </form>
+      </div>
     </section>
 
     <!-- What a note says. A sheet rather than `prompt()`: a phone keyboard

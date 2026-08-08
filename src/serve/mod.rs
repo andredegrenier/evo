@@ -17,6 +17,7 @@ pub mod library_api;
 pub mod markup_api;
 pub mod pages;
 pub mod routes;
+pub mod tools;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -29,8 +30,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::library::Library;
 use crate::library::enrich::AssistantPrefs;
-use crate::mcp::client::ClientEntry;
-use crate::script::model::ModelConfig;
+use crate::mcp::client::{ClientEntry, McpClients};
+use crate::script::model::{ModelBackend, ModelConfig};
 
 /// Where the server listens unless told otherwise. Not registered with anyone;
 /// 8443 says "HTTPS-ish, not privileged" to whoever reads the systemd unit.
@@ -304,6 +305,19 @@ impl ServeOptions {
     }
 }
 
+/// Where a generation's model comes from.
+///
+/// A function rather than a direct call to [`ModelConfig::build`] so that the
+/// endpoint the tests exercise is the shipped one -- routing, framing, tools
+/// and all -- with a scripted model behind it instead of a download. The server
+/// itself only ever installs [`default_backend`].
+pub type Backends = Arc<dyn Fn(&ModelConfig) -> Box<dyn ModelBackend> + Send + Sync>;
+
+/// The real one: whatever the configuration says.
+pub fn default_backend() -> Backends {
+    Arc::new(|config: &ModelConfig| config.build())
+}
+
 /// Everything a handler can reach. One `Arc` of it is the axum router's state.
 pub struct ServeState {
     pub library: Arc<Mutex<Library>>,
@@ -329,6 +343,12 @@ pub struct ServeState {
     /// this process does and the least willing to share: a queue of one is
     /// slower for the second reader and survivable for the machine.
     pub generation: tokio::sync::Semaphore,
+    /// The MCP servers the configuration named, if any -- the same client the
+    /// desktop app uses, with the child processes kept between questions so
+    /// only the first one pays to start them.
+    pub mcp: Arc<McpClients>,
+    /// How to get a model. Always [`default_backend`] outside the tests.
+    pub backend: Backends,
 }
 
 pub type Shared = Arc<ServeState>;
@@ -381,6 +401,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
     // it gets a detached context: the same answer `mcp::client` gives.
     library.start_indexer(&egui::Context::default());
 
+    // The servers the agent may reach. Configured here and never from a
+    // request: an entry names a program to run, which is not something an HTTP
+    // API has any business accepting. Nothing is started until a question with
+    // tools switched on asks what they can do.
+    let mcp = Arc::new(McpClients::default());
+    mcp.configure(&config.mcp_clients);
+
     let options = ServeOptions {
         secure_cookies: !args.insecure_http,
         trust_proxy: args.trust_proxy,
@@ -397,6 +424,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
         page_sizes: Mutex::new(HashMap::new()),
         pages_text: Mutex::new(chat_api::PageText::default()),
         generation: tokio::sync::Semaphore::new(1),
+        mcp,
+        backend: default_backend(),
     });
 
     // Four workers: enough that a slow render or a model turn does not stall
@@ -443,6 +472,13 @@ async fn serve(state: Shared, bind: &str, port: u16) -> Result<(), String> {
         println!("  model: {} at {}", model.model, model.base_url);
     } else {
         println!("  model: built-in {}", model.builtin_model);
+    }
+    let servers = state.config.mcp_clients.len();
+    if servers > 0 {
+        println!(
+            "  tools: {servers} MCP server{} configured (started when first asked for)",
+            if servers == 1 { "" } else { "s" }
+        );
     }
     if !state.options.secure_cookies {
         println!(

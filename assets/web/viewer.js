@@ -106,6 +106,22 @@ export function showPage(number) {
   if (open) goTo(number);
 }
 
+/// Somebody else changed this document's markup -- the agent, marking a page --
+/// so what is on screen is out of date. Re-read it and redraw the overlays of
+/// whichever pages are drawn; a page that has not been loaded yet will fetch
+/// the new markup when it comes into view, which is the same thing later.
+///
+/// A document that is not the one open needs nothing done to it: opening it
+/// reads the markup as it stands.
+export async function refreshMarkup(id, page) {
+  if (!open || open.id !== id) return;
+  await readMarkup();
+  const loaded = open.sections
+    .map((element, index) => (element.dataset.loaded === "yes" ? index + 1 : null))
+    .filter((number) => number !== null && (!page || number === page));
+  for (const number of loaded) await drawOverlay(number);
+}
+
 function message(text) {
   document.getElementById("doc-message").textContent = text || "";
 }

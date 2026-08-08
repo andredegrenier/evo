@@ -21,7 +21,14 @@
 //! `mpsc` channel; when the browser goes away axum drops the receiver, the
 //! blocking side's `send` fails, `on_token` answers [`ControlFlow::Break`], and
 //! the generation is abandoned. There is no separate cancellation to get wrong.
+//!
+//! Two endpoints, one machine. `/api/docs/{id}/chat` asks about a document and
+//! quotes its pages; `/api/agent/chat` asks about the library and has nothing
+//! quoted at all, because what it is for is the tools -- see [`super::tools`].
+//! Both take `tools`, and both default to false: switching evo's own controls
+//! over to a language model is something a person says yes to.
 
+use std::cell::RefCell;
 use std::convert::Infallible;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -37,12 +44,15 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::chat::{agent, history_for, retrieval};
+use crate::mcp::McpAccess;
+use crate::mcp::client::RemoteTool;
 use crate::script::model::{
     ChatMessage, GenerateRequest, ModelBackend, ModelError, ToolCall, ToolDef,
 };
 
 use super::Shared;
 use super::library_api::{check_id, document_bytes, fail, no_such_document, with_library};
+use super::tools::{Emit, ServerTools};
 
 /// Grounded answers want little invention; some helps them read as prose. The
 /// same figure the desktop app's chat uses -- an answer should not depend on
@@ -113,8 +123,19 @@ pub enum Say {
     Stage(&'static str),
     /// Text from the model, as it arrives.
     Token(String),
-    /// The finished answer, and the pages (1-based) it was allowed to use.
-    Done { text: String, pages: Vec<usize> },
+    /// Something the model is having evo do, as it happens. The reader watches
+    /// the tool run rather than finding out about it in the answer.
+    Tool { name: String, text: String },
+    /// Something for the app itself to do: turn to a page, redraw the markup.
+    /// The payload is [`super::tools`]'s, and the browser switches on `action`.
+    Ui(Value),
+    /// The finished answer, the pages (1-based) it was allowed to use, and the
+    /// tools it ran on the way.
+    Done {
+        text: String,
+        pages: Vec<usize>,
+        tools: Vec<String>,
+    },
     /// Why there is no answer. A sentence, for a person.
     Error(String),
 }
@@ -125,6 +146,8 @@ impl Say {
         match self {
             Self::Stage(_) => "stage",
             Self::Token(_) => "token",
+            Self::Tool { .. } => "tool",
+            Self::Ui(_) => "ui",
             Self::Done { .. } => "done",
             Self::Error(_) => "error",
         }
@@ -134,7 +157,11 @@ impl Say {
         match self {
             Self::Stage(text) => json!({ "text": text }),
             Self::Token(text) => json!({ "text": text }),
-            Self::Done { text, pages } => json!({ "text": text, "pages": pages }),
+            Self::Tool { name, text } => json!({ "name": name, "text": text }),
+            Self::Ui(payload) => payload.clone(),
+            Self::Done { text, pages, tools } => {
+                json!({ "text": text, "pages": pages, "tools_used": tools })
+            }
             Self::Error(message) => json!({ "error": message }),
         }
     }
@@ -153,11 +180,25 @@ impl Say {
 const READING: &str = "Reading the document…";
 /// And while somebody else's question is being answered first.
 const WAITING: &str = "Waiting for the model…";
+/// And while the configured MCP servers are being started, which can take a
+/// moment the first time.
+const TOOLING: &str = "Asking the tool servers what they can do…";
 const ASKING: &str = "Asking the model…";
 
 // ---------------------------------------------------------------------------
 // One question, from prompt to answer
 // ---------------------------------------------------------------------------
+
+/// What the model may have evo do this turn: the tools it was offered, and the
+/// thing that runs them.
+///
+/// Both halves together or neither: a tool list nothing can run would have the
+/// model asking for things that always fail, and a runner with no list would
+/// have it guessing at names.
+pub struct Toolbox<'a> {
+    pub access: &'a dyn McpAccess,
+    pub tools: &'a [RemoteTool],
+}
 
 /// Ask `backend` the question in `request` and report what happens.
 ///
@@ -172,27 +213,58 @@ pub fn converse(
     backend: &dyn ModelBackend,
     request: GenerateRequest,
     pages: Vec<usize>,
+    toolbox: Option<Toolbox<'_>>,
     say: &mut dyn FnMut(Say) -> ControlFlow<()>,
 ) {
-    if say(Say::Stage(ASKING)).is_break() {
+    // Streaming and tool-running both report to the reader, and `run_agent`
+    // calls them one at a time from one thread -- so they share `say` through a
+    // `RefCell` rather than each having half of the conversation.
+    let say = RefCell::new(say);
+    let tell = |said: Say| -> ControlFlow<()> {
+        let mut say = say.borrow_mut();
+        (*say)(said)
+    };
+
+    if tell(Say::Stage(ASKING)).is_break() {
         return;
     }
 
-    // The tools arrive in M27. Until then a model that invents a call is told
-    // there is no such thing, in the same words the desktop app uses, and
-    // carries on -- which is better than failing the answer over it.
-    let mut execute = |call: &ToolCall| {
-        Err(format!(
-            "evo has no tool called \u{201c}{}\u{201d}",
-            call.name
-        ))
-    };
     let cancel = AtomicBool::new(false);
+    let mut used: Vec<String> = Vec::new();
 
-    // The borrow of `say` ends with this block, so the outcome can be reported
-    // through the same closure afterwards.
     let outcome = {
-        let mut on_token = |chunk: &str| say(Say::Token(chunk.to_owned()));
+        let mut on_token = |chunk: &str| tell(Say::Token(chunk.to_owned()));
+        // A model that invents a call is told there is no such thing, in the
+        // same words the desktop app uses, and carries on -- which is better
+        // than failing the answer over it.
+        let mut execute = |call: &ToolCall| {
+            let unknown = || format!("evo has no tool called \u{201c}{}\u{201d}", call.name);
+            let Some(toolbox) = &toolbox else {
+                return Err(unknown());
+            };
+            let Some(tool) = toolbox.tools.iter().find(|t| t.def.name == call.name) else {
+                return Err(unknown());
+            };
+            used.push(call.name.clone());
+            let _ = tell(Say::Tool {
+                name: call.name.clone(),
+                text: format!("Running {}…", call.name),
+            });
+            let result = toolbox
+                .access
+                .call(&tool.server, &tool.tool, call.arguments.clone());
+            let _ = tell(match &result {
+                Ok(text) => Say::Tool {
+                    name: call.name.clone(),
+                    text: format!("{} answered ({} characters).", call.name, text.len()),
+                },
+                Err(e) => Say::Tool {
+                    name: call.name.clone(),
+                    text: format!("{} failed: {e}", call.name),
+                },
+            });
+            result
+        };
         agent::run_agent(
             backend,
             request,
@@ -205,15 +277,16 @@ pub fn converse(
 
     match outcome {
         Ok(answer) => {
-            let _ = say(Say::Done {
+            let _ = tell(Say::Done {
                 text: answer.text,
                 pages,
+                tools: used,
             });
         }
         // Cancelled is the reader having gone: there is nobody to tell.
         Err(ModelError::Cancelled) => {}
         Err(e) => {
-            let _ = say(Say::Error(e.to_string()));
+            let _ = tell(Say::Error(e.to_string()));
         }
     }
 }
@@ -247,8 +320,30 @@ pub fn ask_about(
     }
 }
 
+/// The request the model is given for a question about the library itself.
+///
+/// Nothing is quoted, because nothing has been chosen: the agent's context is
+/// whatever it goes and looks up. Which is why the prompt is a different one --
+/// there are no pages here to promise to answer only from.
+pub fn ask_library(
+    question: &str,
+    history: Vec<ChatMessage>,
+    model: String,
+    tools: Vec<ToolDef>,
+) -> GenerateRequest {
+    GenerateRequest {
+        model,
+        prompt: question.to_owned(),
+        system: Some(retrieval::library_system_prompt(!tools.is_empty())),
+        history,
+        tools,
+        temperature: Some(TEMPERATURE),
+        max_tokens: None,
+    }
+}
+
 // ---------------------------------------------------------------------------
-// The endpoint
+// The endpoints
 // ---------------------------------------------------------------------------
 
 /// What the phone sends.
@@ -259,14 +354,11 @@ pub struct Ask {
     /// quoted: every question retrieves afresh.
     #[serde(default)]
     pub history: Vec<ChatMessage>,
-    /// Whether the model may drive evo. Read and ignored until M27 adds the
-    /// tools -- the field is here now so the client that asks for them does
-    /// not have to change shape later.
+    /// Whether the model may drive evo -- search the library, open a document,
+    /// mark it up. Off unless asked for: the panel that wants it says so on
+    /// every request, so nothing is remembered on the server that the reader
+    /// cannot see the state of.
     #[serde(default)]
-    #[allow(
-        dead_code,
-        reason = "M27 gives the agent tools; the field is its contract"
-    )]
     pub tools: bool,
 }
 
@@ -306,6 +398,24 @@ pub async fn chat(
 
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(BACKLOG);
     tokio::spawn(answer(state, id, title, bytes, ask, tx));
+    stream(rx)
+}
+
+/// `POST /api/agent/chat` -- a question about the library, answered by an
+/// assistant that can go and look.
+///
+/// No document, so no pages to quote and nothing to check the id of: what makes
+/// this useful is the tools, and with them switched off it says so.
+pub async fn agent_chat(State(state): State<Shared>, Json(ask): Json<Ask>) -> Response {
+    if ask.question.trim().is_empty() {
+        return fail(StatusCode::BAD_REQUEST, "There is no question in that.");
+    }
+    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(BACKLOG);
+    tokio::spawn(answer_about_the_library(state, ask, tx));
+    stream(rx)
+}
+
+fn stream(rx: mpsc::Receiver<Result<Event, Infallible>>) -> Response {
     Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
         // A phone on a mobile network sits behind proxies that close a quiet
         // connection, and a model can think for a while before its first word.
@@ -313,7 +423,21 @@ pub async fn chat(
         .into_response()
 }
 
-/// The work behind one question, from the blob to the last token.
+/// What a question is being asked about, which is what decides the prompt.
+enum Subject {
+    /// One document: its title, its text by page, and the pages retrieval
+    /// picked for this question.
+    Document {
+        title: String,
+        pages: Arc<Vec<String>>,
+        selected: Vec<usize>,
+    },
+    /// The library as a whole. There is nothing to quote, only tools.
+    Library,
+}
+
+/// The work behind one question about a document, from the blob to the last
+/// token.
 async fn answer(
     state: Shared,
     id: String,
@@ -346,18 +470,41 @@ async fn answer(
 
     let selected = retrieval::select_pages(&pages, &ask.question);
     let cited: Vec<usize> = selected.iter().map(|page| page + 1).collect();
-    let request = ask_about(
-        &title,
-        &pages,
-        &selected,
-        &ask.question,
-        history_for(&ask.history),
-        state.config.model.model.clone(),
-        // M27's business. Saying so here rather than in the client keeps the
-        // decision in one place.
-        Vec::new(),
-    );
+    generate(
+        state,
+        Subject::Document {
+            title,
+            pages,
+            selected,
+        },
+        ask,
+        cited,
+        tx,
+    )
+    .await;
+}
 
+async fn answer_about_the_library(
+    state: Shared,
+    ask: Ask,
+    tx: mpsc::Sender<Result<Event, Infallible>>,
+) {
+    generate(state, Subject::Library, ask, Vec::new(), tx).await;
+}
+
+/// Run one question past the model, tools and all.
+///
+/// Everything here happens on a blocking thread: starting an MCP server, asking
+/// it what it can do, running a tool that opens a PDF, and the generation
+/// itself are all things that take long enough to matter, and none of them may
+/// happen on an async task.
+async fn generate(
+    state: Shared,
+    subject: Subject,
+    ask: Ask,
+    cited: Vec<usize>,
+    tx: mpsc::Sender<Result<Event, Infallible>>,
+) {
     // One generation at a time. A model is the largest thing this process
     // does, and two at once on a small server means neither finishes.
     let permit = match state.generation.try_acquire() {
@@ -375,16 +522,71 @@ async fn answer(
     };
 
     let config = state.config.model.clone();
+    let build = state.backend.clone();
+    let library = state.library.clone();
+    let clients = state.mcp.clone();
     let generating = tokio::task::spawn_blocking(move || {
-        let backend = config.build();
-        converse(backend.as_ref(), request, cited, &mut |said| {
+        // Everything the reader is told goes down one channel, in the order it
+        // happened -- the stages, the tokens, the tool chips, and the tools'
+        // own effects, which come from `ServerTools` through `emit`.
+        let sender = tx.clone();
+        let mut say = move |said: Say| {
             // The one place cancellation lives: a closed browser is a dropped
             // receiver, and a dropped receiver is a failed send.
-            match tx.blocking_send(Ok(said.event())) {
+            match sender.blocking_send(Ok(said.event())) {
                 Ok(()) => ControlFlow::Continue(()),
                 Err(_) => ControlFlow::Break(()),
             }
+        };
+        let emit: Emit = Arc::new(move |said| {
+            let _ = tx.blocking_send(Ok(said.event()));
         });
+
+        // The tool list is fetched here rather than at startup because
+        // gathering it can mean starting somebody's child process.
+        let mut server_tools = None;
+        let mut offered: Vec<RemoteTool> = Vec::new();
+        if ask.tools {
+            if say(Say::Stage(TOOLING)).is_break() {
+                return;
+            }
+            // An unconfigured client is no client at all: a model that asks
+            // for a tool nobody offered should be told evo has no such thing,
+            // not sent looking for a server that was never named.
+            let tools = ServerTools::new(library, clients.is_configured().then_some(clients), emit);
+            offered = tools.tools();
+            server_tools = Some(tools);
+        }
+
+        let defs: Vec<ToolDef> = offered.iter().map(|tool| tool.def.clone()).collect();
+        let request = match subject {
+            Subject::Document {
+                title,
+                pages,
+                selected,
+            } => ask_about(
+                &title,
+                &pages,
+                &selected,
+                &ask.question,
+                history_for(&ask.history),
+                config.model.clone(),
+                defs,
+            ),
+            Subject::Library => ask_library(
+                &ask.question,
+                history_for(&ask.history),
+                config.model.clone(),
+                defs,
+            ),
+        };
+
+        let toolbox = server_tools.as_ref().map(|tools| Toolbox {
+            access: tools as &dyn McpAccess,
+            tools: &offered,
+        });
+        let backend = build(&config);
+        converse(backend.as_ref(), request, cited, toolbox, &mut say);
     })
     .await;
     drop(permit);
@@ -560,10 +762,16 @@ mod tests {
     /// Everything one question said, in order.
     fn run(backend: &dyn ModelBackend, pages_cited: Vec<usize>) -> Vec<Say> {
         let mut said = Vec::new();
-        converse(backend, GenerateRequest::default(), pages_cited, &mut |s| {
-            said.push(s);
-            ControlFlow::Continue(())
-        });
+        converse(
+            backend,
+            GenerateRequest::default(),
+            pages_cited,
+            None,
+            &mut |s| {
+                said.push(s);
+                ControlFlow::Continue(())
+            },
+        );
         said
     }
 
@@ -615,15 +823,21 @@ mod tests {
     fn a_reader_who_goes_away_stops_the_generation() {
         let backend = ScriptedBackend::saying(&["half an answer"]);
         let mut said = Vec::new();
-        converse(&backend, GenerateRequest::default(), vec![1], &mut |s| {
-            let stop = s.name() == "token";
-            said.push(s);
-            if stop {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        });
+        converse(
+            &backend,
+            GenerateRequest::default(),
+            vec![1],
+            None,
+            &mut |s| {
+                let stop = s.name() == "token";
+                said.push(s);
+                if stop {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            },
+        );
         let names: Vec<&str> = said.iter().map(Say::name).collect();
         assert_eq!(names, ["stage", "token"], "no done, and no error either");
     }
@@ -678,9 +892,149 @@ mod tests {
             )
         );
         assert!(request.prompt.contains("[Page 2]"), "{}", request.prompt);
-        assert!(request.tools.is_empty(), "the tools arrive in M27");
+        assert!(request.tools.is_empty(), "none were offered");
         assert_eq!(request.history.len(), 1);
         assert_eq!(request.temperature, Some(TEMPERATURE));
+    }
+
+    /// The agent asks about the library rather than about a document, so it
+    /// gets the other prompt -- and with tools switched off it is told to say
+    /// that it cannot see anything, rather than to invent a library.
+    #[test]
+    fn the_agent_is_told_it_is_driving_evo_and_what_it_may_use() {
+        let with_tools = ask_library(
+            "find the boiler report",
+            Vec::new(),
+            "qwen3".to_owned(),
+            vec![ToolDef {
+                name: "search_library".to_owned(),
+                description: String::new(),
+                parameters: json!({"type": "object"}),
+            }],
+        );
+        let system = with_tools.system.as_deref().expect("a system prompt");
+        assert_eq!(system, retrieval::library_system_prompt(true));
+        assert!(system.contains("highlight_text"), "{system}");
+        assert!(system.contains("[p.N]"), "{system}");
+        // The question travels as itself: there are no pages to quote around it.
+        assert_eq!(with_tools.prompt, "find the boiler report");
+        assert_eq!(with_tools.temperature, Some(TEMPERATURE));
+
+        let alone = ask_library(
+            "what is in here?",
+            Vec::new(),
+            "qwen3".to_owned(),
+            Vec::new(),
+        );
+        let system = alone.system.as_deref().expect("a system prompt");
+        assert!(system.contains("Allow tools"), "{system}");
+        assert!(!system.contains("highlight_text"), "{system}");
+    }
+
+    /// The agent loop end to end at this level: the model asks for a tool, the
+    /// tool runs, what it did reaches the reader, and the answer follows.
+    ///
+    /// The order is the point. A `ui` frame is the app being driven, and it has
+    /// to arrive between the chip that says the tool started and the words that
+    /// explain what it found.
+    #[test]
+    fn a_tool_call_reaches_the_reader_as_a_chip_a_ui_event_and_an_answer() {
+        use crate::mcp::client::RemoteTool;
+
+        /// A toolbox of one tool, which reports what it did the way
+        /// `ServerTools` does: through the same channel the words are on.
+        struct Fake {
+            said: std::sync::Arc<Mutex<Vec<Say>>>,
+        }
+        impl crate::mcp::McpAccess for Fake {
+            fn tools(&self) -> Vec<RemoteTool> {
+                Vec::new()
+            }
+            fn call(&self, _server: &str, tool: &str, arguments: Value) -> Result<String, String> {
+                self.said.lock().unwrap().push(Say::Ui(json!({
+                    "action": "open",
+                    "doc": arguments["doc_id"],
+                    "page": 2,
+                })));
+                Ok(format!("{tool} did it"))
+            }
+        }
+
+        let said = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let access = Fake { said: said.clone() };
+        let tools = vec![RemoteTool {
+            server: "evo".to_owned(),
+            tool: "open_document".to_owned(),
+            def: ToolDef {
+                name: "open_document".to_owned(),
+                description: String::new(),
+                parameters: json!({"type": "object"}),
+            },
+        }];
+        let backend = ScriptedBackend::new(vec![
+            Ok(GenerateOutcome {
+                text: "Opening it.".to_owned(),
+                tool_calls: vec![ToolCall {
+                    id: Some("call_1".to_owned()),
+                    name: "open_document".to_owned(),
+                    arguments: json!({"doc_id": "a".repeat(64), "page": 2}),
+                }],
+            }),
+            Ok(GenerateOutcome::text("It is open at page 2. [p.2]")),
+        ]);
+
+        let recorder = said.clone();
+        converse(
+            &backend,
+            GenerateRequest::default(),
+            vec![2],
+            Some(Toolbox {
+                access: &access,
+                tools: &tools,
+            }),
+            &mut |s| {
+                recorder.lock().unwrap().push(s);
+                ControlFlow::Continue(())
+            },
+        );
+
+        let events = said.lock().unwrap();
+        let names: Vec<&str> = events.iter().map(Say::name).collect();
+        assert_eq!(
+            names,
+            ["stage", "token", "tool", "ui", "tool", "token", "done"],
+            "the app being driven arrives between the chip and the answer"
+        );
+        assert_eq!(events[2].data()["text"], "Running open_document…");
+        assert_eq!(events[3].data()["action"], "open");
+        assert_eq!(events[3].data()["page"], 2);
+        assert_eq!(events[6].data()["tools_used"], json!(["open_document"]));
+        assert_eq!(events[6].data()["text"], "It is open at page 2. [p.2]");
+    }
+
+    /// A model that asks for something nobody offered is told so and carries
+    /// on, whether or not any tools were allowed at all.
+    #[test]
+    fn a_tool_nobody_offered_is_refused_in_words_the_model_can_act_on() {
+        let backend = ScriptedBackend::new(vec![
+            Ok(GenerateOutcome {
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: None,
+                    name: "delete_everything".to_owned(),
+                    arguments: json!({}),
+                }],
+            }),
+            Ok(GenerateOutcome::text("I could not do that.")),
+        ]);
+        let said = run(&backend, Vec::new());
+        let names: Vec<&str> = said.iter().map(Say::name).collect();
+        assert_eq!(
+            names,
+            ["stage", "token", "done"],
+            "no chip for a tool that is not"
+        );
+        assert_eq!(said[2].data()["tools_used"], json!([]));
     }
 
     /// A conversation asks one document many questions, so its text is read

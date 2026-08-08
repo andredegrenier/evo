@@ -179,6 +179,39 @@ pub fn system_prompt_with_tools(title: &str, tools: bool) -> String {
     prompt
 }
 
+/// The instructions the *library* agent answers under.
+///
+/// A sibling of [`system_prompt_with_tools`] rather than a variant of it: this
+/// conversation has no quoted pages and therefore no "only these pages" rule to
+/// make. What it has instead is evo itself -- the tools are the whole point,
+/// and the model is told that what it does with them the reader watches happen.
+pub fn library_system_prompt(tools: bool) -> String {
+    let mut prompt = String::from(
+        "You are evo's assistant, working inside a person's own PDF library on \
+         their phone. Answer from what the library actually holds rather than \
+         from anything you may remember about these documents.",
+    );
+    if tools {
+        prompt.push_str(
+            " You drive evo with the tools you have been given: list_library and \
+             search_library find documents, get_document_text reads their pages, \
+             open_document turns the reader's screen to a page, and \
+             highlight_text marks words on it. Look something up before \
+             answering it. When you are asked to find and mark something, search \
+             for it first, then highlight the exact words you found; say plainly \
+             what you opened or marked, and cite pages as [p.N].",
+        );
+    } else {
+        prompt.push_str(
+            " Tools are switched off for this conversation, so you cannot see \
+             the library at all. Say so when you are asked something only the \
+             documents could answer, and mention that \u{201c}Allow tools\u{201d} \
+             is what turns it on.",
+        );
+    }
+    prompt
+}
+
 /// The user message: the quoted pages, then the question.
 pub fn user_prompt(title: &str, context: &str, question: &str) -> String {
     if context.is_empty() {

@@ -65,6 +65,9 @@ pub fn router(state: Shared) -> axum::Router {
         )
         .route("/api/docs/{id}/markup.svg", get(markup_api::markup_svg))
         .route("/api/docs/{id}/chat", post(chat_api::chat))
+        // The agent is about the library rather than about a document, so it
+        // hangs off the root and not off an id.
+        .route("/api/agent/chat", post(chat_api::agent_chat))
         .route(
             "/api/docs/{id}/chatlog",
             get(chat_api::get_chatlog).put(chat_api::put_chatlog),
@@ -132,8 +135,15 @@ fn missing() -> Response {
 mod tests {
     use super::*;
     use crate::library::Library;
-    use crate::serve::{ServeConfig, ServeOptions, ServePaths, ServeState, now_secs};
+    use crate::script::model::{
+        GenerateOutcome, GenerateRequest, ModelBackend, ModelError, ToolCall,
+    };
+    use crate::serve::{
+        Backends, ServeConfig, ServeOptions, ServePaths, ServeState, Shared, default_backend,
+        now_secs,
+    };
     use serde_json::Value;
+    use std::ops::ControlFlow;
     use std::sync::{Arc, Mutex};
     use tokio_util::sync::CancellationToken;
 
@@ -149,10 +159,16 @@ mod tests {
         cancel: CancellationToken,
         thread: Option<std::thread::JoinHandle<()>>,
         dir: std::path::PathBuf,
+        /// The server's own state, for the tests that have to look at the
+        /// library the way a tool does. Dropped by [`Harness::stop`], because
+        /// redb permits one `Database` per file and a test that reopens the
+        /// library needs this handle gone.
+        state: Option<Shared>,
     }
 
     impl Drop for Harness {
         fn drop(&mut self) {
+            self.state = None;
             self.cancel.cancel();
             if let Some(thread) = self.thread.take() {
                 let _ = thread.join();
@@ -163,17 +179,24 @@ mod tests {
 
     impl Harness {
         fn start(name: &str) -> Self {
-            Self::start_with(name, false)
+            Self::start_with(name, false, default_backend())
         }
 
         /// The same server with the text-extraction worker running. Only the
         /// search test needs it: it is a thread and a tantivy index, and every
         /// other test would be paying for both.
         fn start_indexing(name: &str) -> Self {
-            Self::start_with(name, true)
+            Self::start_with(name, true, default_backend())
         }
 
-        fn start_with(name: &str, index: bool) -> Self {
+        /// The shipped server with a scripted model behind it, so a whole agent
+        /// turn -- tools, events, framing -- can be watched over a real socket
+        /// with nothing downloaded.
+        fn start_with_model(name: &str, backend: Backends) -> Self {
+            Self::start_with(name, false, backend)
+        }
+
+        fn start_with(name: &str, index: bool, backend: Backends) -> Self {
             let dir = std::env::temp_dir().join(format!("evo-serve-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             let paths = ServePaths::new(Some(dir.clone()), None).expect("paths");
@@ -214,7 +237,12 @@ mod tests {
                 page_sizes: Mutex::new(std::collections::HashMap::new()),
                 pages_text: Mutex::new(chat_api::PageText::default()),
                 generation: tokio::sync::Semaphore::new(1),
+                // No test configures an MCP server: starting somebody's child
+                // process is not something a test suite does.
+                mcp: Arc::new(crate::mcp::client::McpClients::default()),
+                backend,
             });
+            let shared = state.clone();
 
             let cancel = CancellationToken::new();
             let (addr_tx, addr_rx) = std::sync::mpsc::channel::<String>();
@@ -253,6 +281,7 @@ mod tests {
                 cancel,
                 thread: Some(thread),
                 dir,
+                state: Some(shared),
             }
         }
 
@@ -265,6 +294,7 @@ mod tests {
         /// the router owns the only `ServeState`, so the `Library` is dropped
         /// with it.
         fn stop(&mut self) {
+            self.state = None;
             self.cancel.cancel();
             if let Some(thread) = self.thread.take() {
                 let _ = thread.join();
@@ -629,6 +659,20 @@ mod tests {
                 assert!(!answer.body.is_empty(), "{path} is empty");
             }
         }
+
+        // Both conversations are in the shell, and the toggle that decides
+        // whether the model may drive evo starts unchecked in the markup: a
+        // browser with no stored preference must not begin with tools on.
+        for part in [
+            "id=\"panel-doc\"",
+            "id=\"panel-agent\"",
+            "id=\"tab-agent\"",
+            "id=\"agent-tools\"",
+            "id=\"chat-tools\"",
+        ] {
+            assert!(shell.contains(part), "the shell has no {part}");
+        }
+        assert!(!shell.contains("checked"), "tools are off until asked for");
 
         // The shell names them, so a rename that forgot one is caught here.
         for reference in [
@@ -1076,6 +1120,288 @@ mod tests {
             json!({ "messages": flood }),
         );
         assert_eq!(refused.status, 413, "{}", refused.text());
+    }
+
+    // -----------------------------------------------------------------------
+    // The agent
+    // -----------------------------------------------------------------------
+
+    /// A model that answers from a prepared script, recording what it was
+    /// offered. No weights, no server, no network -- which is what lets a whole
+    /// agent turn be watched in CI.
+    #[derive(Default)]
+    struct Script {
+        replies: std::collections::VecDeque<GenerateOutcome>,
+        /// The tools named in each request, and the system prompt that came
+        /// with it: what the model was actually told it could do.
+        offered: Vec<(Vec<String>, String)>,
+    }
+
+    struct Scripted(Arc<Mutex<Script>>);
+
+    impl ModelBackend for Scripted {
+        fn generate(
+            &self,
+            req: &GenerateRequest,
+            on_token: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        ) -> Result<GenerateOutcome, ModelError> {
+            let outcome = {
+                let mut script = self.0.lock().unwrap();
+                script.offered.push((
+                    req.tools.iter().map(|t| t.name.clone()).collect(),
+                    req.system.clone().unwrap_or_default(),
+                ));
+                script
+                    .replies
+                    .pop_front()
+                    .unwrap_or_else(|| GenerateOutcome::text("out of script"))
+            };
+            if !outcome.text.is_empty() && on_token(&outcome.text).is_break() {
+                return Err(ModelError::Cancelled);
+            }
+            Ok(outcome)
+        }
+
+        fn list_models(&self) -> Result<Vec<String>, ModelError> {
+            Ok(vec!["scripted".to_owned()])
+        }
+
+        fn describe(&self) -> String {
+            "scripted (test)".to_owned()
+        }
+    }
+
+    fn calls(name: &str, arguments: Value) -> GenerateOutcome {
+        GenerateOutcome {
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: Some(format!("call_{name}")),
+                name: name.to_owned(),
+                arguments,
+            }],
+        }
+    }
+
+    /// Every frame of an event stream, in order, as `(event, data)`.
+    fn frames(stream: &str) -> Vec<(String, Value)> {
+        stream
+            .split("\n\n")
+            .filter_map(|block| {
+                let mut name = String::new();
+                let mut data = String::new();
+                for line in block.lines() {
+                    if let Some(rest) = line.strip_prefix("event:") {
+                        name = rest.trim().to_owned();
+                    } else if let Some(rest) = line.strip_prefix("data:") {
+                        data.push_str(rest.trim_start());
+                    }
+                }
+                (!data.is_empty()).then(|| {
+                    let parsed: Value = serde_json::from_str(&data)
+                        .unwrap_or_else(|e| panic!("{data} is not JSON: {e}"));
+                    (name, parsed)
+                })
+            })
+            .collect()
+    }
+
+    /// The whole promise of this milestone, over a real socket: the agent is
+    /// asked to find something and mark it, it uses evo's own tools to do so,
+    /// and what it did arrives on the same stream as its words -- as `ui`
+    /// frames the app acts on, not as a description of what it would have done.
+    ///
+    /// The markup it made is then the markup the API serves, under a version
+    /// tag that has moved. That is the join between a tool's write and the
+    /// conditional writes the viewer makes; if it were not the same hash, a
+    /// phone would go on drawing yesterday's overlay.
+    #[test]
+    fn the_agent_drives_evo_and_the_markup_it_makes_is_the_markup_the_api_serves() {
+        let script = Arc::new(Mutex::new(Script::default()));
+        let model = script.clone();
+        let evo = Harness::start_with_model(
+            "agent",
+            Arc::new(move |_config: &crate::script::model::ModelConfig| {
+                Box::new(Scripted(model.clone())) as Box<dyn ModelBackend>
+            }),
+        );
+        let session = sign_in(&evo);
+        let docs = format!("{}/api/docs", evo.url);
+        let id =
+            post_bytes(&docs, &session, &[("X-Evo-Title", "Fox report")], fixture()).json()["id"]
+                .as_str()
+                .expect("an id")
+                .to_owned();
+
+        // What the markup is before anybody touches it, and the tag the viewer
+        // would be holding.
+        let before = get(&format!("{docs}/{id}/markup"), Some(&session));
+        let first_tag = before.headers.get("etag").expect("a tag").to_owned();
+
+        // Three rounds: look at it, mark it, say what happened.
+        script.lock().unwrap().replies.extend([
+            calls("open_document", json!({"doc_id": id, "page": 1})),
+            calls(
+                "highlight_text",
+                json!({"doc_id": id, "page": 1, "text": "quick brown fox", "note": "the subject"}),
+            ),
+            GenerateOutcome::text("Marked it on page 1. [p.1]"),
+        ]);
+
+        let asked = post_json(
+            &format!("{}/api/agent/chat", evo.url),
+            Some(&session),
+            json!({
+                "question": "find the fox and highlight it",
+                "history": [],
+                "tools": true,
+            }),
+        );
+        assert_eq!(asked.status, 200, "{}", asked.text());
+        assert!(
+            asked.content_type.starts_with("text/event-stream"),
+            "{}",
+            asked.content_type
+        );
+        let stream = frames(&asked.text());
+        let names: Vec<&str> = stream.iter().map(|(name, _)| name.as_str()).collect();
+        assert!(names.contains(&"ui"), "the app was never driven: {names:?}");
+        assert_eq!(names.last(), Some(&"done"), "{names:?}");
+
+        // The reader watched each tool run.
+        let chips: Vec<&str> = stream
+            .iter()
+            .filter(|(name, _)| name == "tool")
+            .filter_map(|(_, data)| data["text"].as_str())
+            .collect();
+        assert!(chips.contains(&"Running open_document…"), "{chips:?}");
+        assert!(chips.contains(&"Running highlight_text…"), "{chips:?}");
+        assert!(
+            !chips.iter().any(|chip| chip.contains("failed")),
+            "a tool did not work: {chips:?}"
+        );
+
+        // And each one told the app what to do about it.
+        let ui: Vec<&Value> = stream
+            .iter()
+            .filter(|(name, _)| name == "ui")
+            .map(|(_, data)| data)
+            .collect();
+        assert_eq!(ui.len(), 2, "{ui:?}");
+        assert_eq!(ui[0]["action"], "open");
+        assert_eq!(ui[0]["doc"], id.as_str());
+        assert_eq!(ui[0]["page"], 1);
+        assert_eq!(ui[1]["action"], "markup-changed");
+        assert_eq!(ui[1]["doc"], id.as_str());
+
+        let done = &stream.last().expect("a done frame").1;
+        assert_eq!(done["text"], "Marked it on page 1. [p.1]");
+        assert_eq!(
+            done["tools_used"],
+            json!(["open_document", "highlight_text"])
+        );
+
+        // The five tools were really offered, and the prompt says what they are
+        // for -- the model is told it is driving evo, not asked to guess.
+        let offered = &script.lock().unwrap().offered[0];
+        let mut names = offered.0.clone();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "get_document_text",
+                "highlight_text",
+                "list_library",
+                "open_document",
+                "search_library"
+            ]
+        );
+        assert!(offered.1.contains("highlight_text"), "{}", offered.1);
+
+        // The markup the tool wrote is the markup the API now serves, at the
+        // version the `ui` event named.
+        let after = get(&format!("{docs}/{id}/markup"), Some(&session));
+        let tag = after.headers.get("etag").expect("a tag").to_owned();
+        assert_ne!(tag, first_tag, "the version tag moved");
+        assert_eq!(ui[1]["etag"], tag.as_str(), "and moved to the one it said");
+        assert_eq!(
+            get(&format!("{docs}/{id}/manifest"), Some(&session)).json()["markup_etag"],
+            tag.as_str(),
+            "the manifest agrees with it"
+        );
+        let annotations = after.json()["annotations"].as_array().cloned().unwrap();
+        assert_eq!(annotations.len(), 2, "a highlight and its note");
+        assert_eq!(annotations[0]["kind"], "Highlight");
+        assert_eq!(annotations[0]["page"], 0);
+        assert_eq!(
+            annotations[1]["kind"]["TextBox"]["text"],
+            "the subject",
+            "{after:?}",
+            after = after.text()
+        );
+
+        // The overlay draws it, which is what the phone actually fetches.
+        let overlay = get(&format!("{docs}/{id}/markup.svg?page=1"), Some(&session));
+        assert_eq!(overlay.status, 200);
+        assert!(overlay.text().contains("<rect"), "{}", overlay.text());
+        assert_eq!(overlay.headers.get("etag"), Some(&tag));
+    }
+
+    /// With tools switched off -- the default, and what the toggle in the app
+    /// starts at -- the agent is a conversation and nothing more: no tools are
+    /// offered, and the prompt says the library cannot be seen.
+    #[test]
+    fn an_agent_without_tools_is_offered_none_and_is_told_so() {
+        let script = Arc::new(Mutex::new(Script::default()));
+        let model = script.clone();
+        let evo = Harness::start_with_model(
+            "agent-quiet",
+            Arc::new(move |_config: &crate::script::model::ModelConfig| {
+                Box::new(Scripted(model.clone())) as Box<dyn ModelBackend>
+            }),
+        );
+        let session = sign_in(&evo);
+        script
+            .lock()
+            .unwrap()
+            .replies
+            .push_back(GenerateOutcome::text("I cannot see the library."));
+
+        let asked = post_json(
+            &format!("{}/api/agent/chat", evo.url),
+            Some(&session),
+            json!({"question": "what is in my library?"}),
+        );
+        assert_eq!(asked.status, 200, "{}", asked.text());
+        let stream = frames(&asked.text());
+        let names: Vec<&str> = stream.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["stage", "token", "done"], "nothing was driven");
+        assert_eq!(stream[2].1["tools_used"], json!([]));
+
+        let offered = &script.lock().unwrap().offered[0];
+        assert!(offered.0.is_empty(), "{:?}", offered.0);
+        assert!(offered.1.contains("Allow tools"), "{}", offered.1);
+
+        // A question with nothing in it is a fact about the request, so it is a
+        // status rather than an event.
+        assert_eq!(
+            post_json(
+                &format!("{}/api/agent/chat", evo.url),
+                Some(&session),
+                json!({"question": "  "}),
+            )
+            .status,
+            400
+        );
+        // And the agent is behind the session guard like everything else.
+        assert_eq!(
+            post_json(
+                &format!("{}/api/agent/chat", evo.url),
+                None,
+                json!({"question": "hello"}),
+            )
+            .status,
+            401
+        );
     }
 
     /// An id becomes a filename in three places, so nothing that is not a

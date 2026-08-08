@@ -6,7 +6,7 @@
 
 import { api, get, postJson, reason, isDocId, thumbUrl } from "./api.js";
 import { openDocument, closeDocument } from "./viewer.js";
-import { openChat, closeChat } from "./chat.js";
+import { openChat, openAgent, closeChat, onRoute } from "./chat.js";
 
 const views = {
   login: document.getElementById("view-login"),
@@ -63,6 +63,7 @@ loginForm.addEventListener("submit", async (event) => {
 
 document.getElementById("sign-out").addEventListener("click", async () => {
   await api("/api/logout", { method: "POST" });
+  closeChat();
   closeDocument();
   show("login");
 });
@@ -322,12 +323,21 @@ document.getElementById("open-chat").addEventListener("click", () => {
   if (isDocId(parts[1])) openChat(parts[1]);
 });
 
+// The agent has no document, so `#agent` is only a way in: it opens the sheet
+// over the library and leaves the route alone from then on. What the agent does
+// afterwards -- opening a document, marking a page -- moves the route itself,
+// which is the app being driven and is meant to be watched.
+document.getElementById("open-agent").addEventListener("click", () => {
+  location.hash = "#agent";
+});
+
 async function route() {
   const parts = location.hash.replace(/^#/, "").split("/").filter(Boolean);
   const chatting = parts[0] === "chat";
   if ((parts[0] === "doc" || chatting) && isDocId(parts[1])) {
     const page = Math.max(1, parseInt(parts[2], 10) || 1);
     show("doc");
+    onRoute(parts[1]);
     const opened = await openDocument(parts[1], page);
     if (!opened) {
       location.hash = "#library";
@@ -336,9 +346,10 @@ async function route() {
     if (chatting) await openChat(parts[1]);
     return;
   }
-  closeChat();
+  onRoute(null);
   closeDocument();
   show("library");
+  if (parts[0] === "agent") openAgent();
 }
 
 window.addEventListener("hashchange", route);
