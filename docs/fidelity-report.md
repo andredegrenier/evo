@@ -4,7 +4,7 @@ evo draws PDFs with [hayro](https://github.com/LaurenzV/hayro), a pure-Rust rast
 
 A large divergence is not automatically a hayro bug -- the two engines legitimately differ on antialiasing, font hinting and how they resolve unusual colour spaces, and the corpus is full of files deliberately built to break parsers. It is a list of places worth looking.
 
-Generated 2026-08-09 on `macos-aarch64` in 58s. Reference: PDFium chromium/7988. Scale 1.5x, at most 5 pages per document, compared after a 4x box reduction.
+Generated 2026-08-09 on `macos-aarch64` in 57s. Reference: PDFium chromium/7988. Scale 1.5x, at most 5 pages per document, compared after a 4x box reduction.
 
 ## Corpora
 
@@ -31,6 +31,13 @@ Corpus files are downloaded on demand and cached; none of them is committed to t
 | 90th percentile | 0.217 |
 | worst | 24.766 |
 | pages over the reporting threshold (mean 2 or 2% off) | 8 |
+
+## By corpus
+
+| corpus | documents | pages compared | median | 90th | worst | over threshold |
+|---|---:|---:|---:|---:|---:|---:|
+| `fixtures` | 5 | 10 | 0.110 | 0.110 | 0.110 | 0 |
+| `verapdf` | 357 | 361 | 0.008 | 0.238 | 24.766 | 8 |
 
 ## Worst pages
 

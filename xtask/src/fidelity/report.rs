@@ -159,7 +159,55 @@ fn render(repo: &Path, run: &Run, findings: &[Finding], baseline: &Baseline) -> 
         );
     }
 
-    // Worst pages first: this is the part anybody actually reads.
+    // Per corpus, because "the worst page in the whole run" and "how the
+    // engines get on with this kind of document" are different questions and
+    // the second one is the one that says whether to trust the renderer.
+    if !run.measured.is_empty() {
+        out.push_str("## By corpus\n\n");
+        out.push_str(
+            "| corpus | documents | pages compared | median | 90th | worst | over threshold |\n",
+        );
+        out.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
+        for info in &run.corpora {
+            let mut here: Vec<f64> = run
+                .measured
+                .iter()
+                .filter(|m| m.0 == info.name)
+                .map(|m| m.3.mean_abs)
+                .collect();
+            here.sort_by(f64::total_cmp);
+            if here.is_empty() {
+                continue;
+            }
+            let over = run
+                .measured
+                .iter()
+                .filter(|m| {
+                    m.0 == info.name
+                        && (m.3.mean_abs > super::NOTABLE_MEAN_ABS
+                            || m.3.frac_off > super::NOTABLE_FRAC_OFF)
+                })
+                .count();
+            let documents = run
+                .docs
+                .iter()
+                .filter(|doc| doc.corpus == info.name)
+                .count();
+            out.push_str(&format!(
+                "| `{}` | {documents} | {} | {:.3} | {:.3} | {:.3} | {over} |\n",
+                info.name,
+                here.len(),
+                quantile(&here, 0.5),
+                quantile(&here, 0.9),
+                here[here.len() - 1],
+            ));
+        }
+        out.push('\n');
+    }
+
+    // Worst pages first: this is the part anybody actually reads. Nearly every
+    // document in these corpora is one page, so it doubles as a per-document
+    // ranking.
     if !run.measured.is_empty() {
         let mut worst = run.measured.clone();
         worst.sort_by(|a, b| b.3.mean_abs.total_cmp(&a.3.mean_abs));

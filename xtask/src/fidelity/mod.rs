@@ -253,11 +253,22 @@ fn run(args: &[String]) -> Result<bool, String> {
     if bless {
         baseline.scale = SCALE;
         baseline.max_pages = max_pages;
-    } else if baseline.max_pages != max_pages {
-        eprintln!(
-            "note: the baseline was blessed at --max-pages {}, this run is {max_pages}",
-            baseline.max_pages
-        );
+    } else {
+        // Neither of these invalidates a run, but both explain a wall of
+        // findings before somebody goes looking for a bug that is not there.
+        if baseline.max_pages != max_pages {
+            eprintln!(
+                "note: the baseline was blessed at --max-pages {}, this run is {max_pages}",
+                baseline.max_pages
+            );
+        }
+        if (baseline.scale - SCALE).abs() > f32::EPSILON {
+            eprintln!(
+                "note: the baseline was blessed at {}x, this run draws at {SCALE}x, \
+                 so every hash will differ",
+                baseline.scale
+            );
+        }
     }
 
     let run = measure(&repo, &corpora, max_pages)?;
