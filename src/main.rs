@@ -8,6 +8,10 @@ mod keymap;
 mod library;
 mod llm;
 mod mcp;
+/// The timing harness. Tests only: it builds a thousand-page document to
+/// measure against, and nothing the app does needs one.
+#[cfg(test)]
+mod perf;
 mod render;
 mod script;
 mod serve;

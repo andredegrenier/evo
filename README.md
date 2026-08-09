@@ -223,6 +223,18 @@ cargo run -p xtask -- fidelity --bless            # re-record baseline + report
 Corpora are downloaded and cached, never committed. The numbers live in
 `xtask/fidelity-baseline.json`, one section per platform.
 
+**How fast are they?** The timing harness builds a thousand-page document with
+real text and vector art and puts it through the paths a person waits on —
+opening, jumping to a page, ⌘F, `evo serve`, a scroll from end to end:
+
+```sh
+cargo run -p xtask -- perf            # every measurement
+cargo run -p xtask -- perf worker     # just the render worker
+```
+
+Release mode only, one test at a time, and the document is generated rather
+than committed. Set `EVO_PDFIUM_PATH` to measure both engines.
+
 ## Known limitations
 
 - **Preview fidelity**: with the pure-Rust hayro renderer, some documents

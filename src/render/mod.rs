@@ -1,7 +1,7 @@
 //! Background page rasterization. No rasterizer's document is thread-safe --
-//! hayro's render cache is an `Rc`, PDFium's handles belong to whoever opened
-//! them -- so one worker thread owns the opened document, and the UI thread
-//! sends requests and receives finished RGBA images.
+//! hayro's interpreter state is `Rc`-based, PDFium's handles belong to whoever
+//! opened them -- so one worker thread owns the opened document, and the UI
+//! thread sends requests and receives finished RGBA images.
 
 pub mod cache;
 pub mod engine;
@@ -79,6 +79,24 @@ fn coalesce(batch: &mut Vec<RenderRequest>, req: RenderRequest) -> Vec<RenderReq
     dropped
 }
 
+/// The order a drained batch is drawn in: newest request first.
+///
+/// A batch is what a scroll leaves behind. Coalescing has already thrown away
+/// the superseded requests, but what remains is still a trail: the front of it
+/// is pages that went past while the worker was busy, and the back of it is the
+/// page under the cursor now. Drawing it in arrival order makes somebody who
+/// jumped to page 500 watch twenty pages they have already scrolled past being
+/// drawn before theirs -- measured at 234 ms for a 24-page backlog, against
+/// about 10 ms for one page.
+///
+/// Nothing is dropped: the backlog is still drawn, just after the page that is
+/// on screen. Pages the scroll has left behind are usually still wanted, and
+/// throwing them away here would only make the next frame ask again.
+fn newest_first(mut batch: Vec<RenderRequest>) -> Vec<RenderRequest> {
+    batch.reverse();
+    batch
+}
+
 pub struct RenderWorker {
     tx: Sender<RenderRequest>,
     rx: Receiver<RenderResponse>,
@@ -143,7 +161,7 @@ impl RenderWorker {
                         }
                     }
 
-                    for req in batch {
+                    for req in newest_first(batch) {
                         let Some(drawn) = doc.render(req.page, req.scale) else {
                             continue;
                         };
@@ -236,6 +254,44 @@ mod tests {
         let dropped = coalesce(&mut batch, req(2, 1.0));
         assert_eq!(batch, vec![req(0, 1.0), req(1, 1.0), req(2, 1.0)]);
         assert!(dropped.is_empty());
+    }
+
+    /// The page asked for last is the page somebody is looking at, so it is
+    /// the page drawn first.
+    #[test]
+    fn a_drained_batch_is_drawn_newest_first() {
+        let mut batch = vec![req(0, 1.0)];
+        for page in 1..5 {
+            assert!(coalesce(&mut batch, req(page, 1.0)).is_empty());
+        }
+        assert_eq!(
+            newest_first(batch),
+            vec![
+                req(4, 1.0),
+                req(3, 1.0),
+                req(2, 1.0),
+                req(1, 1.0),
+                req(0, 1.0)
+            ]
+        );
+    }
+
+    /// Re-asking for a page moves it to the front of the queue as well as
+    /// cancelling the older request: coalescing pushes the survivor to the back
+    /// of the batch, and the back is where drawing starts.
+    #[test]
+    fn re_asking_for_a_page_promotes_it() {
+        let mut batch = vec![req(0, 1.0), req(1, 1.0), req(2, 1.0)];
+        let dropped = coalesce(&mut batch, req(0, 2.0));
+        assert_eq!(dropped, vec![req(0, 1.0)]);
+        assert_eq!(newest_first(batch).first(), Some(&req(0, 2.0)));
+    }
+
+    /// One request is one request whichever way round it is drawn.
+    #[test]
+    fn a_batch_of_one_is_unchanged() {
+        assert_eq!(newest_first(vec![req(7, 1.0)]), vec![req(7, 1.0)]);
+        assert!(newest_first(Vec::new()).is_empty());
     }
 
     /// A protected document draws like any other once its password has been

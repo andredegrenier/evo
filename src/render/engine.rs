@@ -9,9 +9,9 @@
 //!
 //! Everything behind this module is an [`EngineDoc`]: an opened document that
 //! can be asked for a page's size and a page's pixels. Deliberately `!Send` --
-//! hayro's render cache is an `Rc` and PDFium's document handles belong to
-//! whoever opened them -- so one thread owns a document, exactly as the render
-//! worker already did.
+//! hayro's interpreter state is `Rc`-based and PDFium's document handles
+//! belong to whoever opened them -- so one thread owns a document, exactly as
+//! the render worker already did.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -336,16 +336,17 @@ pub fn pdfium_data_dir() -> Option<PathBuf> {
 
 /// evo's original rasterizer, and still the one that draws SVG exports and
 /// reads positioned text. Pure Rust, no shared library, always available.
+///
+/// hayro's `RenderCache` -- glyphs and decoded objects -- is built fresh for
+/// every page rather than kept on this struct. Keeping it would be the natural
+/// thing to do, and it is what evo did until M37: a `RenderCache<'a>` borrows
+/// from the `Pdf` it was built from, so a struct holding both had to launder
+/// the lifetime through `mem::transmute`. Measured, the cache saves 0.5% on a
+/// document using the base-14 fonts and 5.4-5.8% on one with a 400 KB embedded
+/// TrueType font (`perf_hayro_render_cache_is_worth_its_unsafe`). Single-digit
+/// percent is not what an `unsafe` block costs to keep honest, so it is gone,
+/// and the only one left in evo is a test setting an environment variable.
 pub struct HayroEngineDoc {
-    /// hayro's glyph and object cache, which wants to live as long as the
-    /// document it was built from. It cannot say so in the type system --
-    /// `RenderCache<'a>` borrows from the `Pdf`, and a struct cannot hold both
-    /// halves of that -- so it is declared before `pdf` (fields drop in
-    /// declaration order, and the cache must go first) and its lifetime is
-    /// rewritten at each use, which is the same shape hayro's own
-    /// `CachedPages` uses to hold `Pages<'static>` beside the `Arc` they point
-    /// into.
-    cache: RenderCache<'static>,
     pdf: Pdf,
     settings: InterpreterSettings,
     warnings: Arc<AtomicBool>,
@@ -362,7 +363,6 @@ impl HayroEngineDoc {
             ..Default::default()
         };
         Ok(Self {
-            cache: RenderCache::new(),
             pdf,
             settings,
             warnings,
@@ -386,16 +386,12 @@ impl EngineDoc for HayroEngineDoc {
     fn render(&mut self, page: usize, scale: f32) -> Option<RenderedPage> {
         let pages = self.pdf.pages();
         let target = pages.get(page)?;
-        // SAFETY: the cache holds fonts and objects borrowed from the data
-        // behind `self.pdf`'s internal `Arc`, whose address is stable and
-        // whose contents this struct keeps alive. The `'static` is never
-        // observable outside this method -- it is narrowed here to the borrow
-        // of `self.pdf` that produced `target` -- and the cache is declared
-        // before `pdf` so it is dropped first.
-        let cache: &RenderCache<'_> = unsafe { std::mem::transmute(&self.cache) };
+        // Built here, thrown away with the page. See the type's documentation
+        // for what that costs and what it buys.
+        let cache = RenderCache::new();
         let pixmap = hayro::render(
             target,
-            cache,
+            &cache,
             &self.settings,
             &RenderSettings {
                 x_scale: scale,

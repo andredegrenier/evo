@@ -157,6 +157,22 @@ impl TextureCache {
         self.evict();
     }
 
+    /// How much texture memory this cache is holding. A budget is only worth
+    /// having if something checks it, so the perf harness scrolls a
+    /// thousand-page document past and watches this number. Nothing in the
+    /// running app asks, which is why it is not compiled into one.
+    #[cfg(test)]
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    /// How many textures are held. Read with [`Self::bytes`]: together they
+    /// say whether eviction is happening or the cache is merely small.
+    #[cfg(test)]
+    pub fn texture_count(&self) -> usize {
+        self.map.len()
+    }
+
     fn evict(&mut self) {
         while self.bytes > self.budget {
             // Least-recently-used first, but never something painted this

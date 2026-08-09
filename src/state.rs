@@ -330,3 +330,24 @@ impl DocState {
         ctx.request_repaint();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Opening a document must not start reading its text.
+    ///
+    /// Text extraction is per-page and, on a thousand-page document, seconds
+    /// of work (measured: 5.4 s for all of it against 7.6 ms for the first
+    /// page, `perf_find_first_page_results`). It belongs to ⌘F, which spawns
+    /// the worker when somebody actually searches; doing it at open would put
+    /// all of that in front of the first page appearing, for the great
+    /// majority of documents nobody ever searches.
+    #[test]
+    fn opening_a_document_reads_no_text() {
+        let doc = Document::load_path("tests/fixtures/sample.pdf".into(), None).expect("fixture");
+        let state = DocState::new(doc, &egui::Context::default(), EnginePref::Hayro);
+        assert!(state.text_worker.is_none());
+        assert!(state.page_text.is_empty());
+    }
+}

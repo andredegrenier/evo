@@ -1,10 +1,12 @@
 //! Dev-time tasks. `cargo run -p xtask -- icons` regenerates all icon
 //! artifacts from assets/icon/evo.svg; `cargo run -p xtask -- fidelity`
-//! measures how evo draws a corpus of PDFs. Never a dependency of the app.
+//! measures how evo draws a corpus of PDFs; `cargo run -p xtask -- perf`
+//! measures how fast it does it. Never a dependency of the app.
 
 use std::path::{Path, PathBuf};
 
 mod fidelity;
+mod perf;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -12,10 +14,13 @@ fn main() {
     match task {
         "icons" => icons(),
         "fidelity" => fidelity::main(&args[1..]),
+        "perf" => perf::main(&args[1..]),
         _ => {
-            eprintln!("usage: cargo run -p xtask -- <icons|fidelity>");
+            eprintln!("usage: cargo run -p xtask -- <icons|fidelity|perf>");
             eprintln!();
             eprintln!("{}", fidelity::USAGE);
+            eprintln!();
+            eprintln!("{}", perf::USAGE);
             std::process::exit(1);
         }
     }
