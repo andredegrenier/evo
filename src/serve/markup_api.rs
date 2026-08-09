@@ -306,6 +306,7 @@ mod tests {
             kind: AnnotationKind::Highlight,
             rect: PdfRect::from_points(PdfPoint::new(10.0, 20.0), PdfPoint::new(30.0, 40.0)),
             style: Style::default(),
+            group: None,
         }
     }
 
@@ -358,6 +359,7 @@ mod tests {
             },
             rect: PdfRect::from_points(PdfPoint::new(10.0, 10.0), PdfPoint::new(90.0, 70.0)),
             style: Style::default(),
+            group: None,
         }
     }
 
@@ -386,6 +388,30 @@ mod tests {
         let saved = SavedMarkup::new(vec![highlight(0)], PageList::new(2));
         assert_eq!(saved.version, VERSION);
         assert_eq!(empty_markup(3).version, VERSION);
+    }
+
+    /// `group` was added to version 2 after version 2 was already out, which is
+    /// only safe because it is absent when there is none: a body from a client
+    /// that has never heard of groups is byte-for-byte what it always sent, and
+    /// one that has heard of them is read without a version bump.
+    #[test]
+    fn a_group_is_carried_by_version_two_and_left_out_when_there_is_none() {
+        let plain = highlight(0);
+        assert_eq!(plain.group, None);
+        let json = serde_json::to_string(&plain).expect("serialize");
+        assert!(!json.contains("group"), "{json}");
+        assert_eq!(version_trouble(Some(2), std::slice::from_ref(&plain)), None);
+
+        let grouped: Annotation =
+            serde_json::from_str(&json.replace("\"style\"", "\"group\":42,\"style\""))
+                .expect("a body that names a group is read, not refused");
+        assert_eq!(grouped.group, Some(42));
+        // And it is still a version-2 shape: grouping did not move the format.
+        assert_eq!(version_trouble(Some(2), &[grouped]), None);
+
+        // A body from before groups existed is read the same way it always was.
+        let old: Annotation = serde_json::from_str(&json).expect("still readable");
+        assert_eq!(old, plain);
     }
 
     /// The overlay is what the viewer draws, so it has to be the page's own

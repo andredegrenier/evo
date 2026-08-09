@@ -247,6 +247,7 @@ pub fn annotation_from(
         kind,
         rect,
         style,
+        group: None,
     })
 }
 

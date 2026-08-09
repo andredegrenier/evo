@@ -432,6 +432,7 @@ mod tests {
             kind: AnnotationKind::Rect,
             rect: PdfRect::from_points(PdfPoint::new(100.0, 100.0), PdfPoint::new(200.0, 150.0)),
             style: Style::default(),
+            group: None,
         });
 
         let dir = std::env::temp_dir().join("evo-svg-test");
@@ -460,6 +461,7 @@ mod tests {
                 opacity: 0.35,
                 ..Style::default()
             },
+            group: None,
         }];
 
         let svg = svg_overlay(&annotations, 612.0, 792.0);
@@ -495,6 +497,7 @@ mod tests {
             kind,
             rect: PdfRect::from_points(PdfPoint::new(100.0, 700.0), PdfPoint::new(200.0, 760.0)),
             style: Style::default(),
+            group: None,
         };
 
         let plain = svg_overlay(
@@ -564,6 +567,7 @@ mod tests {
                 stroke_width: 1.5,
                 ..Style::default()
             },
+            group: None,
         };
 
         let words = svg_overlay(
@@ -660,6 +664,7 @@ mod tests {
                 fill: Color::rgb(250, 220, 50),
                 opacity: 0.35,
             },
+            group: None,
         };
         // Bottom-left at (72, 572), top-right at (172, 592) in points.
         assert_eq!(highlight.rect.min.x, 72.0);

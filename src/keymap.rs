@@ -29,6 +29,8 @@ pub enum Action {
     Undo,
     Redo,
     DeleteSelection,
+    Group,
+    Ungroup,
 
     ZoomIn,
     ZoomOut,
@@ -76,7 +78,7 @@ impl Category {
 }
 
 impl Action {
-    pub const ALL: [Action; 29] = [
+    pub const ALL: [Action; 31] = [
         Self::Open,
         Self::Save,
         Self::Print,
@@ -86,6 +88,8 @@ impl Action {
         Self::Undo,
         Self::Redo,
         Self::DeleteSelection,
+        Self::Group,
+        Self::Ungroup,
         Self::ZoomIn,
         Self::ZoomOut,
         Self::ZoomActual,
@@ -119,6 +123,8 @@ impl Action {
             Self::Undo => "Undo",
             Self::Redo => "Redo",
             Self::DeleteSelection => "Delete Selection",
+            Self::Group => "Group",
+            Self::Ungroup => "Ungroup",
             Self::ZoomIn => "Zoom In",
             Self::ZoomOut => "Zoom Out",
             Self::ZoomActual => "Actual Size",
@@ -147,7 +153,12 @@ impl Action {
             Self::Open | Self::Save | Self::Print | Self::CloseDocument | Self::Preferences => {
                 Category::File
             }
-            Self::Undo | Self::Redo | Self::DeleteSelection | Self::Find => Category::Edit,
+            Self::Undo
+            | Self::Redo
+            | Self::DeleteSelection
+            | Self::Group
+            | Self::Ungroup
+            | Self::Find => Category::Edit,
             Self::ZoomIn
             | Self::ZoomOut
             | Self::ZoomActual
@@ -171,6 +182,8 @@ impl Action {
             Self::Undo => shortcut(cmd, Key::Z),
             Self::Redo => shortcut(cmd | Modifiers::SHIFT, Key::Z),
             Self::DeleteSelection => shortcut(none, Key::Delete),
+            Self::Group => shortcut(cmd, Key::G),
+            Self::Ungroup => shortcut(cmd | Modifiers::SHIFT, Key::G),
             Self::ZoomIn => shortcut(cmd, Key::Equals),
             Self::ZoomOut => shortcut(cmd, Key::Minus),
             Self::ZoomActual => shortcut(cmd, Key::Num0),

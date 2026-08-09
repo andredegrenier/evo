@@ -453,6 +453,7 @@ fn draw(markup: &mut SavedMarkup, page: usize, found: &Found, note: Option<&str>
                 fill: HIGHLIGHTER,
                 opacity: HIGHLIGHT_OPACITY,
             },
+            group: None,
         });
         ids.push(next);
         next = next.saturating_add(1);
@@ -476,6 +477,7 @@ fn draw(markup: &mut SavedMarkup, page: usize, found: &Found, note: Option<&str>
                 fill: NOTE_PAPER,
                 opacity: NOTE_OPACITY,
             },
+            group: None,
         });
         ids.push(next);
     }

@@ -1587,6 +1587,7 @@ pub(crate) mod tests {
                     PdfPoint::new(300.0, 430.0 + 30.0 * i as f32),
                 ),
                 style,
+                group: None,
             });
         }
     }
@@ -1753,6 +1754,7 @@ pub(crate) mod tests {
                 kind,
                 rect,
                 style: Style::default(),
+                group: None,
             });
         }
         store
@@ -1928,6 +1930,7 @@ pub(crate) mod tests {
                     stroke_width: 1.5,
                     ..Style::default()
                 },
+                group: None,
             });
         }
         store

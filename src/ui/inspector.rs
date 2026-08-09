@@ -45,11 +45,14 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
     }
 
     let Some(ann) = dc.selected_annotation().cloned() else {
-        ui.weak("No selection.\n\nSelect a markup to edit its exact position and size.");
+        ui.weak(
+            "No selection.\n\nSelect a markup to edit its exact position and size, or drag a \
+             box over several with the Select tool.",
+        );
         return;
     };
 
-    ui.weak(format!("{} on page {}", ann.kind.label(), ann.page + 1));
+    selection_summary(ui, dc, &ann);
     ui.add_space(4.0);
 
     let info = dc.doc.pages[dc.pages.source_of(ann.page)];
@@ -265,11 +268,57 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
     }
 
     ui.add_space(10.0);
-    if ui.button("🗑 Delete").clicked() {
-        if let Some(removed) = dc.store.remove(ann.id) {
-            dc.history.record(Command::RemoveAnnotation(removed));
-        }
-        dc.selection = None;
+    let label = match dc.selection.len() {
+        0 | 1 => "🗑 Delete".to_owned(),
+        n => format!("🗑 Delete {n}"),
+    };
+    if ui.button(label).clicked() {
+        crate::tools::delete_selection(dc);
+    }
+}
+
+/// What is selected, and the two things that can be done to a selection as a
+/// whole: tie it together, or untie it.
+///
+/// With several selected the fields below this still edit one of them -- the
+/// last one clicked -- so the panel says so rather than leaving the user to
+/// discover that "W" moved only one of their four boxes.
+fn selection_summary(ui: &mut egui::Ui, dc: &mut DocState, primary: &Annotation) {
+    let selected = dc.selection.len();
+    if selected > 1 {
+        ui.label(egui::RichText::new(format!("{selected} markups selected")).strong());
+        ui.weak(format!(
+            "Moving and deleting apply to all {selected}. The fields below edit the last one \
+             you clicked: the {} on page {}.",
+            primary.kind.label(),
+            primary.page + 1
+        ));
+    } else {
+        ui.weak(format!(
+            "{} on page {}",
+            primary.kind.label(),
+            primary.page + 1
+        ));
+    }
+
+    let grouped = dc.selected_annotations().iter().any(|a| a.group.is_some());
+    if selected > 1 || grouped {
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(selected > 1, egui::Button::new("Group"))
+                .on_hover_text("Clicking any of them selects all of them (⌘G)")
+                .clicked()
+            {
+                crate::tools::group_selection(dc);
+            }
+            if ui
+                .add_enabled(grouped, egui::Button::new("Ungroup"))
+                .on_hover_text("Let them be selected one at a time again (⇧⌘G)")
+                .clicked()
+            {
+                crate::tools::ungroup_selection(dc);
+            }
+        });
     }
 }
 
@@ -376,9 +425,10 @@ mod tests {
                 kind,
                 rect: crate::tools::pen::bounding_rect(&points),
                 style: Style::default(),
+                group: None,
             };
             dc.store.insert(before.clone());
-            dc.selection = Some(id);
+            dc.selection.select_one(id);
 
             let ctx = egui::Context::default();
             let input = egui::RawInput {
@@ -393,6 +443,46 @@ mod tests {
             assert_eq!(dc.store.get(id), Some(&before), "drawing changed it");
             assert!(!dc.history.can_undo(), "drawing recorded history");
         }
+    }
+
+    /// The panel with several selected: it says how many, it says which one the
+    /// fields below are about, and it offers the two things that apply to a
+    /// selection as a whole. Drawing it may change nothing.
+    #[test]
+    fn the_panel_says_what_a_multiple_selection_is_and_leaves_it_alone() {
+        let ctx = egui::Context::default();
+        let bytes = std::fs::read("tests/fixtures/sample.pdf").expect("fixture");
+        let doc = crate::doc::Document::load_bytes(bytes, None).expect("load");
+        let mut dc = DocState::new(doc, &ctx, crate::render::engine::EnginePref::Hayro);
+        let mut ids = Vec::new();
+        for i in 0..3 {
+            let id = dc.store.alloc_id();
+            dc.store.insert(Annotation {
+                id,
+                page: 0,
+                kind: AnnotationKind::Rect,
+                rect: PdfRect::from_min_size(PdfPoint::new(100.0 * i as f32, 400.0), 50.0, 30.0),
+                style: Style::default(),
+                group: if i == 0 { None } else { Some(9) },
+            });
+            ids.push(id);
+        }
+        dc.selection.select_all(ids.clone());
+        let before = dc.store.to_vec();
+
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(320.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| show(ui, &mut dc));
+
+        assert_eq!(dc.selection.len(), 3, "drawing changed the selection");
+        assert_eq!(dc.store.to_vec(), before, "drawing changed the markup");
+        assert!(!dc.history.can_undo(), "drawing recorded history");
     }
 
     /// The sequence tool's settings are shown whether or not anything is
@@ -420,6 +510,6 @@ mod tests {
 
         assert_eq!(dc.tool_ctl.sequence.prefix, "A", "drawing changed it");
         assert_eq!(dc.tool_ctl.sequence.next, 7);
-        assert!(dc.selection.is_none(), "and nothing had to be selected");
+        assert!(dc.selection.is_empty(), "and nothing had to be selected");
     }
 }

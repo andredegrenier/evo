@@ -288,7 +288,19 @@ pub struct Annotation {
     pub kind: AnnotationKind,
     pub rect: PdfRect,
     pub style: Style,
+    /// Which group this annotation belongs to, if any. Members of a group are
+    /// selected, moved and deleted together.
+    ///
+    /// Additive, and absent from the JSON when there is none: a sidecar full of
+    /// ungrouped markup is byte-for-byte what version 2 already was, so no
+    /// reader has to learn anything to keep reading it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<GroupId>,
 }
+
+/// Identifies a group within one document's markup. Allocated from what is
+/// already there, so an id never collides with one already in use.
+pub type GroupId = u64;
 
 impl Annotation {
     /// Bounds used for hit-testing and selection handles.
@@ -366,6 +378,7 @@ mod tests {
             },
             rect: PdfRect::from_points(PdfPoint::new(0.0, 0.0), PdfPoint::new(100.0, 50.0)),
             style: Style::default(),
+            group: None,
         };
         ann.set_bounds(PdfRect::from_points(
             PdfPoint::new(10.0, 10.0),
@@ -403,6 +416,7 @@ mod tests {
             kind,
             rect,
             style: Style::default(),
+            group: None,
         }
     }
 

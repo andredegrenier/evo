@@ -42,7 +42,7 @@ pub struct DocState {
 
     pub tool: ActiveTool,
     pub tool_ctl: ToolController,
-    pub selection: Option<AnnotationId>,
+    pub selection: Selection,
     /// Annotation currently in inline text-edit mode.
     pub editing_text: Option<AnnotationId>,
     /// Style applied to newly created annotations.
@@ -98,6 +98,79 @@ pub struct FindMatch {
     pub range: Range<usize>,
     /// Union of the matched characters' boxes, in display space.
     pub rect: PdfRect,
+}
+
+/// The markup that is selected, and which one of it the inspector is about.
+///
+/// A set rather than one id, because moving four things at once is what people
+/// do with markup, and because a group is only a selection somebody made once.
+/// `primary` is the last one added: with several selected the panel has to edit
+/// *something*, and the thing just clicked is the least surprising answer.
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub struct Selection {
+    ids: BTreeSet<AnnotationId>,
+    primary: Option<AnnotationId>,
+}
+
+impl Selection {
+    /// Just this one, and nothing else.
+    pub fn select_one(&mut self, id: AnnotationId) {
+        self.ids.clear();
+        self.ids.insert(id);
+        self.primary = Some(id);
+    }
+
+    /// Exactly these, with `primary` the last of them still standing.
+    pub fn select_all(&mut self, ids: impl IntoIterator<Item = AnnotationId>) {
+        self.ids = ids.into_iter().collect();
+        self.primary = self.ids.iter().next_back().copied();
+    }
+
+    /// Add or remove one (shift-click).
+    pub fn toggle(&mut self, id: AnnotationId) {
+        if self.ids.remove(&id) {
+            if self.primary == Some(id) {
+                self.primary = self.ids.iter().next_back().copied();
+            }
+        } else {
+            self.ids.insert(id);
+            self.primary = Some(id);
+        }
+    }
+
+    /// Add these without dropping what is already selected.
+    pub fn add_all(&mut self, ids: impl IntoIterator<Item = AnnotationId>) {
+        for id in ids {
+            self.ids.insert(id);
+            self.primary = Some(id);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.ids.clear();
+        self.primary = None;
+    }
+
+    pub fn contains(&self, id: AnnotationId) -> bool {
+        self.ids.contains(&id)
+    }
+
+    /// The one the inspector edits and whose handles are drawn.
+    pub fn primary(&self) -> Option<AnnotationId> {
+        self.primary
+    }
+
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = AnnotationId> + '_ {
+        self.ids.iter().copied()
+    }
 }
 
 /// Page-rail multi-selection (display positions).
@@ -159,7 +232,7 @@ impl DocState {
             viewport: Viewport::default(),
             tool: ActiveTool::Select,
             tool_ctl: ToolController::default(),
-            selection: None,
+            selection: Selection::default(),
             editing_text: None,
             current_style: Style::default(),
             current_font_size: 14.0,
@@ -223,7 +296,16 @@ impl DocState {
     }
 
     pub fn selected_annotation(&self) -> Option<&crate::doc::annotation::Annotation> {
-        self.selection.and_then(|id| self.store.get(id))
+        self.selection.primary().and_then(|id| self.store.get(id))
+    }
+
+    /// Everything selected, in the order it is stored, skipping ids the store
+    /// no longer has -- undo can take an annotation away while it is selected.
+    pub fn selected_annotations(&self) -> Vec<crate::doc::annotation::Annotation> {
+        self.selection
+            .iter()
+            .filter_map(|id| self.store.get(id).cloned())
+            .collect()
     }
 
     /// Switch rasterizer without closing the document.

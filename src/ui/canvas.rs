@@ -19,6 +19,8 @@ pub use crate::render::THUMB_SCALE;
 
 const SELECTION_COLOR: Color32 = Color32::from_rgb(0x2f, 0x7c, 0xf6);
 const GUIDE_COLOR: Color32 = Color32::from_rgb(0x00, 0xb4, 0xd8);
+/// The rubber-band box, faint enough to read the page through.
+const MARQUEE_FILL: Color32 = Color32::from_rgba_premultiplied(0x2f, 0x7c, 0xf6, 24);
 /// Find-in-document highlights: every hit, then the one being stepped through.
 const FIND_MATCH_COLOR: Color32 = Color32::from_rgba_unmultiplied_const(255, 235, 59, 110);
 const FIND_ACTIVE_COLOR: Color32 = Color32::from_rgba_unmultiplied_const(255, 152, 0, 150);
@@ -344,12 +346,47 @@ fn paint_and_interact(
     }
 
     // ---- selection handles ----
-    if dc.editing_text.is_none()
-        && let Some(ann) = dc.selected_annotation().cloned()
-        && let Some(slot) = layout.slots.iter().find(|s| s.original == ann.page)
+    //
+    // Handles only when one thing is selected: with several, a corner is where
+    // the whole selection gets dragged from, not where one of them is resized,
+    // so offering the grip would be a lie.
+    if dc.editing_text.is_none() {
+        let single = dc.selection.len() == 1;
+        for ann in dc.selected_annotations() {
+            let Some(slot) = layout.slots.iter().find(|s| s.original == ann.page) else {
+                continue;
+            };
+            let t = transform_for(dc, slot, content_rect);
+            if single {
+                paint_selection(&painter, &t, &ann);
+            } else {
+                painter.rect_stroke(
+                    t.rect_to_screen(ann.rect).expand(1.0),
+                    CornerRadius::ZERO,
+                    Stroke::new(1.0, SELECTION_COLOR),
+                    StrokeKind::Outside,
+                );
+            }
+        }
+    }
+
+    // ---- marquee ----
+    if let ToolState::Marquee {
+        page,
+        start,
+        current,
+    } = &dc.tool_ctl.state
+        && let Some(slot) = layout.slots.iter().find(|s| s.original == *page)
     {
         let t = transform_for(dc, slot, content_rect);
-        paint_selection(&painter, &t, &ann);
+        let rect = t.rect_to_screen(PdfRect::from_points(*start, *current));
+        painter.rect_filled(rect, CornerRadius::ZERO, MARQUEE_FILL);
+        painter.rect_stroke(
+            rect,
+            CornerRadius::ZERO,
+            Stroke::new(1.0, SELECTION_COLOR),
+            StrokeKind::Inside,
+        );
     }
 
     // ---- snap guides ----
@@ -442,6 +479,7 @@ fn creation_preview(
         kind,
         rect,
         style,
+        group: None,
     })
 }
 
@@ -791,7 +829,7 @@ fn route_pointer(
         {
             dc.tool_ctl.editing_before = Some(ann.clone());
             dc.tool_ctl.editing_focus_pending = true;
-            dc.selection = Some(id);
+            dc.selection.select_one(id);
             dc.editing_text = Some(id);
             dc.tool_ctl.state = ToolState::Idle;
             return;
@@ -813,7 +851,7 @@ fn route_pointer(
             tools::on_press(dc, &p);
             tools::on_release(dc, &p);
         } else if dc.tool == ActiveTool::Select {
-            dc.selection = None;
+            dc.selection.clear();
         }
         return;
     }
@@ -829,7 +867,7 @@ fn route_pointer(
             let p = pointer_info_at(dc, slot, content_rect, pos, modifiers);
             tools::on_press(dc, &p);
         } else if dc.tool == ActiveTool::Select {
-            dc.selection = None;
+            dc.selection.clear();
         }
     } else if response.dragged()
         && let Some(pos) = response.interact_pointer_pos()
@@ -924,7 +962,7 @@ pub fn commit_text_edit(dc: &mut DocState) {
             // Newly placed box: empty text means abandon it silently.
             if text_empty {
                 dc.store.remove(id);
-                dc.selection = None;
+                dc.selection.clear();
             } else {
                 dc.history.record(Command::AddAnnotation(current));
             }
@@ -932,7 +970,7 @@ pub fn commit_text_edit(dc: &mut DocState) {
         Some(before) => {
             if text_empty {
                 dc.store.remove(id);
-                dc.selection = None;
+                dc.selection.clear();
                 dc.history.record(Command::RemoveAnnotation(before));
             } else if current != before {
                 dc.history.record(Command::ModifyAnnotation {
@@ -1065,15 +1103,16 @@ mod tests {
                     fill: crate::doc::annotation::Color::rgba(0, 0, 255, 60),
                     ..Style::default()
                 },
+                group: None,
             });
         }
 
         // Selected: the vertex handles are painted too.
-        dc.selection = Some(2);
+        dc.selection.select_one(2);
         one_frame(&mut dc);
 
         // And mid-gesture, with the rubber-band segment following the cursor.
-        dc.selection = None;
+        dc.selection.clear();
         dc.tool = crate::tools::ActiveTool::Polygon;
         dc.tool_ctl.state = ToolState::Placing {
             page: 0,
@@ -1082,6 +1121,45 @@ mod tests {
         };
         one_frame(&mut dc);
         assert_eq!(dc.store.on_page(0).count(), 5, "drawing changed nothing");
+    }
+
+    /// Several selected at once draws an outline round each and no handles:
+    /// with more than one selected a corner is where the whole lot is dragged
+    /// from, not where one of them is stretched. And the rubber-band box has to
+    /// draw while it is being dragged.
+    #[test]
+    fn a_multiple_selection_and_a_marquee_both_draw() {
+        let ctx = egui::Context::default();
+        let mut dc = state(&ctx);
+        let mut ids = Vec::new();
+        for i in 0..3 {
+            let id = dc.store.alloc_id();
+            dc.store.insert(Annotation {
+                id,
+                page: 0,
+                kind: AnnotationKind::Rect,
+                rect: PdfRect::from_min_size(
+                    PdfPoint::new(100.0 + 80.0 * i as f32, 500.0),
+                    60.0,
+                    40.0,
+                ),
+                style: Style::default(),
+                group: None,
+            });
+            ids.push(id);
+        }
+
+        dc.selection.select_all(ids.clone());
+        one_frame(&mut dc);
+        assert_eq!(dc.selection.len(), 3, "drawing changed the selection");
+
+        dc.tool_ctl.state = ToolState::Marquee {
+            page: 0,
+            start: PdfPoint::new(90.0, 480.0),
+            current: PdfPoint::new(280.0, 560.0),
+        };
+        one_frame(&mut dc);
+        assert_eq!(dc.store.on_page(0).count(), 3, "drawing changed nothing");
     }
 
     /// A frame with both kinds of stamp on it, and the picture cache that
@@ -1100,6 +1178,7 @@ mod tests {
                 kind,
                 rect: PdfRect::from_min_size(PdfPoint::new(100.0, y), 160.0, 44.0),
                 style: Style::default(),
+                group: None,
             });
             id
         };
@@ -1144,7 +1223,7 @@ mod tests {
             350.0,
         );
 
-        dc.selection = Some(words);
+        dc.selection.select_one(words);
         one_frame(&mut dc);
         assert_eq!(
             dc.stamp_images.len(),

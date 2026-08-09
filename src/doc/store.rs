@@ -49,6 +49,30 @@ impl AnnotationStore {
         self.annotations.is_empty()
     }
 
+    /// The ids of everything in `group`, in z-order.
+    pub fn group_members(
+        &self,
+        group: super::annotation::GroupId,
+    ) -> impl Iterator<Item = AnnotationId> + '_ {
+        self.annotations
+            .iter()
+            .filter(move |a| a.group == Some(group))
+            .map(|a| a.id)
+    }
+
+    /// A group id nothing is using yet.
+    ///
+    /// Taken from what is on the document rather than from a counter, so it
+    /// survives a sidecar round trip: the groups come back from disk with their
+    /// ids, and the next one made has to clear them.
+    pub fn next_group_id(&self) -> super::annotation::GroupId {
+        self.annotations
+            .iter()
+            .filter_map(|a| a.group)
+            .max()
+            .map_or(1, |g| g.saturating_add(1))
+    }
+
     /// What every stamp on the document says.
     pub fn stamp_texts(&self) -> impl Iterator<Item = &str> {
         self.annotations.iter().filter_map(|a| match &a.kind {

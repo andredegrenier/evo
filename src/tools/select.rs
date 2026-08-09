@@ -232,6 +232,7 @@ mod tests {
                 kind: AnnotationKind::Rect,
                 rect: PdfRect::from_points(PdfPoint::new(0.0, 0.0), PdfPoint::new(50.0, 50.0)),
                 style: Style::default(),
+                group: None,
             });
         }
         assert_eq!(hit_test(&store, 0, PdfPoint::new(25.0, 25.0), 2.0), Some(2));

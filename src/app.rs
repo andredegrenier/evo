@@ -703,6 +703,9 @@ impl EvoApp {
             || (!ctx.egui_wants_keyboard_input()
                 && ctx.input_mut(|i| i.key_pressed(Key::Backspace)));
 
+        let ungroup = self.keymap.consume(ctx, Action::Ungroup);
+        let group = !ungroup && self.keymap.consume(ctx, Action::Group);
+
         let tools_pressed: Vec<ActiveTool> = TOOL_ACTIONS
             .iter()
             .filter(|(action, _)| self.keymap.consume(ctx, *action))
@@ -753,19 +756,23 @@ impl EvoApp {
         // Escape: cancel gesture / deselect / back to select tool.
         if escape {
             tools::cancel(dc);
-            if dc.selection.is_some() {
-                dc.selection = None;
+            if !dc.selection.is_empty() {
+                dc.selection.clear();
             } else {
                 dc.tool = ActiveTool::Select;
             }
         }
 
-        if delete
-            && let Some(id) = dc.selection
-            && let Some(removed) = dc.store.remove(id)
-        {
-            dc.history.record(Command::RemoveAnnotation(removed));
-            dc.selection = None;
+        if delete {
+            tools::delete_selection(dc);
+        }
+
+        // Ungroup before group: with the default bindings ⇧⌘G would otherwise
+        // also satisfy ⌘G, exactly as ⇧⌘Z does ⌘Z.
+        if ungroup {
+            tools::ungroup_selection(dc);
+        } else if group {
+            tools::group_selection(dc);
         }
 
         // The rest only applies when not typing in a text field.
@@ -792,14 +799,8 @@ impl EvoApp {
             }
             d
         });
-        if (nudge.0 != 0.0 || nudge.1 != 0.0)
-            && let Some(before) = dc.selected_annotation().cloned()
-        {
-            let mut after = before.clone();
-            after.translate(nudge.0, nudge.1);
-            dc.store.replace(after.clone());
-            dc.history
-                .record(Command::ModifyAnnotation { before, after });
+        if nudge.0 != 0.0 || nudge.1 != 0.0 {
+            tools::nudge_selection(dc, nudge.0, nudge.1);
         }
     }
 
@@ -1228,7 +1229,7 @@ impl EvoApp {
             &mut dc.store,
             &mut dc.pages,
         );
-        dc.selection = Some(id);
+        dc.selection.select_one(id);
         Ok(serde_json::json!({ "added": kind, "page": page, "annotation_id": id }))
     }
 
@@ -1431,6 +1432,39 @@ impl EvoApp {
                     && let Some(dc) = &mut self.dc
                 {
                     dc.history.redo(&mut dc.store, &mut dc.pages);
+                    ui.close();
+                }
+                ui.separator();
+                let (can_group, can_ungroup) = self
+                    .dc
+                    .as_ref()
+                    .map(|d| {
+                        (
+                            d.selection.len() > 1,
+                            d.selected_annotations().iter().any(|a| a.group.is_some()),
+                        )
+                    })
+                    .unwrap_or((false, false));
+                if ui
+                    .add_enabled(
+                        can_group,
+                        egui::Button::new(self.label(ctx, "Group", Action::Group)),
+                    )
+                    .clicked()
+                    && let Some(dc) = &mut self.dc
+                {
+                    tools::group_selection(dc);
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        can_ungroup,
+                        egui::Button::new(self.label(ctx, "Ungroup", Action::Ungroup)),
+                    )
+                    .clicked()
+                    && let Some(dc) = &mut self.dc
+                {
+                    tools::ungroup_selection(dc);
                     ui.close();
                 }
                 ui.separator();

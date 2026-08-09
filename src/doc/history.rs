@@ -120,6 +120,7 @@ mod tests {
             kind: AnnotationKind::Rect,
             rect: PdfRect::from_points(PdfPoint::new(0.0, 0.0), PdfPoint::new(10.0, 10.0)),
             style: Style::default(),
+            group: None,
         }
     }
 

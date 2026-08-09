@@ -7,7 +7,9 @@ pub mod snap;
 
 use eframe::egui::Modifiers;
 
-use crate::doc::annotation::{Annotation, AnnotationId, AnnotationKind, Color, Style, TextAlign};
+use crate::doc::annotation::{
+    Annotation, AnnotationId, AnnotationKind, Color, GroupId, Style, TextAlign,
+};
 use crate::doc::geometry::{PdfPoint, PdfRect};
 use crate::doc::history::Command;
 use crate::state::DocState;
@@ -210,8 +212,9 @@ fn place_stamp(dc: &mut DocState, page: usize, rect: PdfRect, kind: AnnotationKi
         kind,
         rect,
         style: stamp_style(dc.current_style.opacity),
+        group: None,
     };
-    dc.selection = Some(id);
+    dc.selection.select_one(id);
     dc.history
         .apply(Command::AddAnnotation(ann), &mut dc.store, &mut dc.pages);
 }
@@ -268,11 +271,19 @@ pub enum ToolState {
         points: Vec<PdfPoint>,
         hover: PdfPoint,
     },
-    /// Moving an existing annotation.
+    /// Moving the selection. `origs` is every selected annotation as it was
+    /// when the drag began, the one actually grabbed first: it is the one the
+    /// snap guides are computed for, and the rest follow it exactly.
     Dragging {
-        orig: Annotation,
+        origs: Vec<Annotation>,
         press: PdfPoint,
         moved: bool,
+    },
+    /// Rubber-banding a box over empty space to select what it touches.
+    Marquee {
+        page: usize,
+        start: PdfPoint,
+        current: PdfPoint,
     },
     /// Resizing via a handle.
     Resizing {
@@ -337,8 +348,10 @@ impl ToolController {
             ToolState::Idle => None,
             ToolState::Creating { page, .. }
             | ToolState::Drawing { page, .. }
-            | ToolState::Placing { page, .. } => Some(*page),
-            ToolState::Dragging { orig, .. } | ToolState::Resizing { orig, .. } => Some(orig.page),
+            | ToolState::Placing { page, .. }
+            | ToolState::Marquee { page, .. } => Some(*page),
+            ToolState::Dragging { origs, .. } => origs.first().map(|a| a.page),
+            ToolState::Resizing { orig, .. } => Some(orig.page),
         }
     }
 
@@ -366,25 +379,53 @@ pub fn on_press(dc: &mut DocState, p: &PointerInfo) {
     match dc.tool {
         ActiveTool::Pan => {}
         ActiveTool::Select => {
-            // Handles of the current selection take priority.
-            if let Some(ann) = dc.selected_annotation().cloned()
+            // Handles take priority, and only when one thing is selected: with
+            // four selected, a corner of one of them is not a resize gesture,
+            // it is a place somebody is about to drag all four from.
+            if dc.selection.len() == 1
+                && let Some(ann) = dc.selected_annotation().cloned()
                 && ann.page == p.page
                 && let Some(handle) = select::handle_at(&ann, p.pos, p.tol * 1.5)
             {
                 dc.tool_ctl.state = ToolState::Resizing { orig: ann, handle };
                 return;
             }
-            if let Some(id) = select::hit_test(&dc.store, p.page, p.pos, p.tol) {
-                dc.selection = Some(id);
-                let orig = dc.store.get(id).unwrap().clone();
-                dc.tool_ctl.state = ToolState::Dragging {
-                    orig,
-                    press: p.pos,
-                    moved: false,
+            let Some(id) = select::hit_test(&dc.store, p.page, p.pos, p.tol) else {
+                // Empty space: shift keeps what is selected (the drag is about
+                // to add to it), a plain press starts again from nothing.
+                if !p.modifiers.shift {
+                    dc.selection.clear();
+                }
+                dc.tool_ctl.state = ToolState::Marquee {
+                    page: p.page,
+                    start: p.pos,
+                    current: p.pos,
                 };
-            } else {
-                dc.selection = None;
+                return;
+            };
+            // A group is one thing to everybody except the code that stores it.
+            let hit = group_of(dc, id);
+            if p.modifiers.shift {
+                for id in &hit {
+                    dc.selection.toggle(*id);
+                }
+            } else if !dc.selection.contains(id) {
+                dc.selection.select_all(hit);
             }
+            let origs = dc.selected_annotations();
+            if origs.is_empty() {
+                return;
+            }
+            // The grabbed one leads: it is what the snap guides are drawn for.
+            let mut origs = origs;
+            if let Some(at) = origs.iter().position(|a| a.id == id) {
+                origs.swap(0, at);
+            }
+            dc.tool_ctl.state = ToolState::Dragging {
+                origs,
+                press: p.pos,
+                moved: false,
+            };
         }
         ActiveTool::Text => {
             let id = dc.store.alloc_id();
@@ -401,9 +442,10 @@ pub fn on_press(dc: &mut DocState, p: &PointerInfo) {
                 },
                 rect,
                 style: dc.current_style,
+                group: None,
             };
             dc.store.insert(ann);
-            dc.selection = Some(id);
+            dc.selection.select_one(id);
             dc.editing_text = Some(id);
             dc.tool_ctl.editing_before = None;
             dc.tool_ctl.editing_focus_pending = true;
@@ -461,7 +503,7 @@ pub fn on_press(dc: &mut DocState, p: &PointerInfo) {
             place_stamp(dc, p.page, rect, AnnotationKind::ImageStamp { png });
         }
         tool if tool.places_vertices() => {
-            dc.selection = None;
+            dc.selection.clear();
             let state = std::mem::replace(&mut dc.tool_ctl.state, ToolState::Idle);
             let mut points = match state {
                 // Vertices already going down on this page continue; a click
@@ -478,7 +520,7 @@ pub fn on_press(dc: &mut DocState, p: &PointerInfo) {
             };
         }
         tool if tool.is_drag_create() => {
-            dc.selection = None;
+            dc.selection.clear();
             dc.tool_ctl.state = ToolState::Creating {
                 page: p.page,
                 start: p.pos,
@@ -541,23 +583,46 @@ pub fn on_drag(dc: &mut DocState, p: &PointerInfo) {
             }
             dc.tool_ctl.state = ToolState::Drawing { page, points };
         }
-        ToolState::Dragging { orig, press, .. } => {
+        ToolState::Marquee { page, start, .. } => {
+            dc.tool_ctl.state = ToolState::Marquee {
+                page,
+                start,
+                current: p.pos,
+            };
+        }
+        ToolState::Dragging { origs, press, .. } => {
+            let Some(lead) = origs.first().cloned() else {
+                return;
+            };
             let dx = p.pos.x - press.x;
             let dy = p.pos.y - press.y;
-            let mut rect = orig.rect.translated(dx, dy);
+            let mut rect = lead.rect.translated(dx, dy);
             if snapping {
-                let others = other_bounds(dc, orig.page, Some(orig.id));
+                // Nothing being dragged is something to snap against.
+                let moving: Vec<AnnotationId> = origs.iter().map(|a| a.id).collect();
+                let others: Vec<PdfRect> = dc
+                    .store
+                    .on_page(lead.page)
+                    .filter(|a| !moving.contains(&a.id))
+                    .map(|a| a.bounds())
+                    .collect();
                 let result = snap_rect(rect, SnapFeatures::ALL, p.page_w, p.page_h, &others, p.tol);
                 rect = rect.translated(result.correction.dx, result.correction.dy);
-                dc.tool_ctl.set_guides(orig.page, result.guides);
+                dc.tool_ctl.set_guides(lead.page, result.guides);
             } else {
                 dc.tool_ctl.clear_guides();
             }
-            let mut ann = orig.clone();
-            ann.translate(rect.min.x - orig.rect.min.x, rect.min.y - orig.rect.min.y);
-            dc.store.replace(ann);
+            // Whatever correction the lead took, everything else takes too:
+            // a selection that changed shape while it moved would be a bug the
+            // user could see.
+            let (dx, dy) = (rect.min.x - lead.rect.min.x, rect.min.y - lead.rect.min.y);
+            for orig in &origs {
+                let mut ann = orig.clone();
+                ann.translate(dx, dy);
+                dc.store.replace(ann);
+            }
             dc.tool_ctl.state = ToolState::Dragging {
-                orig,
+                origs,
                 press,
                 moved: true,
             };
@@ -753,8 +818,9 @@ pub fn on_release(dc: &mut DocState, p: &PointerInfo) {
                 kind,
                 rect,
                 style,
+                group: None,
             };
-            dc.selection = Some(id);
+            dc.selection.select_one(id);
             dc.history
                 .apply(Command::AddAnnotation(ann), &mut dc.store, &mut dc.pages);
         }
@@ -771,20 +837,61 @@ pub fn on_release(dc: &mut DocState, p: &PointerInfo) {
                 kind: AnnotationKind::Freehand { points },
                 rect,
                 style: dc.current_style,
+                group: None,
             };
-            dc.selection = Some(id);
+            dc.selection.select_one(id);
             dc.history
                 .apply(Command::AddAnnotation(ann), &mut dc.store, &mut dc.pages);
         }
-        ToolState::Dragging { orig, moved, .. } => {
-            if moved
-                && let Some(after) = dc.store.get(orig.id).cloned()
-                && after != orig
-            {
-                dc.history.record(Command::ModifyAnnotation {
-                    before: orig,
-                    after,
-                });
+        ToolState::Marquee {
+            page,
+            start,
+            current,
+        } => {
+            let rect = PdfRect::from_points(start, current);
+            // A press and release in the same place is a click on empty space,
+            // which `on_press` has already read as "select nothing".
+            if rect.width() < 1.0 && rect.height() < 1.0 {
+                return;
+            }
+            let touched: Vec<AnnotationId> = dc
+                .store
+                .on_page(page)
+                .filter(|a| a.bounds().intersects(rect))
+                .flat_map(|a| group_of(dc, a.id))
+                .collect();
+            if p.modifiers.shift {
+                dc.selection.add_all(touched);
+            } else {
+                dc.selection.select_all(touched);
+            }
+        }
+        ToolState::Dragging { origs, moved, .. } => {
+            if !moved {
+                // A press on something already selected keeps the whole
+                // selection, so that a drag moves all of it. Letting go without
+                // having moved says the press was a click after all, and a
+                // click picks out the one thing under it.
+                if !p.modifiers.shift
+                    && dc.selection.len() > 1
+                    && let Some(lead) = origs.first()
+                {
+                    let hit = group_of(dc, lead.id);
+                    dc.selection.select_all(hit);
+                }
+                return;
+            }
+            // One entry however many moved: a drag is one thing the user did,
+            // and one press of ⌘Z has to put all of it back.
+            let changes: Vec<Command> = origs
+                .into_iter()
+                .filter_map(|before| {
+                    let after = dc.store.get(before.id).cloned()?;
+                    (after != before).then_some(Command::ModifyAnnotation { before, after })
+                })
+                .collect();
+            if let Some(cmd) = one_step(changes) {
+                dc.history.record(cmd);
             }
         }
         ToolState::Resizing { orig, .. } => {
@@ -862,8 +969,9 @@ pub fn finish_placement(dc: &mut DocState) -> bool {
         kind,
         rect: pen::bounding_rect(&points),
         style: dc.current_style,
+        group: None,
     };
-    dc.selection = Some(id);
+    dc.selection.select_one(id);
     dc.history
         .apply(Command::AddAnnotation(ann), &mut dc.store, &mut dc.pages);
     true
@@ -874,10 +982,110 @@ pub fn cancel(dc: &mut DocState) {
     let state = std::mem::replace(&mut dc.tool_ctl.state, ToolState::Idle);
     dc.tool_ctl.clear_guides();
     match state {
-        ToolState::Dragging { orig, .. } | ToolState::Resizing { orig, .. } => {
+        ToolState::Dragging { origs, .. } => {
+            for orig in origs {
+                dc.store.replace(orig);
+            }
+        }
+        ToolState::Resizing { orig, .. } => {
             dc.store.replace(orig);
         }
         _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Selection, groups, and the things done to whole selections
+// ---------------------------------------------------------------------------
+
+/// Several commands as one undo step, or none at all if nothing changed.
+///
+/// A single change stays a single command rather than a batch of one: it is
+/// the same undo either way, and the history reads better for it.
+fn one_step(mut commands: Vec<Command>) -> Option<Command> {
+    match commands.len() {
+        0 => None,
+        1 => commands.pop(),
+        _ => Some(Command::Batch(commands)),
+    }
+}
+
+/// Everything that would be selected by clicking `id`: the whole group if it
+/// is in one, and otherwise just itself.
+fn group_of(dc: &DocState, id: AnnotationId) -> Vec<AnnotationId> {
+    match dc.store.get(id).and_then(|a| a.group) {
+        Some(group) => dc.store.group_members(group).collect(),
+        None => vec![id],
+    }
+}
+
+/// Delete everything selected, as one undo step.
+pub fn delete_selection(dc: &mut DocState) {
+    let removed: Vec<Command> = dc
+        .selection
+        .iter()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .filter_map(|id| dc.store.remove(id).map(Command::RemoveAnnotation))
+        .collect();
+    if let Some(cmd) = one_step(removed) {
+        dc.history.record(cmd);
+        dc.selection.clear();
+    }
+}
+
+/// Move everything selected by (dx, dy) points, as one undo step. This is the
+/// arrow keys: one press is one nudge, however much is selected.
+pub fn nudge_selection(dc: &mut DocState, dx: f32, dy: f32) {
+    let changes: Vec<Command> = dc
+        .selected_annotations()
+        .into_iter()
+        .map(|before| {
+            let mut after = before.clone();
+            after.translate(dx, dy);
+            dc.store.replace(after.clone());
+            Command::ModifyAnnotation { before, after }
+        })
+        .collect();
+    if let Some(cmd) = one_step(changes) {
+        dc.history.record(cmd);
+    }
+}
+
+/// Tie the selection together, so that from now on clicking one of them
+/// selects all of them. Nothing to do with fewer than two.
+pub fn group_selection(dc: &mut DocState) -> bool {
+    let members = dc.selected_annotations();
+    if members.len() < 2 {
+        return false;
+    }
+    let group = dc.store.next_group_id();
+    apply_group(dc, members, Some(group))
+}
+
+/// Untie whatever groups the selection belongs to.
+pub fn ungroup_selection(dc: &mut DocState) -> bool {
+    let members = dc.selected_annotations();
+    apply_group(dc, members, None)
+}
+
+fn apply_group(dc: &mut DocState, members: Vec<Annotation>, group: Option<GroupId>) -> bool {
+    let changes: Vec<Command> = members
+        .into_iter()
+        .filter(|before| before.group != group)
+        .map(|before| {
+            let mut after = before.clone();
+            after.group = group;
+            dc.store.replace(after.clone());
+            Command::ModifyAnnotation { before, after }
+        })
+        .collect();
+    match one_step(changes) {
+        Some(cmd) => {
+            dc.history.record(cmd);
+            true
+        }
+        None => false,
     }
 }
 
@@ -934,6 +1142,281 @@ mod tests {
         on_release(dc, &p);
     }
 
+    /// Three rectangles in a row on page 0, at x = 100, 200 and 300.
+    fn three_rects(dc: &mut DocState) -> Vec<AnnotationId> {
+        (0..3)
+            .map(|i| {
+                let id = dc.store.alloc_id();
+                let x = 100.0 + 100.0 * i as f32;
+                dc.store.insert(Annotation {
+                    id,
+                    page: 0,
+                    kind: AnnotationKind::Rect,
+                    rect: PdfRect::from_min_size(PdfPoint::new(x, 400.0), 60.0, 40.0),
+                    style: Style::default(),
+                    group: None,
+                });
+                id
+            })
+            .collect()
+    }
+
+    fn shift_at(x: f32, y: f32) -> PointerInfo {
+        PointerInfo {
+            modifiers: Modifiers::SHIFT,
+            ..at(x, y)
+        }
+    }
+
+    fn drag(dc: &mut DocState, from: (f32, f32), to: (f32, f32)) {
+        on_press(dc, &at(from.0, from.1));
+        on_drag(dc, &at(to.0, to.1));
+        on_release(dc, &at(to.0, to.1));
+    }
+
+    /// A box dragged over empty space takes everything it touches, and
+    /// shift-clicking adds and removes one at a time.
+    #[test]
+    fn a_marquee_takes_what_it_touches_and_shift_adds_one_at_a_time() {
+        let mut dc = doc_state();
+        let ids = three_rects(&mut dc);
+        dc.tool = ActiveTool::Select;
+
+        // A box across the first two, started well clear of either.
+        drag(&mut dc, (80.0, 380.0), (280.0, 460.0));
+        assert_eq!(dc.selection.len(), 2, "{:?}", dc.selection);
+        assert!(dc.selection.contains(ids[0]) && dc.selection.contains(ids[1]));
+
+        // Shift-clicking the third adds it; again takes it away.
+        on_press(&mut dc, &shift_at(330.0, 420.0));
+        on_release(&mut dc, &shift_at(330.0, 420.0));
+        assert_eq!(dc.selection.len(), 3);
+        assert_eq!(dc.selection.primary(), Some(ids[2]), "the last one clicked");
+        on_press(&mut dc, &shift_at(330.0, 420.0));
+        on_release(&mut dc, &shift_at(330.0, 420.0));
+        assert_eq!(dc.selection.len(), 2);
+        assert!(!dc.selection.contains(ids[2]));
+
+        // A plain click on empty space starts again from nothing.
+        click(&mut dc, 500.0, 200.0);
+        assert!(dc.selection.is_empty());
+
+        // And a marquee that touches nothing selects nothing, rather than
+        // leaving what was there.
+        dc.selection.select_one(ids[0]);
+        drag(&mut dc, (500.0, 200.0), (560.0, 260.0));
+        assert!(dc.selection.is_empty());
+    }
+
+    /// Several moved at once is one thing the user did, so it is one press of
+    /// ⌘Z -- and everything moves by the same amount, whichever was grabbed.
+    #[test]
+    fn moving_several_at_once_moves_them_together_and_undoes_as_one_step() {
+        let mut dc = doc_state();
+        let ids = three_rects(&mut dc);
+        dc.tool = ActiveTool::Select;
+        let before: Vec<Annotation> = ids
+            .iter()
+            .map(|id| dc.store.get(*id).unwrap().clone())
+            .collect();
+        dc.selection.select_all(ids.clone());
+
+        // Grab the middle one and drag; ⌘ held so nothing snaps on the way.
+        let held = PointerInfo {
+            modifiers: Modifiers::COMMAND,
+            ..at(230.0, 420.0)
+        };
+        on_press(&mut dc, &held);
+        let to = PointerInfo {
+            modifiers: Modifiers::COMMAND,
+            ..at(250.0, 450.0)
+        };
+        on_drag(&mut dc, &to);
+        on_release(&mut dc, &to);
+
+        for (id, was) in ids.iter().zip(&before) {
+            let now = dc.store.get(*id).expect("still there");
+            assert!(
+                (now.rect.min.x - was.rect.min.x - 20.0).abs() < 0.01,
+                "{now:?}"
+            );
+            assert!(
+                (now.rect.min.y - was.rect.min.y - 30.0).abs() < 0.01,
+                "{now:?}"
+            );
+        }
+
+        assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
+        for (id, was) in ids.iter().zip(&before) {
+            assert_eq!(dc.store.get(*id), Some(was), "one undo put all three back");
+        }
+        assert!(!dc.history.can_undo(), "and there was only the one step");
+        assert!(dc.history.redo(&mut dc.store, &mut dc.pages));
+        assert!(dc.store.get(ids[0]).unwrap().rect.min.x > 100.0, "and back");
+    }
+
+    /// The arrow keys nudge everything selected, and one press is one step
+    /// back -- the same promise a drag makes.
+    #[test]
+    fn nudging_moves_the_whole_selection_in_one_step() {
+        let mut dc = doc_state();
+        let ids = three_rects(&mut dc);
+        dc.selection.select_all([ids[0], ids[2]]);
+        nudge_selection(&mut dc, 1.0, -1.0);
+
+        assert!((dc.store.get(ids[0]).unwrap().rect.min.x - 101.0).abs() < 0.01);
+        assert!((dc.store.get(ids[2]).unwrap().rect.min.y - 399.0).abs() < 0.01);
+        assert!(
+            (dc.store.get(ids[1]).unwrap().rect.min.x - 200.0).abs() < 0.01,
+            "the one that was not selected stayed put"
+        );
+
+        assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
+        assert!((dc.store.get(ids[0]).unwrap().rect.min.x - 100.0).abs() < 0.01);
+        assert!((dc.store.get(ids[2]).unwrap().rect.min.y - 400.0).abs() < 0.01);
+        assert!(!dc.history.can_undo(), "one press, one step");
+    }
+
+    /// Deleting a selection is one step too.
+    #[test]
+    fn deleting_several_at_once_undoes_as_one_step() {
+        let mut dc = doc_state();
+        let ids = three_rects(&mut dc);
+        dc.selection.select_all(ids.clone());
+        delete_selection(&mut dc);
+        assert_eq!(dc.store.on_page(0).count(), 0);
+        assert!(dc.selection.is_empty());
+
+        assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
+        assert_eq!(dc.store.on_page(0).count(), 3, "all three came back");
+        assert!(!dc.history.can_undo());
+
+        // Nothing selected is nothing to delete, and nothing to undo either.
+        delete_selection(&mut dc);
+        assert!(!dc.history.can_undo());
+    }
+
+    /// A group is a selection somebody made once: clicking any member selects
+    /// all of them, and what is done to them is done to all of them.
+    #[test]
+    fn a_group_is_selected_moved_and_deleted_as_one() {
+        let mut dc = doc_state();
+        let ids = three_rects(&mut dc);
+        dc.tool = ActiveTool::Select;
+
+        // Two of the three, tied together.
+        dc.selection.select_all([ids[0], ids[1]]);
+        assert!(group_selection(&mut dc));
+        let group = dc.store.get(ids[0]).unwrap().group.expect("a group");
+        assert_eq!(dc.store.get(ids[1]).unwrap().group, Some(group));
+        assert_eq!(dc.store.get(ids[2]).unwrap().group, None);
+        assert!(dc.history.can_undo(), "grouping is undoable");
+
+        // Clicking either of them selects both; the loose one selects itself.
+        click(&mut dc, 130.0, 420.0);
+        assert_eq!(dc.selection.len(), 2);
+        assert!(dc.selection.contains(ids[1]), "its partner came with it");
+        click(&mut dc, 330.0, 420.0);
+        assert_eq!(dc.selection.len(), 1);
+
+        // A group moves as one, in one undo step.
+        let before = dc.store.get(ids[1]).unwrap().clone();
+        click(&mut dc, 230.0, 420.0);
+        let held = PointerInfo {
+            modifiers: Modifiers::COMMAND,
+            ..at(230.0, 420.0)
+        };
+        on_press(&mut dc, &held);
+        let to = PointerInfo {
+            modifiers: Modifiers::COMMAND,
+            ..at(230.0, 470.0)
+        };
+        on_drag(&mut dc, &to);
+        on_release(&mut dc, &to);
+        assert!((dc.store.get(ids[0]).unwrap().rect.min.y - 450.0).abs() < 0.01);
+        assert!((dc.store.get(ids[1]).unwrap().rect.min.y - 450.0).abs() < 0.01);
+        assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
+        assert_eq!(
+            dc.store.get(ids[1]),
+            Some(&before),
+            "both went back at once"
+        );
+
+        // Deleting one of them deletes the group, and one undo restores it.
+        click(&mut dc, 130.0, 420.0);
+        delete_selection(&mut dc);
+        assert_eq!(dc.store.on_page(0).count(), 1, "only the loose one is left");
+        assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
+        assert_eq!(dc.store.on_page(0).count(), 3);
+
+        // Untying them puts them back to being clicked one at a time.
+        dc.selection.select_all([ids[0], ids[1]]);
+        assert!(ungroup_selection(&mut dc));
+        assert_eq!(dc.store.get(ids[0]).unwrap().group, None);
+        click(&mut dc, 130.0, 420.0);
+        assert_eq!(dc.selection.len(), 1);
+        assert_eq!(dc.selection.primary(), Some(ids[0]));
+
+        // And undoing the ungroup ties them again -- one step for both.
+        assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
+        assert_eq!(dc.store.get(ids[0]).unwrap().group, Some(group));
+        assert_eq!(dc.store.get(ids[1]).unwrap().group, Some(group));
+    }
+
+    /// One thing on its own is not a group, and a fresh group id has to be one
+    /// nothing else is already using.
+    #[test]
+    fn grouping_needs_two_and_never_reuses_an_id() {
+        let mut dc = doc_state();
+        let ids = three_rects(&mut dc);
+        dc.selection.select_one(ids[0]);
+        assert!(!group_selection(&mut dc), "one thing is not a group");
+        assert!(!dc.history.can_undo());
+
+        dc.selection.select_all([ids[0], ids[1]]);
+        group_selection(&mut dc);
+        let first = dc.store.get(ids[0]).unwrap().group.expect("a group");
+        dc.selection.select_one(ids[2]);
+        let another = dc.store.alloc_id();
+        dc.store.insert(Annotation {
+            id: another,
+            page: 0,
+            kind: AnnotationKind::Rect,
+            rect: PdfRect::from_min_size(PdfPoint::new(400.0, 400.0), 10.0, 10.0),
+            style: Style::default(),
+            group: None,
+        });
+        dc.selection.select_all([ids[2], another]);
+        group_selection(&mut dc);
+        let second = dc.store.get(ids[2]).unwrap().group.expect("a group");
+        assert_ne!(first, second);
+
+        // Ungrouping something that is in no group changes nothing.
+        dc.selection.select_one(ids[1]);
+        dc.selection.clear();
+        assert!(!ungroup_selection(&mut dc));
+    }
+
+    /// A grouped shape still has to survive the sidecar, and the next group
+    /// made after it comes back has to clear the ids that came with it.
+    #[test]
+    fn a_group_survives_the_sidecar_and_the_next_id_clears_it() {
+        let mut dc = doc_state();
+        let ids = three_rects(&mut dc);
+        dc.selection.select_all([ids[0], ids[1]]);
+        group_selection(&mut dc);
+
+        let json = serde_json::to_string(&dc.store.to_vec()).expect("serialize");
+        assert!(json.contains("\"group\":1"), "{json}");
+        // Ungrouped markup is the version-2 shape exactly as it was.
+        assert_eq!(json.matches("\"group\"").count(), 2, "{json}");
+
+        let restored: Vec<Annotation> = serde_json::from_str(&json).expect("deserialize");
+        let store = crate::doc::store::AnnotationStore::restore(restored);
+        assert_eq!(store.group_members(1).count(), 2);
+        assert_eq!(store.next_group_id(), 2);
+    }
+
     #[test]
     fn clicking_out_a_polygon_makes_one_annotation_and_one_undo_step() {
         let mut dc = doc_state();
@@ -968,7 +1451,7 @@ mod tests {
         }
         assert_eq!(made.rect.min.x, 100.0);
         assert_eq!(made.rect.max.y, 200.0);
-        assert_eq!(dc.selection, Some(made.id));
+        assert_eq!(dc.selection.primary(), Some(made.id));
 
         // One undo takes the whole shape back, and redo brings it back whole.
         assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
@@ -1107,7 +1590,7 @@ mod tests {
         assert!((centre.y - 500.0).abs() < 0.01, "{centre:?}");
         assert!(made.rect.width() > made.rect.height(), "{:?}", made.rect);
 
-        assert_eq!(dc.selection, Some(made.id));
+        assert_eq!(dc.selection.primary(), Some(made.id));
         assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
         assert!(dc.store.get(made.id).is_none(), "one click, one undo");
 
@@ -1218,6 +1701,7 @@ mod tests {
             },
             rect: PdfRect::from_points(PdfPoint::new(10.0, 10.0), PdfPoint::new(90.0, 60.0)),
             style: dc.current_style,
+            group: None,
         };
         dc.history.apply(
             Command::AddAnnotation(ann.clone()),

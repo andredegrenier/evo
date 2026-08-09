@@ -857,6 +857,7 @@ mod tests {
                 crate::doc::geometry::PdfPoint::new(90.0, 60.0),
             ),
             style: crate::doc::annotation::Style::default(),
+            group: None,
         };
         let v2 = SavedMarkup::new(vec![cloud.clone()], crate::doc::page_ops::PageList::new(2));
         assert_eq!(v2.version, 2);

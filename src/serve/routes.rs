@@ -998,6 +998,7 @@ mod tests {
                     "kind": {"ImageStamp": {"png": encoded}},
                     "rect": {"min": {"x": 300.0, "y": 700.0}, "max": {"x": 360.0, "y": 730.0}},
                     "style": style,
+                    "group": 3,
                 }]
             }),
         );
@@ -1013,6 +1014,15 @@ mod tests {
             back.json()["annotations"][1]["kind"]["ImageStamp"]["png"],
             encoded.as_str(),
             "the picture came back byte for byte"
+        );
+        // Groups are additive to version 2: a body that names one is stored and
+        // handed back, and one that does not mention groups says nothing about
+        // them at all.
+        assert_eq!(back.json()["annotations"][1]["group"], 3);
+        assert!(
+            back.json()["annotations"][0].get("group").is_none(),
+            "{}",
+            back.text()
         );
 
         let svg = get(&format!("{docs}/{id}/markup.svg?page=1"), Some(&session)).text();

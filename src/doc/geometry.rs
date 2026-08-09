@@ -68,6 +68,15 @@ impl PdfRect {
         p.x >= self.min.x && p.x <= self.max.x && p.y >= self.min.y && p.y <= self.max.y
     }
 
+    /// Whether the two rects share any area (touching edges count: a marquee
+    /// dragged exactly along an annotation's edge did reach it).
+    pub fn intersects(&self, other: Self) -> bool {
+        self.min.x <= other.max.x
+            && other.min.x <= self.max.x
+            && self.min.y <= other.max.y
+            && other.min.y <= self.max.y
+    }
+
     /// Smallest rect containing both.
     pub fn union(&self, other: Self) -> Self {
         Self {
