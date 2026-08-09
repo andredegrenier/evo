@@ -45,6 +45,9 @@ pub enum Action {
     ToolLine,
     ToolArrow,
     ToolPen,
+    ToolCloud,
+    ToolPolygon,
+    ToolPolyLine,
 }
 
 /// Where an action appears in the Preferences list.
@@ -70,7 +73,7 @@ impl Category {
 }
 
 impl Action {
-    pub const ALL: [Action; 23] = [
+    pub const ALL: [Action; 26] = [
         Self::Open,
         Self::Save,
         Self::Print,
@@ -94,6 +97,9 @@ impl Action {
         Self::ToolLine,
         Self::ToolArrow,
         Self::ToolPen,
+        Self::ToolCloud,
+        Self::ToolPolygon,
+        Self::ToolPolyLine,
     ];
 
     pub fn label(self) -> &'static str {
@@ -121,6 +127,9 @@ impl Action {
             Self::ToolLine => "Line",
             Self::ToolArrow => "Arrow",
             Self::ToolPen => "Pen",
+            Self::ToolCloud => "Cloud",
+            Self::ToolPolygon => "Polygon",
+            Self::ToolPolyLine => "Polyline",
         }
     }
 
@@ -169,6 +178,11 @@ impl Action {
             Self::ToolLine => shortcut(none, Key::L),
             Self::ToolArrow => shortcut(none, Key::A),
             Self::ToolPen => shortcut(none, Key::P),
+            Self::ToolCloud => shortcut(none, Key::C),
+            Self::ToolPolygon => shortcut(none, Key::Y),
+            // The polyline is the polygon left open, so it is the polygon key
+            // with a shift on it -- the pairing every drawing app uses.
+            Self::ToolPolyLine => shortcut(Modifiers::SHIFT, Key::Y),
         }
     }
 }

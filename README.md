@@ -37,9 +37,15 @@ the only non-Rust components, both vendored.)
 
 **Markup** — <kbd>V</kbd> select, <kbd>H</kbd> highlight, <kbd>T</kbd> text,
 <kbd>R</kbd> rectangle, <kbd>O</kbd> ellipse, <kbd>L</kbd> line,
-<kbd>A</kbd> arrow, <kbd>P</kbd> pen, <kbd>G</kbd> pan (or hold space)
+<kbd>A</kbd> arrow, <kbd>P</kbd> pen, <kbd>C</kbd> cloud, <kbd>Y</kbd> polygon,
+<kbd>⇧Y</kbd> polyline, <kbd>G</kbd> pan (or hold space)
 - Every markup has 8 resize handles (shift = lock aspect), drag to move,
   arrow keys to nudge (shift = 10 pt)
+- **Polygons, polylines and revision clouds**: click each corner, then double
+  click or press <kbd>Enter</kbd> to finish (<kbd>Esc</kbd> abandons); the
+  Cloud tool drags one out around a rectangle. Corners are dragged
+  individually, and the Inspector turns the scallops on, off, and up. They
+  export as real `/Polygon` and `/PolyLine` annotations, clouds included
 - **Snapping & guides**: dragged edges and centers snap to the page center,
   page edges, and other markups, with live alignment guides (hold ⌘ to
   disable)

@@ -1022,7 +1022,9 @@ mod tests {
             .load_markup(&id)
             .expect("reading the sidecar")
             .expect("the phone wrote one");
-        assert_eq!(sidecar.version, 1);
+        // The phone said version 1, because that is what its copy of the app
+        // knows; what lands on disk is the format this build writes.
+        assert_eq!(sidecar.version, crate::library::MARKUP_VERSION);
         assert_eq!(sidecar.pages.order.len(), 2, "the page order survived");
 
         let mut store = AnnotationStore::restore(sidecar.annotations);
@@ -1051,6 +1053,139 @@ mod tests {
         // And the next annotation the app draws does not land on top of one of
         // the phone's: both sides number from the highest id there is.
         assert_eq!(store.alloc_id(), 3);
+
+        let _ = std::fs::remove_dir_all(&evo.dir);
+    }
+
+    /// The shapes v0.6 added, over the wire the way an agent would send them:
+    /// saved as format 2, read back unchanged, and -- the part that matters to
+    /// a phone -- drawn into the overlay it lays over the page image, without
+    /// the browser having to learn a thing about polygons.
+    #[test]
+    fn a_cloud_and_a_polyline_survive_the_api_and_reach_the_overlay() {
+        let mut evo = Harness::start("polygons");
+        let session = sign_in(&evo);
+        let docs = format!("{}/api/docs", evo.url);
+        let id = post_bytes(&docs, &session, &[], fixture()).json()["id"]
+            .as_str()
+            .expect("an id")
+            .to_owned();
+        let markup = format!("{docs}/{id}/markup");
+
+        let tag = get(&markup, Some(&session))
+            .headers
+            .get("etag")
+            .expect("a version tag")
+            .to_owned();
+        let style = json!({
+            "stroke": {"r": 220, "g": 38, "b": 38, "a": 255},
+            "stroke_width": 2.0,
+            "fill": {"r": 0, "g": 0, "b": 0, "a": 0},
+            "opacity": 1.0
+        });
+        let saved = put_json(
+            &markup,
+            &session,
+            &[("If-Match", &tag)],
+            json!({
+                "version": 2,
+                "annotations": [{
+                    "id": 1,
+                    "page": 0,
+                    "kind": {"Polygon": {
+                        "points": [
+                            {"x": 100.0, "y": 600.0},
+                            {"x": 300.0, "y": 600.0},
+                            {"x": 300.0, "y": 700.0},
+                            {"x": 100.0, "y": 700.0}
+                        ],
+                        "cloudy": 1.5
+                    }},
+                    "rect": {"min": {"x": 100.0, "y": 600.0}, "max": {"x": 300.0, "y": 700.0}},
+                    "style": style,
+                }, {
+                    "id": 2,
+                    "page": 0,
+                    "kind": {"PolyLine": {
+                        "points": [
+                            {"x": 72.0, "y": 200.0},
+                            {"x": 200.0, "y": 260.0},
+                            {"x": 320.0, "y": 200.0}
+                        ],
+                        "arrow_end": true
+                    }},
+                    "rect": {"min": {"x": 72.0, "y": 200.0}, "max": {"x": 320.0, "y": 260.0}},
+                    "style": style,
+                }]
+            }),
+        );
+        assert_eq!(saved.status, 200, "{}", saved.text());
+
+        // Read back: the same two shapes, and the format this build writes.
+        let read = get(&markup, Some(&session));
+        assert_eq!(read.status, 200);
+        let body = read.json();
+        assert_eq!(body["version"].as_u64(), Some(2));
+        assert_eq!(body["annotations"][0]["kind"]["Polygon"]["cloudy"], 1.5);
+        assert_eq!(
+            body["annotations"][1]["kind"]["PolyLine"]["arrow_end"],
+            true
+        );
+
+        // The overlay the browser lays over the page image: a scalloped path
+        // for the cloud, a straight one for the polyline, and its arrowhead.
+        let overlay = get(&format!("{docs}/{id}/markup.svg?page=1"), Some(&session));
+        assert_eq!(overlay.status, 200);
+        let svg = overlay.text();
+        assert_eq!(svg.matches("<path").count(), 2, "{svg}");
+        assert!(svg.matches(" C ").count() > 12, "the cloud is flat: {svg}");
+        assert!(svg.contains("<polygon points="), "no arrowhead: {svg}");
+
+        // A client that still speaks the old format may write what the old
+        // format could describe...
+        let tag = read.headers.get("etag").expect("a tag").to_owned();
+        let old = put_json(
+            &markup,
+            &session,
+            &[("If-Match", &tag)],
+            json!({"version": 1, "annotations": []}),
+        );
+        assert_eq!(old.status, 200, "{}", old.text());
+
+        // ...and is refused, in a sentence, when it claims a polygon is one.
+        let tag = get(&markup, Some(&session))
+            .headers
+            .get("etag")
+            .expect("a tag")
+            .to_owned();
+        let muddled = put_json(
+            &markup,
+            &session,
+            &[("If-Match", &tag)],
+            json!({
+                "version": 1,
+                "annotations": [{
+                    "id": 1,
+                    "page": 0,
+                    "kind": {"Polygon": {"points": [{"x": 1.0, "y": 2.0}], "cloudy": null}},
+                    "rect": {"min": {"x": 1.0, "y": 2.0}, "max": {"x": 3.0, "y": 4.0}},
+                    "style": style,
+                }]
+            }),
+        );
+        assert_eq!(muddled.status, 400, "{}", muddled.text());
+        assert!(muddled.text().contains("format 2"), "{}", muddled.text());
+
+        // And what the desktop app opens afterwards is the empty layer the
+        // old client last wrote, stamped with this build's version.
+        evo.stop();
+        let library = Library::open_at(evo.dir.join("library")).expect("the library, unlocked");
+        let sidecar = library
+            .load_markup(&id)
+            .expect("reading the sidecar")
+            .expect("one was written");
+        assert_eq!(sidecar.version, crate::library::MARKUP_VERSION);
+        assert!(sidecar.annotations.is_empty());
 
         let _ = std::fs::remove_dir_all(&evo.dir);
     }

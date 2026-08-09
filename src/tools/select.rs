@@ -17,6 +17,8 @@ pub enum Handle {
     W,
     LineStart,
     LineEnd,
+    /// One vertex of a point-list shape (polygon, polyline), by index.
+    Vertex(usize),
 }
 
 impl Handle {
@@ -43,7 +45,7 @@ impl Handle {
             Handle::S => PdfPoint::new(c.x, r.min.y),
             Handle::Sw => PdfPoint::new(r.min.x, r.min.y),
             Handle::W => PdfPoint::new(r.min.x, c.y),
-            Handle::LineStart | Handle::LineEnd => c,
+            Handle::LineStart | Handle::LineEnd | Handle::Vertex(_) => c,
         }
     }
 
@@ -78,11 +80,41 @@ fn dist_to_segment(p: PdfPoint, a: PdfPoint, b: PdfPoint) -> f32 {
 fn hits(ann: &Annotation, pos: PdfPoint, tol: f32) -> bool {
     match &ann.kind {
         AnnotationKind::Line { p1, p2, .. } => dist_to_segment(pos, *p1, *p2) <= tol,
-        AnnotationKind::Freehand { points } => points
+        AnnotationKind::Freehand { points } | AnnotationKind::PolyLine { points, .. } => points
             .windows(2)
             .any(|w| dist_to_segment(pos, w[0], w[1]) <= tol),
+        AnnotationKind::Polygon { points, .. } => {
+            // A filled shape is grabbable anywhere inside it; an outline is
+            // grabbable along the line, which is all there is of it. Clouds
+            // bulge outside their vertices, so the tolerance is generous.
+            if ann.style.fill.is_visible() && inside(points, pos) {
+                return true;
+            }
+            let tol = match &ann.kind {
+                AnnotationKind::Polygon {
+                    cloudy: Some(i), ..
+                } => tol + crate::doc::geometry::cloud_radius(*i),
+                _ => tol,
+            };
+            (0..points.len())
+                .any(|i| dist_to_segment(pos, points[i], points[(i + 1) % points.len()]) <= tol)
+        }
         _ => ann.rect.expanded(tol).contains(pos),
     }
+}
+
+/// Even-odd point-in-polygon.
+fn inside(points: &[PdfPoint], p: PdfPoint) -> bool {
+    let mut is_in = false;
+    let mut j = points.len().wrapping_sub(1);
+    for i in 0..points.len() {
+        let (a, b) = (points[i], points[j]);
+        if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+            is_in = !is_in;
+        }
+        j = i;
+    }
+    is_in
 }
 
 /// Topmost annotation on `page` under `pos`, if any. `tol` in PDF points.
@@ -110,6 +142,13 @@ pub fn handle_at(ann: &Annotation, pos: PdfPoint, tol: f32) -> Option<Handle> {
             return Some(Handle::LineEnd);
         }
         return None;
+    }
+    // A polygon is edited at its corners; a box round it could only ever
+    // stretch it, which is not how anybody fixes an outline they drew.
+    if let AnnotationKind::Polygon { points, .. } | AnnotationKind::PolyLine { points, .. } =
+        &ann.kind
+    {
+        return points.iter().position(|p| near(*p)).map(Handle::Vertex);
     }
     Handle::RECT_HANDLES
         .into_iter()

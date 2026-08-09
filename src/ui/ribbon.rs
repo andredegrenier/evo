@@ -45,7 +45,7 @@ pub enum RibbonItem {
 impl RibbonItem {
     /// Every item that exists, in default order. `sanitize` uses this to
     /// restore anything a stored layout is missing.
-    pub const ALL: [RibbonItem; 19] = [
+    pub const ALL: [RibbonItem; 22] = [
         Self::Undo,
         Self::Redo,
         Self::Tool(ActiveTool::Select),
@@ -57,6 +57,9 @@ impl RibbonItem {
         Self::Tool(ActiveTool::Line),
         Self::Tool(ActiveTool::Arrow),
         Self::Tool(ActiveTool::Pen),
+        Self::Tool(ActiveTool::Polygon),
+        Self::Tool(ActiveTool::PolyLine),
+        Self::Tool(ActiveTool::Cloud),
         Self::StrokeColor,
         Self::FillColor,
         Self::StrokeWidth,
@@ -628,6 +631,9 @@ fn tool_icon(tool: ActiveTool) -> (&'static str, Action) {
         ActiveTool::Line => (icon::LINE_SEGMENT, Action::ToolLine),
         ActiveTool::Arrow => (icon::ARROW_UP_RIGHT, Action::ToolArrow),
         ActiveTool::Pen => (icon::SCRIBBLE, Action::ToolPen),
+        ActiveTool::Cloud => (icon::CLOUD, Action::ToolCloud),
+        ActiveTool::Polygon => (icon::POLYGON, Action::ToolPolygon),
+        ActiveTool::PolyLine => (icon::LINE_SEGMENTS, Action::ToolPolyLine),
     }
 }
 

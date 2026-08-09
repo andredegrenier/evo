@@ -69,7 +69,7 @@ pub struct EvoApp {
 pub const ZOOM_STEP: f32 = 1.25;
 
 /// Tool actions and the tool each selects.
-const TOOL_ACTIONS: [(Action, ActiveTool); 9] = [
+const TOOL_ACTIONS: [(Action, ActiveTool); 12] = [
     (Action::ToolSelect, ActiveTool::Select),
     (Action::ToolPan, ActiveTool::Pan),
     (Action::ToolHighlight, ActiveTool::Highlight),
@@ -79,6 +79,9 @@ const TOOL_ACTIONS: [(Action, ActiveTool); 9] = [
     (Action::ToolLine, ActiveTool::Line),
     (Action::ToolArrow, ActiveTool::Arrow),
     (Action::ToolPen, ActiveTool::Pen),
+    (Action::ToolCloud, ActiveTool::Cloud),
+    (Action::ToolPolygon, ActiveTool::Polygon),
+    (Action::ToolPolyLine, ActiveTool::PolyLine),
 ];
 
 fn cmd() -> Modifiers {
@@ -230,11 +233,7 @@ impl EvoApp {
             && let Some(id) = &dc.library_id
             && let Some(lib) = &self.library
         {
-            let markup = crate::library::SavedMarkup {
-                version: 1,
-                annotations: dc.store.to_vec(),
-                pages: dc.pages.clone(),
-            };
+            let markup = crate::library::SavedMarkup::new(dc.store.to_vec(), dc.pages.clone());
             if let Err(e) = lib.save_markup(id, &markup) {
                 self.error = Some(format!("Could not save markup to library: {e}"));
             }
@@ -661,6 +660,10 @@ impl EvoApp {
 
         let escape =
             !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.key_pressed(Key::Escape));
+        // Enter closes a polygon or polyline that is still being clicked out.
+        // Modal like Escape, and unbindable for the same reason.
+        let finish_shape =
+            !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.key_pressed(Key::Enter));
 
         let Some(dc) = &mut self.dc else {
             return;
@@ -688,7 +691,15 @@ impl EvoApp {
             dc.viewport.fit_width = true;
         }
 
+        if finish_shape {
+            tools::finish_placement(dc);
+        }
+
         for tool in tools_pressed {
+            // Half-placed vertices belong to the tool that was placing them.
+            if dc.tool != tool {
+                tools::cancel(dc);
+            }
             dc.tool = tool;
         }
 

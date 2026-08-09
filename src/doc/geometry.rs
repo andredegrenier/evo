@@ -84,6 +84,221 @@ impl PdfRect {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Cloud scallops
+// ---------------------------------------------------------------------------
+
+/// One cubic Bézier segment of a cloud's outline, in PDF page space.
+///
+/// Every consumer of a cloud draws cubics -- egui's `CubicBezierShape`, the
+/// PDF `c` operator, SVG's `C` command -- so the scallops are computed once,
+/// here, and each of the three only has to write them out.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct CubicArc {
+    pub from: PdfPoint,
+    pub c1: PdfPoint,
+    pub c2: PdfPoint,
+    pub to: PdfPoint,
+}
+
+/// The narrowest and widest scallops a cloud may be drawn with. Matches the
+/// `/BE /I` range Acrobat and Bluebeam write into a PDF.
+pub const CLOUD_INTENSITY_MIN: f32 = 1.0;
+pub const CLOUD_INTENSITY_MAX: f32 = 2.0;
+
+pub fn clamp_cloud_intensity(intensity: f32) -> f32 {
+    if intensity.is_nan() {
+        return CLOUD_INTENSITY_MIN;
+    }
+    intensity.clamp(CLOUD_INTENSITY_MIN, CLOUD_INTENSITY_MAX)
+}
+
+/// Radius of one scallop, in points, for a given intensity.
+pub fn cloud_radius(intensity: f32) -> f32 {
+    5.0 * clamp_cloud_intensity(intensity)
+}
+
+/// How far apart scallop centres sit, as a fraction of the diameter. Below 1
+/// so neighbouring bumps overlap and the outline reads as one cloud rather
+/// than as a string of beads -- which is what Acrobat and Bluebeam draw.
+const CLOUD_OVERLAP: f32 = 0.8;
+
+/// The scalloped outline of the closed polygon through `points`, as cubics.
+///
+/// The bumps are laid out by arc length around the whole perimeter (not per
+/// edge), so they stay evenly spaced across corners, and each one is a circular
+/// arc of more than a half turn -- neighbours cross, which is the overlap that
+/// makes a cloud. The returned arcs are a closed loop: each one starts where
+/// the last ended, and the last ends where the first began.
+///
+/// Degenerate input (fewer than three distinct points, a zero-length
+/// perimeter) yields no arcs rather than a panic: the caller draws nothing.
+pub fn cloud_arcs(points: &[PdfPoint], intensity: f32) -> Vec<CubicArc> {
+    let ring = closed_ring(points);
+    if ring.len() < 2 {
+        return Vec::new();
+    }
+
+    // Cumulative arc length around the closed ring.
+    let mut lengths: Vec<f32> = Vec::with_capacity(ring.len());
+    let mut perimeter = 0.0f32;
+    for i in 0..ring.len() {
+        let a = ring[i];
+        let b = ring[(i + 1) % ring.len()];
+        let len = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt();
+        lengths.push(len);
+        perimeter += len;
+    }
+    if !perimeter.is_finite() || perimeter <= 1e-3 {
+        return Vec::new();
+    }
+
+    let radius = cloud_radius(intensity);
+    let spacing = 2.0 * radius * CLOUD_OVERLAP;
+    let count = ((perimeter / spacing).round() as i64).clamp(3, 4096) as usize;
+    let step = perimeter / count as f32;
+
+    // The joints between neighbouring bumps sit half a step past each bump's
+    // centre and a little inside the outline, so the bumps cross there.
+    let inset = (radius * radius - (step / 2.0) * (step / 2.0))
+        .max(0.0)
+        .sqrt();
+    // +1 when the ring runs counter-clockwise. The interior is then to the
+    // left of the direction of travel, which is what says which way is out.
+    let wind = if signed_area(&ring) >= 0.0 { 1.0 } else { -1.0 };
+
+    let joints: Vec<PdfPoint> = (0..count)
+        .map(|i| {
+            let (p, t) = walk(&ring, &lengths, (i as f32 + 0.5) * step);
+            // Inward: the left-hand normal for a counter-clockwise ring.
+            PdfPoint::new(p.x - wind * t.y * inset, p.y + wind * t.x * inset)
+        })
+        .collect();
+
+    let mut arcs = Vec::with_capacity(count * 3);
+    for i in 0..count {
+        let a = joints[i];
+        let b = joints[(i + 1) % count];
+        push_bump(&mut arcs, a, b, radius, wind);
+    }
+    arcs
+}
+
+/// The polygon's points with consecutive duplicates (and a repeated closing
+/// point) removed, so the arc-length walk never divides by zero.
+fn closed_ring(points: &[PdfPoint]) -> Vec<PdfPoint> {
+    let mut ring: Vec<PdfPoint> = Vec::with_capacity(points.len());
+    for p in points {
+        if !p.x.is_finite() || !p.y.is_finite() {
+            continue;
+        }
+        if ring
+            .last()
+            .is_some_and(|last| (last.x - p.x).abs() < 1e-6 && (last.y - p.y).abs() < 1e-6)
+        {
+            continue;
+        }
+        ring.push(*p);
+    }
+    while ring.len() >= 2 {
+        let (first, last) = (ring[0], ring[ring.len() - 1]);
+        if (first.x - last.x).abs() < 1e-6 && (first.y - last.y).abs() < 1e-6 {
+            ring.pop();
+        } else {
+            break;
+        }
+    }
+    ring
+}
+
+/// Twice the signed area of the ring: positive counter-clockwise.
+fn signed_area(ring: &[PdfPoint]) -> f32 {
+    let mut sum = 0.0;
+    for i in 0..ring.len() {
+        let a = ring[i];
+        let b = ring[(i + 1) % ring.len()];
+        sum += a.x * b.y - b.x * a.y;
+    }
+    sum
+}
+
+/// The point `distance` along the closed ring, and the unit direction of
+/// travel there.
+fn walk(ring: &[PdfPoint], lengths: &[f32], distance: f32) -> (PdfPoint, PdfPoint) {
+    let mut left = distance;
+    for i in 0..ring.len() {
+        let len = lengths[i];
+        if len <= f32::EPSILON {
+            continue;
+        }
+        if left <= len {
+            let a = ring[i];
+            let b = ring[(i + 1) % ring.len()];
+            let t = left / len;
+            return (
+                PdfPoint::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t),
+                PdfPoint::new((b.x - a.x) / len, (b.y - a.y) / len),
+            );
+        }
+        left -= len;
+    }
+    // Rounding overshot the last edge: the ring's start is where it wraps to.
+    let a = ring[0];
+    let b = ring[1 % ring.len()];
+    let len = lengths[0].max(f32::EPSILON);
+    (a, PdfPoint::new((b.x - a.x) / len, (b.y - a.y) / len))
+}
+
+/// Append the cubics of one scallop from `a` to `b`, bulging outward.
+fn push_bump(out: &mut Vec<CubicArc>, a: PdfPoint, b: PdfPoint, radius: f32, wind: f32) {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let chord = (dx * dx + dy * dy).sqrt();
+    if chord <= 1e-4 {
+        return;
+    }
+    // The outward side of the chord, in the ring's own winding.
+    let (ox, oy) = (wind * dy / chord, -wind * dx / chord);
+    // A bump can never be flatter than a half circle on its own chord.
+    let r = radius.max(chord / 2.0 * 1.0001);
+    let sag = (r * r - (chord / 2.0) * (chord / 2.0)).max(0.0).sqrt();
+    // The centre sits on the outward side of the chord -- it is a point of the
+    // polygon's own perimeter -- so the long way round the circle is the part
+    // that bulges out, and it is more than a half turn. That is the overlap.
+    let center = PdfPoint::new((a.x + b.x) / 2.0 + ox * sag, (a.y + b.y) / 2.0 + oy * sag);
+
+    let start = (a.y - center.y).atan2(a.x - center.x);
+    let end = (b.y - center.y).atan2(b.x - center.x);
+    // The major arc is the one that goes the long way round, through the
+    // outward extreme -- that is the visible part of the scallop.
+    let tau = std::f32::consts::TAU;
+    let mut sweep = end - start;
+    while sweep <= -std::f32::consts::PI {
+        sweep += tau;
+    }
+    while sweep > std::f32::consts::PI {
+        sweep -= tau;
+    }
+    sweep -= sweep.signum() * tau;
+
+    let steps = (sweep.abs() / std::f32::consts::FRAC_PI_2).ceil().max(1.0) as usize;
+    let delta = sweep / steps as f32;
+    let k = 4.0 / 3.0 * (delta / 4.0).tan();
+    let on = |angle: f32| PdfPoint::new(center.x + r * angle.cos(), center.y + r * angle.sin());
+    for i in 0..steps {
+        let t0 = start + delta * i as f32;
+        let t1 = t0 + delta;
+        // Exact endpoints at the joints keep the loop closed to the bit.
+        let from = if i == 0 { a } else { on(t0) };
+        let to = if i + 1 == steps { b } else { on(t1) };
+        out.push(CubicArc {
+            from,
+            c1: PdfPoint::new(from.x - k * r * t0.sin(), from.y + k * r * t0.cos()),
+            c2: PdfPoint::new(to.x + k * r * t1.sin(), to.y - k * r * t1.cos()),
+            to,
+        });
+    }
+}
+
 /// User-applied page rotation, clockwise, on top of the intrinsic `/Rotate`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum ExtraRotation {
@@ -212,5 +427,122 @@ mod tests {
         let t = transform(ExtraRotation::None);
         let s = t.to_screen(PdfPoint::new(0.0, 0.0));
         assert_eq!(s, pos2(10.0, 20.0 + 792.0 * 2.0));
+    }
+
+    fn square(size: f32) -> Vec<PdfPoint> {
+        vec![
+            PdfPoint::new(0.0, 0.0),
+            PdfPoint::new(size, 0.0),
+            PdfPoint::new(size, size),
+            PdfPoint::new(0.0, size),
+        ]
+    }
+
+    fn bounds(arcs: &[CubicArc]) -> PdfRect {
+        let mut r = PdfRect::from_points(arcs[0].from, arcs[0].from);
+        for arc in arcs {
+            for p in [arc.from, arc.c1, arc.c2, arc.to] {
+                r = r.union(PdfRect::from_points(p, p));
+            }
+        }
+        r
+    }
+
+    /// A cloud is one path, not a scattering of bumps: every arc has to start
+    /// where the last one ended, all the way round to the first.
+    #[test]
+    fn the_scallops_join_into_one_closed_loop() {
+        let arcs = cloud_arcs(&square(200.0), 1.0);
+        assert!(arcs.len() > 8, "only {} arcs", arcs.len());
+        for pair in arcs.windows(2) {
+            assert!(
+                (pair[0].to.x - pair[1].from.x).abs() < 1e-3
+                    && (pair[0].to.y - pair[1].from.y).abs() < 1e-3,
+                "a gap between {:?} and {:?}",
+                pair[0].to,
+                pair[1].from
+            );
+        }
+        let (first, last) = (arcs[0], arcs[arcs.len() - 1]);
+        assert!(
+            (last.to.x - first.from.x).abs() < 1e-3 && (last.to.y - first.from.y).abs() < 1e-3,
+            "the loop does not close: {:?} != {:?}",
+            last.to,
+            first.from
+        );
+    }
+
+    /// Bumps are a fixed size, so a bigger outline is more of them -- the way
+    /// a cloud round a paragraph has more scallops than one round a word.
+    #[test]
+    fn a_longer_perimeter_is_more_scallops() {
+        let small = cloud_arcs(&square(60.0), 1.0).len();
+        let large = cloud_arcs(&square(240.0), 1.0).len();
+        assert!(large > small * 2, "{small} then {large}");
+    }
+
+    /// Intensity is how far the scallops stand off the outline.
+    #[test]
+    fn intensity_widens_the_scallops() {
+        let quiet = bounds(&cloud_arcs(&square(200.0), 1.0));
+        let loud = bounds(&cloud_arcs(&square(200.0), 2.0));
+        assert!(
+            loud.width() > quiet.width() + 4.0,
+            "{} then {}",
+            quiet.width(),
+            loud.width()
+        );
+        // And the range is the one a PDF viewer understands.
+        assert_eq!(cloud_radius(0.1), cloud_radius(CLOUD_INTENSITY_MIN));
+        assert_eq!(cloud_radius(99.0), cloud_radius(CLOUD_INTENSITY_MAX));
+        assert_eq!(clamp_cloud_intensity(f32::NAN), CLOUD_INTENSITY_MIN);
+    }
+
+    /// Nothing a user can draw -- a two-point "polygon", a double-clicked
+    /// vertex, a shape with no area -- may take the renderer down with it.
+    #[test]
+    fn degenerate_outlines_draw_nothing_rather_than_panicking() {
+        assert!(cloud_arcs(&[], 1.0).is_empty());
+        assert!(cloud_arcs(&[PdfPoint::new(3.0, 4.0)], 1.5).is_empty());
+        assert!(
+            cloud_arcs(&[PdfPoint::new(1.0, 1.0), PdfPoint::new(1.0, 1.0)], 1.0).is_empty(),
+            "a repeated point has no perimeter"
+        );
+        assert!(
+            cloud_arcs(&[PdfPoint::new(0.0, 0.0), PdfPoint::new(0.0, 1e-5)], 1.0).is_empty(),
+            "a perimeter under a thousandth of a point is nothing to draw"
+        );
+        assert!(
+            cloud_arcs(
+                &[
+                    PdfPoint::new(0.0, 0.0),
+                    PdfPoint::new(f32::NAN, 2.0),
+                    PdfPoint::new(50.0, 0.0),
+                    PdfPoint::new(50.0, 50.0),
+                ],
+                1.0
+            )
+            .iter()
+            .all(|a| a.from.x.is_finite() && a.to.y.is_finite()),
+            "a point that is not a number is dropped, not propagated"
+        );
+
+        // A two-point line still has a perimeter (out and back), and drawing
+        // it as a cloud is a thin sausage rather than a crash.
+        let line = cloud_arcs(&[PdfPoint::new(0.0, 0.0), PdfPoint::new(100.0, 0.0)], 1.0);
+        assert!(!line.is_empty());
+        assert!(line.iter().all(|a| a.from.x.is_finite()));
+    }
+
+    /// The scallops belong outside the outline: that is what makes a revision
+    /// cloud read as surrounding what it is about.
+    #[test]
+    fn the_bumps_stand_outside_the_outline() {
+        for order in [square(100.0), square(100.0).into_iter().rev().collect()] {
+            let arcs = cloud_arcs(&order, 1.0);
+            let b = bounds(&arcs);
+            assert!(b.min.x < -1.0 && b.min.y < -1.0, "{b:?}");
+            assert!(b.max.x > 101.0 && b.max.y > 101.0, "{b:?}");
+        }
     }
 }

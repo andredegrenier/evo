@@ -62,7 +62,7 @@ pub struct OpenArgs {
 pub struct MarkupArgs {
     /// Page to draw on, 1-based.
     pub page: usize,
-    /// One of: highlight, rect, ellipse, line, arrow, text.
+    /// One of: highlight, rect, ellipse, cloud, line, arrow, text.
     pub kind: String,
     /// Left edge, in PDF points from the left of the page.
     pub x0: f32,
@@ -183,9 +183,9 @@ impl EvoMcp {
     }
 
     /// Draw one piece of markup on the open document: a highlight, rectangle,
-    /// ellipse, line, arrow or text box. Coordinates are PDF points measured
-    /// from the bottom-left of the page. It is added to the undo history, so
-    /// the user can take it back.
+    /// ellipse, revision cloud, line, arrow or text box. Coordinates are PDF
+    /// points measured from the bottom-left of the page. It is added to the
+    /// undo history, so the user can take it back.
     #[tool]
     async fn add_markup(
         &self,

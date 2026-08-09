@@ -29,7 +29,7 @@ use super::library_api::{check_id, fail, no_such_document, page_sizes, with_libr
 
 /// The markup format this server writes. The desktop app's sidecars carry the
 /// same number.
-const VERSION: u32 = 1;
+const VERSION: u32 = crate::library::MARKUP_VERSION;
 
 /// A document with no markup yet, so that "there is nothing here" and "there is
 /// something here" are the same shape to a client.
@@ -129,6 +129,37 @@ pub struct MarkupBody {
     pub pages: Option<PageList>,
 }
 
+/// Whether a body's claimed format version can hold what it is carrying.
+///
+/// A phone that has not reloaded since v0.5 still says `"version": 1`, and its
+/// highlights are as good as they ever were -- so a version-1 body is accepted
+/// and stored as version 2. What it may not do is claim version 1 while
+/// carrying a polygon: that is a client that has muddled its own format, and
+/// letting it through would write a file whose stamp lies about its contents.
+/// A version from the future is refused outright, because this server cannot
+/// know what it left out.
+fn version_trouble(claimed: Option<u32>, annotations: &[Annotation]) -> Option<String> {
+    let claimed = claimed?;
+    if claimed > VERSION {
+        return Some(format!(
+            "this markup says it is format {claimed}, and this evo writes format {VERSION}. \
+             Update the server before saving it."
+        ));
+    }
+    let needs = annotations
+        .iter()
+        .map(|a| a.kind.min_sidecar_version())
+        .max()
+        .unwrap_or(1);
+    if needs > claimed {
+        return Some(format!(
+            "this markup says it is format {claimed}, but it holds shapes that need format \
+             {needs}. Reload the page and try again."
+        ));
+    }
+    None
+}
+
 /// `PUT /api/docs/{id}/markup` -- replace the annotation layer, if it is still
 /// the one the client edited.
 pub async fn put_markup(
@@ -154,6 +185,10 @@ pub async fn put_markup(
         );
     };
 
+    if let Some(complaint) = version_trouble(body.version, &body.annotations) {
+        return fail(StatusCode::BAD_REQUEST, &complaint);
+    }
+
     let (current, tag) = match load(&state, &id).await {
         Ok(Some(pair)) => pair,
         Ok(None) => return no_such_document(),
@@ -174,14 +209,13 @@ pub async fn put_markup(
             .into_response();
     }
 
-    let saved = SavedMarkup {
-        version: body.version.unwrap_or(VERSION),
-        annotations: body.annotations,
+    let saved = SavedMarkup::new(
+        body.annotations,
         // A client that did not mention the page order does not get to change
         // it. This is the difference between a phone drawing a highlight and a
         // phone silently un-rotating a page.
-        pages: body.pages.unwrap_or(current.pages),
-    };
+        body.pages.unwrap_or(current.pages),
+    );
     let new_tag = etag(&saved);
     let wanted = id.clone();
     let written = with_library(&state, move |lib| {
@@ -308,6 +342,50 @@ mod tests {
         assert!(!matches("\"other\"", current));
         assert!(!matches("", current));
         assert!(!matches("abc12", current));
+    }
+
+    fn polygon() -> Annotation {
+        Annotation {
+            id: 2,
+            page: 0,
+            kind: AnnotationKind::Polygon {
+                points: vec![
+                    PdfPoint::new(10.0, 10.0),
+                    PdfPoint::new(90.0, 10.0),
+                    PdfPoint::new(50.0, 70.0),
+                ],
+                cloudy: Some(1.0),
+            },
+            rect: PdfRect::from_points(PdfPoint::new(10.0, 10.0), PdfPoint::new(90.0, 70.0)),
+            style: Style::default(),
+        }
+    }
+
+    /// A phone that has not been reloaded since the last release still says
+    /// version 1, and its highlights are as good as they ever were. What it
+    /// may not do is call a polygon a version-1 shape.
+    #[test]
+    fn an_older_client_may_still_write_what_it_understands() {
+        assert_eq!(VERSION, 2, "this build writes format 2");
+        assert_eq!(version_trouble(None, &[highlight(0)]), None);
+        assert_eq!(version_trouble(Some(1), &[highlight(0)]), None);
+        assert_eq!(version_trouble(Some(2), &[highlight(0), polygon()]), None);
+
+        let muddled = version_trouble(Some(1), &[polygon()]).expect("refused");
+        assert!(muddled.contains("need format 2"), "{muddled}");
+
+        let ahead = version_trouble(Some(99), &[]).expect("refused");
+        assert!(ahead.contains("format 99"), "{ahead}");
+        assert!(ahead.contains("Update the server"), "{ahead}");
+    }
+
+    /// Whatever a client claims, what is stored is what this build writes --
+    /// so a version-1 save from a stale phone leaves a version-2 sidecar.
+    #[test]
+    fn what_is_stored_carries_this_builds_version() {
+        let saved = SavedMarkup::new(vec![highlight(0)], PageList::new(2));
+        assert_eq!(saved.version, VERSION);
+        assert_eq!(empty_markup(3).version, VERSION);
     }
 
     /// The overlay is what the viewer draws, so it has to be the page's own

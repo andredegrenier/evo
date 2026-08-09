@@ -4,7 +4,9 @@
 use eframe::egui::{self, DragValue};
 
 use crate::doc::annotation::{Annotation, AnnotationKind};
-use crate::doc::geometry::{PdfPoint, PdfRect};
+use crate::doc::geometry::{
+    CLOUD_INTENSITY_MAX, CLOUD_INTENSITY_MIN, PdfPoint, PdfRect, clamp_cloud_intensity,
+};
 use crate::doc::history::Command;
 use crate::state::DocState;
 use crate::ui::ribbon::{from_egui, to_egui};
@@ -39,6 +41,9 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
         ui.weak("No selection.\n\nSelect a markup to edit its exact position and size.");
         return;
     };
+
+    ui.weak(format!("{} on page {}", ann.kind.label(), ann.page + 1));
+    ui.add_space(4.0);
 
     let info = dc.doc.pages[dc.pages.source_of(ann.page)];
     let (page_w, page_h) = (info.width, info.height);
@@ -175,6 +180,56 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
         });
     }
 
+    if let AnnotationKind::Polygon { cloudy, .. } = ann.kind {
+        let mut on = cloudy.is_some();
+        if ui
+            .checkbox(&mut on, "Cloudy edge")
+            .on_hover_text("Draw the outline as a revision cloud")
+            .changed()
+        {
+            record_style(dc, ann.clone(), &|a| {
+                if let AnnotationKind::Polygon { cloudy, .. } = &mut a.kind {
+                    *cloudy = on.then_some(crate::tools::DEFAULT_CLOUD_INTENSITY);
+                }
+            });
+        }
+        if let Some(current) = cloudy {
+            let mut intensity = current;
+            let slider = ui.add(
+                egui::Slider::new(&mut intensity, CLOUD_INTENSITY_MIN..=CLOUD_INTENSITY_MAX)
+                    .text("Scallops"),
+            );
+            if slider.drag_started() || slider.gained_focus() {
+                dc.tool_ctl.inspector_before = Some(ann.clone());
+            }
+            if slider.changed()
+                && let Some(a) = dc.store.get_mut(ann.id)
+                && let AnnotationKind::Polygon { cloudy, .. } = &mut a.kind
+            {
+                *cloudy = Some(clamp_cloud_intensity(intensity));
+            }
+            if (slider.drag_stopped() || slider.lost_focus())
+                && let Some(before) = dc.tool_ctl.inspector_before.take()
+                && let Some(after) = dc.store.get(ann.id).cloned()
+                && after != before
+            {
+                dc.history
+                    .record(Command::ModifyAnnotation { before, after });
+            }
+        }
+    }
+
+    if let AnnotationKind::PolyLine { arrow_end, .. } = ann.kind {
+        let mut on = arrow_end;
+        if ui.checkbox(&mut on, "Arrowhead at the end").changed() {
+            record_style(dc, ann.clone(), &|a| {
+                if let AnnotationKind::PolyLine { arrow_end, .. } = &mut a.kind {
+                    *arrow_end = on;
+                }
+            });
+        }
+    }
+
     ui.add_space(10.0);
     if ui.button("🗑 Delete").clicked() {
         if let Some(removed) = dc.store.remove(ann.id) {
@@ -198,5 +253,68 @@ fn center(dc: &mut DocState, ann: &Annotation, target: f32, vertical: Option<()>
         dc.store.replace(after.clone());
         dc.history
             .record(Command::ModifyAnnotation { before, after });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::doc::annotation::{AnnotationKind, Style};
+    use crate::doc::geometry::PdfPoint;
+    use crate::state::DocState;
+
+    /// The panel has a row per kind now, and a row that is never drawn is a
+    /// row nobody notices is broken. One frame per new kind, with the controls
+    /// left alone, must change nothing.
+    #[test]
+    fn the_panel_draws_for_the_shapes_v0_6_added() {
+        let ctx = egui::Context::default();
+        let bytes = std::fs::read("tests/fixtures/sample.pdf").expect("fixture");
+        let doc = crate::doc::Document::load_bytes(bytes, None).expect("load");
+        let mut dc = DocState::new(doc, &ctx, crate::render::engine::EnginePref::Hayro);
+        let points = vec![
+            PdfPoint::new(100.0, 600.0),
+            PdfPoint::new(300.0, 600.0),
+            PdfPoint::new(200.0, 700.0),
+        ];
+
+        for kind in [
+            AnnotationKind::Polygon {
+                points: points.clone(),
+                cloudy: Some(1.5),
+            },
+            AnnotationKind::Polygon {
+                points: points.clone(),
+                cloudy: None,
+            },
+            AnnotationKind::PolyLine {
+                points: points.clone(),
+                arrow_end: true,
+            },
+        ] {
+            let id = dc.store.alloc_id();
+            let before = Annotation {
+                id,
+                page: 0,
+                kind,
+                rect: crate::tools::pen::bounding_rect(&points),
+                style: Style::default(),
+            };
+            dc.store.insert(before.clone());
+            dc.selection = Some(id);
+
+            let ctx = egui::Context::default();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(320.0, 700.0),
+                )),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| show(ui, &mut dc));
+
+            assert_eq!(dc.store.get(id), Some(&before), "drawing changed it");
+            assert!(!dc.history.can_undo(), "drawing recorded history");
+        }
     }
 }

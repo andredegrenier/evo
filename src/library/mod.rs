@@ -124,12 +124,31 @@ impl DocMeta {
     }
 }
 
+/// The sidecar format this build writes.
+///
+/// Version 2 added the polygon family (polygons, polylines, clouds). Version 1
+/// files still read: nothing in them has changed meaning, so a library written
+/// by v0.5 opens here untouched, and only a document that is actually given one
+/// of the new shapes gains anything a v0.5 evo could not parse.
+pub const MARKUP_VERSION: u32 = 2;
+
 /// The persisted markup layer for one library document.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SavedMarkup {
     pub version: u32,
     pub annotations: Vec<Annotation>,
     pub pages: PageList,
+}
+
+impl SavedMarkup {
+    /// A markup layer stamped with the version this build writes.
+    pub fn new(annotations: Vec<Annotation>, pages: PageList) -> Self {
+        Self {
+            version: MARKUP_VERSION,
+            annotations,
+            pages,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -480,8 +499,23 @@ impl Library {
         Ok(self.blobs.get(id)?)
     }
 
+    /// The markup sidecar for a document, if one has ever been saved.
+    ///
+    /// A sidecar from a *newer* evo is refused by name rather than parsed
+    /// half-way: the shapes it holds are ones this build cannot draw, and
+    /// opening it would end with the next save quietly deleting them.
     pub fn load_markup(&self, id: &str) -> Result<Option<SavedMarkup>, LibraryError> {
-        self.db.get_markup(id)
+        let markup = self.db.get_markup(id)?;
+        if let Some(markup) = &markup
+            && markup.version > MARKUP_VERSION
+        {
+            return Err(LibraryError::Db(format!(
+                "this document's markup was saved by a newer version of evo \
+                 (format {}, this one reads up to {MARKUP_VERSION}); update evo to open it",
+                markup.version
+            )));
+        }
+        Ok(markup)
     }
 
     pub fn save_markup(&self, id: &str, markup: &SavedMarkup) -> Result<(), LibraryError> {
@@ -794,6 +828,8 @@ mod tests {
             .import(Path::new("tests/fixtures/sample.pdf"), None)
             .unwrap();
 
+        // A sidecar as v0.5 wrote it: version 1, and nothing in it has changed
+        // meaning since, so it reads back exactly as it was left.
         let markup = SavedMarkup {
             version: 1,
             annotations: vec![],
@@ -803,6 +839,45 @@ mod tests {
         let loaded = lib.load_markup(&meta.id).unwrap().unwrap();
         assert_eq!(loaded.version, 1);
         assert_eq!(loaded.pages.order, vec![0, 1]);
+
+        // What this build writes, with a shape only this build knows.
+        let cloud = crate::doc::annotation::Annotation {
+            id: 1,
+            page: 0,
+            kind: crate::doc::annotation::AnnotationKind::Polygon {
+                points: vec![
+                    crate::doc::geometry::PdfPoint::new(10.0, 10.0),
+                    crate::doc::geometry::PdfPoint::new(90.0, 10.0),
+                    crate::doc::geometry::PdfPoint::new(90.0, 60.0),
+                ],
+                cloudy: Some(1.5),
+            },
+            rect: crate::doc::geometry::PdfRect::from_points(
+                crate::doc::geometry::PdfPoint::new(10.0, 10.0),
+                crate::doc::geometry::PdfPoint::new(90.0, 60.0),
+            ),
+            style: crate::doc::annotation::Style::default(),
+        };
+        let v2 = SavedMarkup::new(vec![cloud.clone()], crate::doc::page_ops::PageList::new(2));
+        assert_eq!(v2.version, 2);
+        lib.save_markup(&meta.id, &v2).unwrap();
+        let loaded = lib.load_markup(&meta.id).unwrap().unwrap();
+        assert_eq!(loaded.version, 2);
+        assert_eq!(loaded.annotations, vec![cloud]);
+
+        // And a sidecar from a version that does not exist yet is refused by
+        // name rather than opened with its shapes silently dropped.
+        let future = SavedMarkup {
+            version: MARKUP_VERSION + 1,
+            annotations: vec![],
+            pages: crate::doc::page_ops::PageList::new(2),
+        };
+        lib.save_markup(&meta.id, &future).unwrap();
+        let err = match lib.load_markup(&meta.id) {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("a sidecar from the future was opened anyway"),
+        };
+        assert!(err.contains("newer version of evo"), "{err}");
         std::fs::remove_dir_all(dir).ok();
     }
 

@@ -25,6 +25,12 @@ pub enum ActiveTool {
     Line,
     Arrow,
     Pen,
+    /// Rectangular revision cloud, dragged out like a rectangle.
+    Cloud,
+    /// Closed outline, one clicked vertex at a time.
+    Polygon,
+    /// Open chain of segments, one clicked vertex at a time.
+    PolyLine,
 }
 
 impl ActiveTool {
@@ -39,6 +45,9 @@ impl ActiveTool {
             ActiveTool::Line => "Line",
             ActiveTool::Arrow => "Arrow",
             ActiveTool::Pen => "Pen",
+            ActiveTool::Cloud => "Cloud",
+            ActiveTool::Polygon => "Polygon",
+            ActiveTool::PolyLine => "Polyline",
         }
     }
 
@@ -50,8 +59,38 @@ impl ActiveTool {
                 | ActiveTool::Ellipse
                 | ActiveTool::Line
                 | ActiveTool::Arrow
+                | ActiveTool::Cloud
         )
     }
+
+    /// Tools built by clicking vertices rather than by dragging a box.
+    pub fn places_vertices(self) -> bool {
+        matches!(self, ActiveTool::Polygon | ActiveTool::PolyLine)
+    }
+
+    /// How many vertices this tool needs before it has a shape.
+    fn least_vertices(self) -> usize {
+        match self {
+            ActiveTool::Polygon => 3,
+            _ => 2,
+        }
+    }
+}
+
+/// The intensity a cloud is drawn with until somebody changes it.
+pub const DEFAULT_CLOUD_INTENSITY: f32 = 1.0;
+
+/// The four corners of `rect`, counter-clockwise from the bottom left.
+///
+/// Counter-clockwise because that is the winding `cloud_arcs` reads to decide
+/// which side of the outline the scallops belong on.
+pub fn rect_points(rect: PdfRect) -> Vec<PdfPoint> {
+    vec![
+        PdfPoint::new(rect.min.x, rect.min.y),
+        PdfPoint::new(rect.max.x, rect.min.y),
+        PdfPoint::new(rect.max.x, rect.max.y),
+        PdfPoint::new(rect.min.x, rect.max.y),
+    ]
 }
 
 pub enum ToolState {
@@ -66,6 +105,13 @@ pub enum ToolState {
     Drawing {
         page: usize,
         points: Vec<PdfPoint>,
+    },
+    /// Vertices placed so far by the Polygon/PolyLine tools, plus where the
+    /// pointer is now so the outline can be drawn as far as the cursor.
+    Placing {
+        page: usize,
+        points: Vec<PdfPoint>,
+        hover: PdfPoint,
     },
     /// Moving an existing annotation.
     Dragging {
@@ -128,7 +174,9 @@ impl ToolController {
     pub fn active_page(&self) -> Option<usize> {
         match &self.state {
             ToolState::Idle => None,
-            ToolState::Creating { page, .. } | ToolState::Drawing { page, .. } => Some(*page),
+            ToolState::Creating { page, .. }
+            | ToolState::Drawing { page, .. }
+            | ToolState::Placing { page, .. } => Some(*page),
             ToolState::Dragging { orig, .. } | ToolState::Resizing { orig, .. } => Some(orig.page),
         }
     }
@@ -206,6 +254,23 @@ pub fn on_press(dc: &mut DocState, p: &PointerInfo) {
                 points: vec![p.pos],
             };
         }
+        tool if tool.places_vertices() => {
+            dc.selection = None;
+            let state = std::mem::replace(&mut dc.tool_ctl.state, ToolState::Idle);
+            let mut points = match state {
+                // Vertices already going down on this page continue; a click
+                // that lands on a different page starts again there, which is
+                // the only reading of it that isn't a shape spanning two pages.
+                ToolState::Placing { page, points, .. } if page == p.page => points,
+                _ => Vec::new(),
+            };
+            points.push(p.pos);
+            dc.tool_ctl.state = ToolState::Placing {
+                page: p.page,
+                points,
+                hover: p.pos,
+            };
+        }
         tool if tool.is_drag_create() => {
             dc.selection = None;
             dc.tool_ctl.state = ToolState::Creating {
@@ -253,6 +318,16 @@ pub fn on_drag(dc: &mut DocState, p: &PointerInfo) {
                 current: pos,
             };
         }
+        ToolState::Placing { page, points, .. } => {
+            // Dragging with a vertex tool is just a slow click: the shape only
+            // grows where the pointer is let go, which `on_press` has already
+            // recorded. The hover point follows so the preview does too.
+            dc.tool_ctl.state = ToolState::Placing {
+                page,
+                points,
+                hover: p.pos,
+            };
+        }
         ToolState::Drawing { page, mut points } => {
             let last = points.last().copied();
             if last.is_none_or(|l| (l.x - p.pos.x).abs() + (l.y - p.pos.y).abs() > 0.2) {
@@ -283,6 +358,43 @@ pub fn on_drag(dc: &mut DocState, p: &PointerInfo) {
         }
         ToolState::Resizing { orig, handle } => {
             let mut pos = p.pos;
+
+            if let Handle::Vertex(index) = handle {
+                if snapping {
+                    let others = other_bounds(dc, orig.page, Some(orig.id));
+                    let result = snap_rect(
+                        PdfRect::from_points(pos, pos),
+                        SnapFeatures {
+                            left: true,
+                            right: false,
+                            center_x: false,
+                            top: false,
+                            bottom: true,
+                            center_y: false,
+                        },
+                        p.page_w,
+                        p.page_h,
+                        &others,
+                        p.tol,
+                    );
+                    pos.x += result.correction.dx;
+                    pos.y += result.correction.dy;
+                    dc.tool_ctl.set_guides(orig.page, result.guides);
+                } else {
+                    dc.tool_ctl.clear_guides();
+                }
+                let mut ann = orig.clone();
+                if let Some(points) = ann.kind.points_mut()
+                    && let Some(vertex) = points.get_mut(index)
+                {
+                    *vertex = pos;
+                    let moved = points.clone();
+                    ann.rect = pen::bounding_rect(&moved);
+                }
+                dc.store.replace(ann);
+                dc.tool_ctl.state = ToolState::Resizing { orig, handle };
+                return;
+            }
 
             if matches!(handle, Handle::LineStart | Handle::LineEnd) {
                 if snapping {
@@ -368,6 +480,19 @@ pub fn on_release(dc: &mut DocState, p: &PointerInfo) {
     dc.tool_ctl.clear_guides();
     match state {
         ToolState::Idle => {}
+        // Letting go of the pointer does not end a vertex gesture: it ends
+        // when the user says so (a double click, or Enter).
+        ToolState::Placing {
+            page,
+            points,
+            hover,
+        } => {
+            dc.tool_ctl.state = ToolState::Placing {
+                page,
+                points,
+                hover,
+            };
+        }
         ToolState::Creating {
             page,
             start,
@@ -396,6 +521,13 @@ pub fn on_release(dc: &mut DocState, p: &PointerInfo) {
                 ),
                 ActiveTool::Rect => (AnnotationKind::Rect, dc.current_style),
                 ActiveTool::Ellipse => (AnnotationKind::Ellipse, dc.current_style),
+                ActiveTool::Cloud => (
+                    AnnotationKind::Polygon {
+                        points: rect_points(rect),
+                        cloudy: Some(DEFAULT_CLOUD_INTENSITY),
+                    },
+                    dc.current_style,
+                ),
                 ActiveTool::Line | ActiveTool::Arrow => (
                     AnnotationKind::Line {
                         p1: start,
@@ -460,6 +592,74 @@ pub fn on_release(dc: &mut DocState, p: &PointerInfo) {
     let _ = p;
 }
 
+/// The pointer moved over a page with no button down.
+///
+/// Only the vertex tools care: the segment from the last placed vertex to the
+/// cursor is what tells the user where the next click will land.
+pub fn on_hover(dc: &mut DocState, page: usize, pos: PdfPoint) {
+    if let ToolState::Placing {
+        page: placing,
+        hover,
+        ..
+    } = &mut dc.tool_ctl.state
+        && *placing == page
+    {
+        *hover = pos;
+    }
+}
+
+/// Finish a vertex gesture (double click, or Enter), turning the vertices
+/// placed so far into an annotation. Returns whether one was made.
+///
+/// Too few vertices is not an error to report -- a stray double click on the
+/// page is a slip, and the shape is simply abandoned.
+pub fn finish_placement(dc: &mut DocState) -> bool {
+    let ToolState::Placing { page, points, .. } =
+        std::mem::replace(&mut dc.tool_ctl.state, ToolState::Idle)
+    else {
+        return false;
+    };
+    dc.tool_ctl.clear_guides();
+    // A double click puts the same vertex down twice; the second one is the
+    // instruction to stop, not a corner.
+    let mut points = points;
+    while points.len() >= 2 {
+        let last = points[points.len() - 1];
+        let before = points[points.len() - 2];
+        if (last.x - before.x).abs() < 0.5 && (last.y - before.y).abs() < 0.5 {
+            points.pop();
+        } else {
+            break;
+        }
+    }
+    if points.len() < dc.tool.least_vertices() {
+        return false;
+    }
+    let kind = match dc.tool {
+        ActiveTool::Polygon => AnnotationKind::Polygon {
+            points: points.clone(),
+            cloudy: None,
+        },
+        ActiveTool::PolyLine => AnnotationKind::PolyLine {
+            points: points.clone(),
+            arrow_end: false,
+        },
+        _ => return false,
+    };
+    let id = dc.store.alloc_id();
+    let ann = Annotation {
+        id,
+        page,
+        kind,
+        rect: pen::bounding_rect(&points),
+        style: dc.current_style,
+    };
+    dc.selection = Some(id);
+    dc.history
+        .apply(Command::AddAnnotation(ann), &mut dc.store, &mut dc.pages);
+    true
+}
+
 /// Cancel any in-flight gesture (Esc).
 pub fn cancel(dc: &mut DocState) {
     let state = std::mem::replace(&mut dc.tool_ctl.state, ToolState::Idle);
@@ -488,5 +688,228 @@ fn constrain(start: PdfPoint, pos: PdfPoint, tool: ActiveTool) -> PdfPoint {
             let side = dx.abs().max(dy.abs());
             PdfPoint::new(start.x + side * dx.signum(), start.y + side * dy.signum())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::doc::history::Command;
+    use crate::render::engine::EnginePref;
+    use eframe::egui;
+
+    fn doc_state() -> DocState {
+        let ctx = egui::Context::default();
+        let bytes = std::fs::read("tests/fixtures/sample.pdf").expect("fixture");
+        let doc = crate::doc::Document::load_bytes(bytes, None).expect("load");
+        DocState::new(doc, &ctx, EnginePref::Hayro)
+    }
+
+    fn at(x: f32, y: f32) -> PointerInfo {
+        PointerInfo {
+            page: 0,
+            pos: PdfPoint::new(x, y),
+            modifiers: Modifiers::NONE,
+            tol: 4.0,
+            page_w: 612.0,
+            page_h: 792.0,
+        }
+    }
+
+    /// One click is one vertex: the click arrives as a press and a release
+    /// together (that is how the canvas routes it), and neither may end the
+    /// shape -- only the user saying so does.
+    fn click(dc: &mut DocState, x: f32, y: f32) {
+        let p = at(x, y);
+        on_press(dc, &p);
+        on_release(dc, &p);
+    }
+
+    #[test]
+    fn clicking_out_a_polygon_makes_one_annotation_and_one_undo_step() {
+        let mut dc = doc_state();
+        dc.tool = ActiveTool::Polygon;
+        click(&mut dc, 100.0, 100.0);
+        click(&mut dc, 200.0, 100.0);
+        assert!(
+            dc.store.on_page(0).next().is_none(),
+            "nothing exists until the shape is finished"
+        );
+        assert!(
+            matches!(&dc.tool_ctl.state, ToolState::Placing { points, .. } if points.len() == 2)
+        );
+
+        // Two vertices are not a polygon.
+        assert!(!finish_placement(&mut dc));
+        assert!(dc.store.on_page(0).next().is_none());
+
+        dc.tool_ctl.state = ToolState::Idle;
+        click(&mut dc, 100.0, 100.0);
+        click(&mut dc, 200.0, 100.0);
+        click(&mut dc, 150.0, 200.0);
+        assert!(finish_placement(&mut dc));
+
+        let made = dc.store.on_page(0).next().expect("a polygon").clone();
+        match &made.kind {
+            AnnotationKind::Polygon { points, cloudy } => {
+                assert_eq!(points.len(), 3);
+                assert_eq!(*cloudy, None, "the Polygon tool draws a plain outline");
+            }
+            other => panic!("got {other:?}"),
+        }
+        assert_eq!(made.rect.min.x, 100.0);
+        assert_eq!(made.rect.max.y, 200.0);
+        assert_eq!(dc.selection, Some(made.id));
+
+        // One undo takes the whole shape back, and redo brings it back whole.
+        assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
+        assert!(dc.store.get(made.id).is_none());
+        assert!(dc.history.redo(&mut dc.store, &mut dc.pages));
+        assert_eq!(dc.store.get(made.id), Some(&made));
+    }
+
+    /// A double click puts the same vertex down twice before it says "done";
+    /// the repeat is the instruction, not a corner.
+    #[test]
+    fn finishing_on_a_repeated_vertex_does_not_keep_it() {
+        let mut dc = doc_state();
+        dc.tool = ActiveTool::PolyLine;
+        click(&mut dc, 100.0, 100.0);
+        click(&mut dc, 200.0, 150.0);
+        click(&mut dc, 200.0, 150.0);
+        assert!(finish_placement(&mut dc));
+        let made = dc.store.on_page(0).next().expect("a polyline");
+        match &made.kind {
+            AnnotationKind::PolyLine { points, arrow_end } => {
+                assert_eq!(points.len(), 2, "{points:?}");
+                assert!(!arrow_end, "the arrowhead is off until asked for");
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn escape_abandons_the_vertices_placed_so_far() {
+        let mut dc = doc_state();
+        dc.tool = ActiveTool::Polygon;
+        click(&mut dc, 10.0, 10.0);
+        click(&mut dc, 90.0, 10.0);
+        cancel(&mut dc);
+        assert!(matches!(dc.tool_ctl.state, ToolState::Idle));
+        assert!(dc.store.on_page(0).next().is_none());
+        assert!(!dc.history.can_undo(), "an abandoned shape is not history");
+    }
+
+    /// The Cloud tool is the rectangle drag everybody already knows, and what
+    /// it leaves behind is a four-cornered cloudy polygon.
+    #[test]
+    fn dragging_the_cloud_tool_leaves_a_cloudy_rectangle() {
+        let mut dc = doc_state();
+        dc.tool = ActiveTool::Cloud;
+        on_press(&mut dc, &at(100.0, 100.0));
+        on_drag(&mut dc, &at(300.0, 220.0));
+        on_release(&mut dc, &at(300.0, 220.0));
+
+        let made = dc.store.on_page(0).next().expect("a cloud").clone();
+        match &made.kind {
+            AnnotationKind::Polygon { points, cloudy } => {
+                assert_eq!(points.len(), 4);
+                assert_eq!(*cloudy, Some(DEFAULT_CLOUD_INTENSITY));
+                // Counter-clockwise, which is what puts the scallops outside.
+                assert_eq!(points[0], PdfPoint::new(made.rect.min.x, made.rect.min.y));
+                assert_eq!(points[1], PdfPoint::new(made.rect.max.x, made.rect.min.y));
+                assert_eq!(points[3], PdfPoint::new(made.rect.min.x, made.rect.max.y));
+            }
+            other => panic!("got {other:?}"),
+        }
+        assert!(dc.history.can_undo());
+    }
+
+    /// Everything that can be done to one of the new shapes has to be
+    /// undoable: making it, moving it, dragging a corner, editing it.
+    #[test]
+    fn moving_and_reshaping_a_polygon_are_undoable() {
+        let mut dc = doc_state();
+        dc.tool = ActiveTool::Polygon;
+        click(&mut dc, 100.0, 100.0);
+        click(&mut dc, 200.0, 100.0);
+        click(&mut dc, 150.0, 200.0);
+        finish_placement(&mut dc);
+        let made = dc.store.on_page(0).next().expect("a polygon").clone();
+
+        // Drag the whole shape with the select tool.
+        dc.tool = ActiveTool::Select;
+        on_press(&mut dc, &at(150.0, 100.0));
+        assert!(matches!(dc.tool_ctl.state, ToolState::Dragging { .. }));
+        on_drag(&mut dc, &at(160.0, 130.0));
+        on_release(&mut dc, &at(160.0, 130.0));
+        let moved = dc.store.get(made.id).expect("still there").clone();
+        assert_ne!(moved, made, "the drag moved it");
+        let first = moved.kind.points().expect("points")[0];
+        assert!((first.y - 130.0).abs() < 1.0, "{first:?}");
+
+        // Drag one vertex.
+        on_press(&mut dc, &at(first.x, first.y));
+        assert!(
+            matches!(
+                dc.tool_ctl.state,
+                ToolState::Resizing {
+                    handle: crate::tools::select::Handle::Vertex(0),
+                    ..
+                }
+            ),
+            "a corner is grabbed by its own handle"
+        );
+        on_drag(&mut dc, &at(first.x - 40.0, first.y - 40.0));
+        on_release(&mut dc, &at(first.x - 40.0, first.y - 40.0));
+        let reshaped = dc.store.get(made.id).expect("still there").clone();
+        assert_ne!(reshaped, moved);
+        assert!(reshaped.rect.min.x < moved.rect.min.x, "the box followed");
+
+        // And the whole session unwinds, step by step, back to nothing.
+        for expected in [Some(moved), Some(made), None] {
+            dc.history.undo(&mut dc.store, &mut dc.pages);
+            assert_eq!(dc.store.get(1).cloned(), expected);
+        }
+        assert!(!dc.history.can_undo());
+    }
+
+    /// Changing the cloudiness is an ordinary annotation edit, so the history
+    /// machinery carries it with no help from the new kinds.
+    #[test]
+    fn turning_a_cloud_off_and_on_again_is_undoable() {
+        let mut dc = doc_state();
+        let id = dc.store.alloc_id();
+        let ann = Annotation {
+            id,
+            page: 0,
+            kind: AnnotationKind::Polygon {
+                points: rect_points(PdfRect::from_points(
+                    PdfPoint::new(10.0, 10.0),
+                    PdfPoint::new(90.0, 60.0),
+                )),
+                cloudy: Some(DEFAULT_CLOUD_INTENSITY),
+            },
+            rect: PdfRect::from_points(PdfPoint::new(10.0, 10.0), PdfPoint::new(90.0, 60.0)),
+            style: dc.current_style,
+        };
+        dc.history.apply(
+            Command::AddAnnotation(ann.clone()),
+            &mut dc.store,
+            &mut dc.pages,
+        );
+
+        let mut plain = ann.clone();
+        if let AnnotationKind::Polygon { cloudy, .. } = &mut plain.kind {
+            *cloudy = None;
+        }
+        dc.store.replace(plain.clone());
+        dc.history.record(Command::ModifyAnnotation {
+            before: ann.clone(),
+            after: plain,
+        });
+
+        dc.history.undo(&mut dc.store, &mut dc.pages);
+        assert_eq!(dc.store.get(id), Some(&ann), "the scallops came back");
     }
 }

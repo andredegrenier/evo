@@ -247,6 +247,31 @@ fn paint_and_interact(
             paint_annotation(&painter, &t, &preview);
         }
     }
+    // Vertices going down: the outline so far, plus a segment following the
+    // pointer to where the next click would put a corner.
+    if let ToolState::Placing {
+        page,
+        points,
+        hover,
+    } = &dc.tool_ctl.state
+        && let Some(slot) = layout.slots.iter().find(|s| s.original == *page)
+    {
+        let t = transform_for(dc, slot, content_rect);
+        let stroke = Stroke::new(
+            dc.current_style.stroke_width * t.zoom,
+            color32(dc.current_style.stroke, dc.current_style.opacity),
+        );
+        let mut screen: Vec<Pos2> = points.iter().map(|p| t.to_screen(*p)).collect();
+        screen.push(t.to_screen(*hover));
+        if dc.tool == ActiveTool::Polygon && screen.len() >= 3 {
+            painter.add(Shape::closed_line(screen.clone(), stroke));
+        } else if screen.len() >= 2 {
+            painter.add(Shape::line(screen.clone(), stroke));
+        }
+        for p in points {
+            paint_handle(&painter, t.to_screen(*p), 6.0);
+        }
+    }
     if let ToolState::Drawing { page, points } = &dc.tool_ctl.state
         && let Some(slot) = layout.slots.iter().find(|s| s.original == *page)
         && points.len() >= 2
@@ -338,6 +363,13 @@ fn creation_preview(
         ),
         ActiveTool::Rect => (AnnotationKind::Rect, dc.current_style),
         ActiveTool::Ellipse => (AnnotationKind::Ellipse, dc.current_style),
+        ActiveTool::Cloud => (
+            AnnotationKind::Polygon {
+                points: crate::tools::rect_points(rect),
+                cloudy: Some(crate::tools::DEFAULT_CLOUD_INTENSITY),
+            },
+            dc.current_style,
+        ),
         ActiveTool::Line | ActiveTool::Arrow => (
             AnnotationKind::Line {
                 p1: start,
@@ -395,6 +427,32 @@ pub fn paint_annotation(painter: &egui::Painter, t: &PageTransform, ann: &Annota
                 painter.add(Shape::line(screen, stroke));
             }
         }
+        AnnotationKind::Polygon { points, cloudy } => match cloudy {
+            Some(intensity) => paint_cloud(painter, t, points, *intensity, fill, stroke),
+            None => {
+                let screen: Vec<Pos2> = points.iter().map(|p| t.to_screen(*p)).collect();
+                if screen.len() >= 3 {
+                    if ann.style.fill.is_visible() {
+                        painter.add(Shape::convex_polygon(screen.clone(), fill, Stroke::NONE));
+                    }
+                    painter.add(Shape::closed_line(screen, stroke));
+                }
+            }
+        },
+        AnnotationKind::PolyLine { points, arrow_end } => {
+            let screen: Vec<Pos2> = points.iter().map(|p| t.to_screen(*p)).collect();
+            if screen.len() >= 2 {
+                painter.add(Shape::line(screen.clone(), stroke));
+                if *arrow_end {
+                    paint_arrowhead(
+                        painter,
+                        screen[screen.len() - 2],
+                        screen[screen.len() - 1],
+                        stroke,
+                    );
+                }
+            }
+        }
         AnnotationKind::TextBox {
             text,
             font_size,
@@ -417,6 +475,39 @@ pub fn paint_annotation(painter: &egui::Painter, t: &PageTransform, ann: &Annota
             };
             painter.galley(Pos2::new(x, rect.min.y), galley, color);
         }
+    }
+}
+
+/// Draw a cloudy polygon: the base shape's fill, with the scalloped outline
+/// from [`cloud_arcs`](crate::doc::geometry::cloud_arcs) as its edge.
+///
+/// The fill follows the plain outline rather than the scallops, which keeps a
+/// filled cloud one tessellated shape instead of a bump-by-bump patchwork; the
+/// scallops are what the eye reads anyway.
+fn paint_cloud(
+    painter: &egui::Painter,
+    t: &PageTransform,
+    points: &[crate::doc::geometry::PdfPoint],
+    intensity: f32,
+    fill: Color32,
+    stroke: Stroke,
+) {
+    if fill.a() > 0 && points.len() >= 3 {
+        let screen: Vec<Pos2> = points.iter().map(|p| t.to_screen(*p)).collect();
+        painter.add(Shape::convex_polygon(screen, fill, Stroke::NONE));
+    }
+    for arc in crate::doc::geometry::cloud_arcs(points, intensity) {
+        painter.add(epaint::CubicBezierShape::from_points_stroke(
+            [
+                t.to_screen(arc.from),
+                t.to_screen(arc.c1),
+                t.to_screen(arc.c2),
+                t.to_screen(arc.to),
+            ],
+            false,
+            Color32::TRANSPARENT,
+            stroke,
+        ));
     }
 }
 
@@ -446,6 +537,17 @@ fn paint_selection(painter: &egui::Painter, t: &PageTransform, ann: &Annotation)
         for p in [p1, p2] {
             let center = t.to_screen(*p);
             paint_handle(painter, center, handle_px);
+        }
+        return;
+    }
+
+    // Point-list shapes are edited vertex by vertex, so that is where the
+    // handles go -- a bounding box would only offer to stretch them.
+    if let AnnotationKind::Polygon { points, .. } | AnnotationKind::PolyLine { points, .. } =
+        &ann.kind
+    {
+        for p in points {
+            paint_handle(painter, t.to_screen(*p), handle_px);
         }
         return;
     }
@@ -518,6 +620,24 @@ fn route_pointer(
                 .contains(pos)
         })
     };
+
+    // While vertices are going down, the pointer's own position is part of the
+    // drawing: it is where the next corner would land.
+    if dc.tool.places_vertices()
+        && let Some(pos) = response
+            .hover_pos()
+            .or_else(|| response.interact_pointer_pos())
+        && let Some(slot) = slot_at(pos)
+    {
+        let p = pointer_info_at(dc, slot, content_rect, pos, modifiers);
+        tools::on_hover(dc, p.page, p.pos);
+    }
+
+    // A second click in the same place says the shape is finished.
+    if response.double_clicked() && dc.tool.places_vertices() {
+        tools::finish_placement(dc);
+        return;
+    }
 
     // Double-click a text box to edit it.
     if response.double_clicked()
@@ -726,4 +846,102 @@ fn paint_rotated_texture(
     }
     mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
     painter.add(Shape::mesh(mesh));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::doc::annotation::{Annotation, Style};
+    use crate::doc::geometry::{PdfPoint, PdfRect};
+    use crate::tools::ToolState;
+
+    fn state(ctx: &egui::Context) -> DocState {
+        let bytes = std::fs::read("tests/fixtures/sample.pdf").expect("fixture");
+        let doc = crate::doc::Document::load_bytes(bytes, None).expect("load");
+        DocState::new(doc, ctx, crate::render::engine::EnginePref::Hayro)
+    }
+
+    fn one_frame(dc: &mut DocState) {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(900.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            poll_worker(dc, ui.ctx());
+            show(ui, dc);
+        });
+    }
+
+    /// One real frame with every new shape on the page: painted, selected,
+    /// and half-placed. Curves, closed outlines and vertex handles all go
+    /// through egui's tessellator, which has opinions about degenerate paths.
+    #[test]
+    fn a_frame_with_polygons_clouds_and_a_shape_being_placed_draws() {
+        let ctx = egui::Context::default();
+        let mut dc = state(&ctx);
+        let triangle = vec![
+            PdfPoint::new(100.0, 600.0),
+            PdfPoint::new(300.0, 600.0),
+            PdfPoint::new(200.0, 700.0),
+        ];
+        let kinds = [
+            AnnotationKind::Polygon {
+                points: triangle.clone(),
+                cloudy: None,
+            },
+            AnnotationKind::Polygon {
+                points: triangle.clone(),
+                cloudy: Some(2.0),
+            },
+            AnnotationKind::PolyLine {
+                points: triangle.clone(),
+                arrow_end: true,
+            },
+            // Nothing anybody would draw on purpose, and nothing that may take
+            // a frame down either.
+            AnnotationKind::Polygon {
+                points: vec![PdfPoint::new(50.0, 50.0)],
+                cloudy: Some(1.0),
+            },
+            AnnotationKind::PolyLine {
+                points: Vec::new(),
+                arrow_end: true,
+            },
+        ];
+        for kind in kinds {
+            let id = dc.store.alloc_id();
+            dc.store.insert(Annotation {
+                id,
+                page: 0,
+                kind,
+                rect: PdfRect::from_points(
+                    PdfPoint::new(100.0, 600.0),
+                    PdfPoint::new(300.0, 700.0),
+                ),
+                style: Style {
+                    fill: crate::doc::annotation::Color::rgba(0, 0, 255, 60),
+                    ..Style::default()
+                },
+            });
+        }
+
+        // Selected: the vertex handles are painted too.
+        dc.selection = Some(2);
+        one_frame(&mut dc);
+
+        // And mid-gesture, with the rubber-band segment following the cursor.
+        dc.selection = None;
+        dc.tool = crate::tools::ActiveTool::Polygon;
+        dc.tool_ctl.state = ToolState::Placing {
+            page: 0,
+            points: vec![PdfPoint::new(72.0, 100.0), PdfPoint::new(200.0, 140.0)],
+            hover: PdfPoint::new(240.0, 90.0),
+        };
+        one_frame(&mut dc);
+        assert_eq!(dc.store.on_page(0).count(), 5, "drawing changed nothing");
+    }
 }

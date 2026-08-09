@@ -226,6 +226,40 @@ pub(crate) fn write_annotation(g: &mut String, ann: &Annotation, page_h: f32) ->
                 )?;
             }
         }
+        AnnotationKind::Polygon { points, cloudy } => {
+            let d = match cloudy {
+                Some(intensity) => cloud_path(points, *intensity, page_h),
+                None => straight_path(points, true, page_h),
+            };
+            if !d.is_empty() {
+                write!(
+                    g,
+                    "<path d=\"{d}\"{fill_attr}{stroke_attrs} stroke-linejoin=\"round\" opacity=\"{opacity}\"/>"
+                )?;
+            }
+        }
+        AnnotationKind::PolyLine { points, arrow_end } => {
+            let d = straight_path(points, false, page_h);
+            if !d.is_empty() {
+                write!(
+                    g,
+                    "<path d=\"{d}\" fill=\"none\"{stroke_attrs} stroke-linejoin=\"round\" stroke-linecap=\"round\" opacity=\"{opacity}\"/>"
+                )?;
+            }
+            if *arrow_end && points.len() >= 2 {
+                let head = arrowhead(
+                    points[points.len() - 2],
+                    points[points.len() - 1],
+                    style.stroke_width,
+                    page_h,
+                );
+                write!(
+                    g,
+                    "<polygon points=\"{head}\" fill=\"{}\" opacity=\"{opacity}\"/>",
+                    css(style.stroke)
+                )?;
+            }
+        }
         AnnotationKind::TextBox {
             text,
             font_size,
@@ -263,6 +297,48 @@ pub(crate) fn write_annotation(g: &mut String, ann: &Annotation, page_h: f32) ->
         }
     }
     Ok(())
+}
+
+/// A straight `d` through the points, closed for a polygon and left open for a
+/// polyline. Empty when there is nothing to draw.
+fn straight_path(points: &[PdfPoint], close: bool, page_h: f32) -> String {
+    if points.len() < 2 {
+        return String::new();
+    }
+    let sy = |y: f32| page_h - y;
+    let mut d = format!("M {} {}", points[0].x, sy(points[0].y));
+    for p in &points[1..] {
+        let _ = write!(d, " L {} {}", p.x, sy(p.y));
+    }
+    if close {
+        d.push_str(" Z");
+    }
+    d
+}
+
+/// The scalloped `d` of a revision cloud: the same arcs the desktop canvas and
+/// the PDF appearance stream draw, as SVG cubics.
+fn cloud_path(points: &[PdfPoint], intensity: f32, page_h: f32) -> String {
+    let arcs = crate::doc::geometry::cloud_arcs(points, intensity);
+    if arcs.is_empty() {
+        return straight_path(points, true, page_h);
+    }
+    let sy = |y: f32| page_h - y;
+    let mut d = format!("M {} {}", arcs[0].from.x, sy(arcs[0].from.y));
+    for arc in &arcs {
+        let _ = write!(
+            d,
+            " C {} {} {} {} {} {}",
+            arc.c1.x,
+            sy(arc.c1.y),
+            arc.c2.x,
+            sy(arc.c2.y),
+            arc.to.x,
+            sy(arc.to.y)
+        );
+    }
+    d.push_str(" Z");
+    d
 }
 
 fn arrowhead(p1: PdfPoint, p2: PdfPoint, width: f32, page_h: f32) -> String {
@@ -356,6 +432,75 @@ mod tests {
         // one, and an empty group is cheaper to draw than a special case.
         let empty = svg_overlay(&[], 200.0, 400.0);
         assert!(empty.contains("<g id=\"evo-markup\"></g>"), "{empty}");
+    }
+
+    /// The overlay is how the new shapes reach a phone: the browser never
+    /// learns what a polygon is, it is handed a path. Both kinds have to draw,
+    /// and a cloud has to arrive as curves rather than as straight edges.
+    #[test]
+    fn polygons_and_polylines_reach_the_overlay_as_paths() {
+        let points = vec![
+            PdfPoint::new(100.0, 700.0),
+            PdfPoint::new(200.0, 700.0),
+            PdfPoint::new(150.0, 760.0),
+        ];
+        let make = |id: u64, kind: AnnotationKind| Annotation {
+            id,
+            page: 0,
+            kind,
+            rect: PdfRect::from_points(PdfPoint::new(100.0, 700.0), PdfPoint::new(200.0, 760.0)),
+            style: Style::default(),
+        };
+
+        let plain = svg_overlay(
+            &[make(
+                1,
+                AnnotationKind::Polygon {
+                    points: points.clone(),
+                    cloudy: None,
+                },
+            )],
+            612.0,
+            792.0,
+        );
+        // y counted down from the top: 792 - 700.
+        assert!(
+            plain.contains("<path d=\"M 100 92 L 200 92 L 150 32 Z\""),
+            "{plain}"
+        );
+        assert!(!plain.contains(" C "), "a plain polygon has no curves");
+
+        let cloudy = svg_overlay(
+            &[make(
+                2,
+                AnnotationKind::Polygon {
+                    points: points.clone(),
+                    cloudy: Some(1.0),
+                },
+            )],
+            612.0,
+            792.0,
+        );
+        assert!(cloudy.matches(" C ").count() > 12, "no scallops: {cloudy}");
+        assert!(cloudy.ends_with("Z\" fill=\"none\" stroke=\"rgb(220,38,38)\" stroke-width=\"2\" stroke-linejoin=\"round\" opacity=\"1\"/></g></svg>"), "{cloudy}");
+
+        let line = svg_overlay(
+            &[make(
+                3,
+                AnnotationKind::PolyLine {
+                    points,
+                    arrow_end: true,
+                },
+            )],
+            612.0,
+            792.0,
+        );
+        assert!(
+            line.contains("<path d=\"M 100 92 L 200 92 L 150 32\""),
+            "{line}"
+        );
+        assert!(!line.contains(" Z\""), "a polyline is not closed");
+        assert!(line.contains("<polygon points="), "no arrowhead: {line}");
     }
 
     /// The whole trip a highlight drawn on a phone makes, in arithmetic.

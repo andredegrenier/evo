@@ -130,7 +130,15 @@ impl AppBridge {
 const CLOSED: &str = "evo is no longer accepting requests";
 
 /// The markup kinds a caller may ask for, named the way the toolbar names them.
-pub const MARKUP_KINDS: [&str; 6] = ["highlight", "rect", "ellipse", "line", "arrow", "text"];
+pub const MARKUP_KINDS: [&str; 7] = [
+    "highlight",
+    "rect",
+    "ellipse",
+    "cloud",
+    "line",
+    "arrow",
+    "text",
+];
 
 /// Turn a request into an annotation, or say why it is not one.
 ///
@@ -169,6 +177,16 @@ pub fn annotation_from(
         ),
         "rect" | "rectangle" => (AnnotationKind::Rect, stroked(base, color)),
         "ellipse" | "circle" | "oval" => (AnnotationKind::Ellipse, stroked(base, color)),
+        // A revision cloud is the rectangle an assistant asked for, drawn with
+        // scalloped edges. The free-form polygon is not offered here: this
+        // request carries two corners and nothing else.
+        "cloud" | "revision cloud" => (
+            AnnotationKind::Polygon {
+                points: crate::tools::rect_points(rect),
+                cloudy: Some(crate::tools::DEFAULT_CLOUD_INTENSITY),
+            },
+            stroked(base, color),
+        ),
         kind @ ("line" | "arrow") => (
             AnnotationKind::Line {
                 p1: PdfPoint::new(req.x0, req.y0),
@@ -368,6 +386,13 @@ mod tests {
                     }
                 )),
                 "text" => assert!(matches!(ann.kind, AnnotationKind::TextBox { .. })),
+                "cloud" => match &ann.kind {
+                    AnnotationKind::Polygon { points, cloudy } => {
+                        assert_eq!(points.len(), 4, "a cloud is drawn round a rectangle");
+                        assert_eq!(*cloudy, Some(crate::tools::DEFAULT_CLOUD_INTENSITY));
+                    }
+                    other => panic!("a cloud came back as {other:?}"),
+                },
                 other => unreachable!("{other}"),
             }
         }

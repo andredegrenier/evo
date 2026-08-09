@@ -376,6 +376,32 @@ fn content_ops(info: &PageInfo, ann: &Annotation) -> String {
                 ops.push_str("S\n");
             }
         }
+        AnnotationKind::Polygon { points, cloudy } => {
+            match cloudy {
+                // The scallops are drawn here, in the appearance stream, as
+                // well as declared in `/BE`: a viewer that ignores the border
+                // effect still has to show a cloud rather than a bare box.
+                Some(intensity) => ops.push_str(&cloud_path(info, points, *intensity)),
+                None => ops.push_str(&polygon_path(info, points, true)),
+            }
+            ops.push_str(&format!("{}\n", paint_op(ann)));
+        }
+        AnnotationKind::PolyLine { points, arrow_end } => {
+            ops.push_str(&polygon_path(info, points, false));
+            ops.push_str("S\n");
+            if *arrow_end && points.len() >= 2 {
+                let (ax, ay) = display_to_user(info, points[points.len() - 2]);
+                let (bx, by) = display_to_user(info, points[points.len() - 1]);
+                ops.push_str(&arrowhead_ops(
+                    ax,
+                    ay,
+                    bx,
+                    by,
+                    style.stroke_width,
+                    style.stroke,
+                ));
+            }
+        }
         AnnotationKind::TextBox {
             text,
             font_size,
@@ -385,6 +411,52 @@ fn content_ops(info: &PageInfo, ann: &Annotation) -> String {
         }
     }
     ops.push_str("Q\n");
+    ops
+}
+
+/// A straight path through `points`, closed for a polygon and left open for a
+/// polyline.
+fn polygon_path(info: &PageInfo, points: &[PdfPoint], close: bool) -> String {
+    let mut ops = String::new();
+    for (i, p) in points.iter().enumerate() {
+        let (x, y) = display_to_user(info, *p);
+        ops.push_str(&format!(
+            "{} {} {}\n",
+            fmt(x),
+            fmt(y),
+            if i == 0 { "m" } else { "l" }
+        ));
+    }
+    if close && !points.is_empty() {
+        ops.push_str("h\n");
+    }
+    ops
+}
+
+/// The scalloped outline of a cloudy polygon, as `c` operators.
+fn cloud_path(info: &PageInfo, points: &[PdfPoint], intensity: f32) -> String {
+    let arcs = crate::doc::geometry::cloud_arcs(points, intensity);
+    if arcs.is_empty() {
+        return polygon_path(info, points, true);
+    }
+    let mut ops = String::new();
+    let (sx, sy) = display_to_user(info, arcs[0].from);
+    ops.push_str(&format!("{} {} m\n", fmt(sx), fmt(sy)));
+    for arc in &arcs {
+        let (c1x, c1y) = display_to_user(info, arc.c1);
+        let (c2x, c2y) = display_to_user(info, arc.c2);
+        let (tx, ty) = display_to_user(info, arc.to);
+        ops.push_str(&format!(
+            "{} {} {} {} {} {} c\n",
+            fmt(c1x),
+            fmt(c1y),
+            fmt(c2x),
+            fmt(c2y),
+            fmt(tx),
+            fmt(ty)
+        ));
+    }
+    ops.push_str("h\n");
     ops
 }
 
@@ -696,17 +768,34 @@ fn build_annotation(lo: &mut LoDocument, info: &PageInfo, ann: &Annotation) -> O
     // never clipped, even if `rect` is stale for line/pen shapes.
     let geom_rect = match &ann.kind {
         AnnotationKind::Line { p1, p2, .. } => crate::doc::geometry::PdfRect::from_points(*p1, *p2),
-        AnnotationKind::Freehand { points } => crate::tools::pen::bounding_rect(points),
-        _ => ann.rect,
+        kind => match kind.points() {
+            Some(points) => crate::tools::pen::bounding_rect(points),
+            None => ann.rect,
+        },
     };
     let r = user_rect(info, geom_rect);
     let mut pad = ann.style.stroke_width.max(1.0);
-    if let AnnotationKind::Line {
-        arrow_end: true, ..
-    } = &ann.kind
-    {
+    if matches!(
+        &ann.kind,
+        AnnotationKind::Line {
+            arrow_end: true,
+            ..
+        } | AnnotationKind::PolyLine {
+            arrow_end: true,
+            ..
+        }
+    ) {
         // Arrowheads extend perpendicular to the line beyond the stroke.
         pad = pad.max((ann.style.stroke_width * 4.0).max(8.0) * 0.6 + 1.0);
+    }
+    if let AnnotationKind::Polygon {
+        cloudy: Some(intensity),
+        ..
+    } = &ann.kind
+    {
+        // The scallops stand a whole radius outside the vertices; a box drawn
+        // round the vertices alone would shave the bumps off.
+        pad += crate::doc::geometry::cloud_radius(*intensity);
     }
     // /Rect and the form BBox are kept identical so viewers map the
     // appearance 1:1 with no scaling.
@@ -752,6 +841,8 @@ fn build_annotation(lo: &mut LoDocument, info: &PageInfo, ann: &Annotation) -> O
         AnnotationKind::Line { .. } => "Line",
         AnnotationKind::Freehand { .. } => "Ink",
         AnnotationKind::TextBox { .. } => "FreeText",
+        AnnotationKind::Polygon { .. } => "Polygon",
+        AnnotationKind::PolyLine { .. } => "PolyLine",
     };
 
     let mut dict = dictionary! {
@@ -842,6 +933,49 @@ fn build_annotation(lo: &mut LoDocument, info: &PageInfo, ann: &Annotation) -> O
                 );
             }
         }
+        AnnotationKind::Polygon { points, cloudy } => {
+            dict.set("Vertices", vertices(info, points));
+            if ann.style.fill.is_visible() {
+                dict.set("IC", color_array(ann.style.fill));
+            }
+            if ann.style.stroke_width > 0.0 {
+                dict.set(
+                    "BS",
+                    dictionary! { "W" => Object::Real(ann.style.stroke_width) },
+                );
+            }
+            if let Some(intensity) = cloudy {
+                // ISO 32000-1 12.5.6.9: a cloudy border effect at this
+                // intensity. Acrobat and Bluebeam both write the /IT alongside
+                // it, and both read it back as "this is a revision cloud".
+                dict.set(
+                    "BE",
+                    dictionary! {
+                        "S" => Object::Name(b"C".to_vec()),
+                        "I" => Object::Real(crate::doc::geometry::clamp_cloud_intensity(*intensity)),
+                    },
+                );
+                dict.set("IT", Object::Name(b"PolygonCloud".to_vec()));
+            }
+        }
+        AnnotationKind::PolyLine { points, arrow_end } => {
+            dict.set("Vertices", vertices(info, points));
+            if *arrow_end {
+                dict.set(
+                    "LE",
+                    vec![
+                        Object::Name(b"None".to_vec()),
+                        Object::Name(b"OpenArrow".to_vec()),
+                    ],
+                );
+            }
+            if ann.style.stroke_width > 0.0 {
+                dict.set(
+                    "BS",
+                    dictionary! { "W" => Object::Real(ann.style.stroke_width) },
+                );
+            }
+        }
         AnnotationKind::TextBox {
             text,
             font_size,
@@ -871,6 +1005,18 @@ fn build_annotation(lo: &mut LoDocument, info: &PageInfo, ann: &Annotation) -> O
     }
 
     lo.add_object(dict)
+}
+
+/// A point list as the flat `[x1 y1 x2 y2 ...]` array `/Vertices` wants, in
+/// PDF user space.
+fn vertices(info: &PageInfo, points: &[PdfPoint]) -> Vec<Object> {
+    points
+        .iter()
+        .flat_map(|p| {
+            let (x, y) = display_to_user(info, *p);
+            [Object::Real(x), Object::Real(y)]
+        })
+        .collect()
 }
 
 fn merge_gs_resources(existing: Option<Object>, opacity: f32) -> Dictionary {
@@ -1241,6 +1387,190 @@ mod tests {
         assert_eq!(annots.len(), 6);
 
         // hayro can parse the exported file too.
+        assert!(hayro::hayro_syntax::Pdf::new(bytes).is_ok());
+    }
+
+    /// The annotation object for the nth markup on page 1 of an export.
+    fn exported_annot(bytes: &[u8], index: usize) -> Dictionary {
+        let lo = LoDocument::load_mem(bytes).expect("lopdf reopens the export");
+        let page1 = lo.get_pages()[&1];
+        let annots = lo
+            .get_dictionary(page1)
+            .unwrap()
+            .get(b"Annots")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .clone();
+        let id = annots[index].as_reference().expect("a reference");
+        lo.get_dictionary(id).expect("the annotation").clone()
+    }
+
+    fn polygon_store(kinds: Vec<AnnotationKind>) -> AnnotationStore {
+        let mut store = AnnotationStore::default();
+        for kind in kinds {
+            let id = store.alloc_id();
+            let rect = crate::tools::pen::bounding_rect(kind.points().expect("points"));
+            store.insert(Annotation {
+                id,
+                page: 0,
+                kind,
+                rect,
+                style: Style::default(),
+            });
+        }
+        store
+    }
+
+    fn triangle() -> Vec<PdfPoint> {
+        vec![
+            PdfPoint::new(100.0, 400.0),
+            PdfPoint::new(300.0, 400.0),
+            PdfPoint::new(200.0, 520.0),
+        ]
+    }
+
+    /// A polygon and a cloud have to leave as the PDF annotations every other
+    /// viewer knows -- `/Polygon` with `/Vertices`, and the cloudy one wearing
+    /// the border effect Acrobat and Bluebeam write -- and the file has to
+    /// still parse afterwards.
+    #[test]
+    fn exports_polygons_and_clouds_as_real_annotations() {
+        let doc = fixture();
+        let pages = PageList::new(doc.pages.len());
+        let store = polygon_store(vec![
+            AnnotationKind::Polygon {
+                points: triangle(),
+                cloudy: None,
+            },
+            AnnotationKind::Polygon {
+                points: triangle(),
+                cloudy: Some(1.5),
+            },
+        ]);
+
+        let bytes = export_pdf_bytes(&doc, &pages, &store, ExportOptions::default()).unwrap();
+
+        let plain = exported_annot(&bytes, 0);
+        assert_eq!(
+            plain.get(b"Subtype").unwrap().as_name().unwrap(),
+            b"Polygon"
+        );
+        let verts = plain.get(b"Vertices").unwrap().as_array().unwrap();
+        assert_eq!(verts.len(), 6, "three points, two numbers each");
+        assert_eq!(verts[0].as_float().unwrap(), 100.0);
+        assert_eq!(verts[1].as_float().unwrap(), 400.0);
+        assert!(plain.get(b"BE").is_err(), "a plain polygon has no cloud");
+
+        let cloud = exported_annot(&bytes, 1);
+        assert_eq!(
+            cloud.get(b"Subtype").unwrap().as_name().unwrap(),
+            b"Polygon"
+        );
+        assert_eq!(
+            cloud.get(b"IT").unwrap().as_name().unwrap(),
+            b"PolygonCloud"
+        );
+        let be = cloud.get(b"BE").unwrap().as_dict().unwrap();
+        assert_eq!(be.get(b"S").unwrap().as_name().unwrap(), b"C");
+        assert!((be.get(b"I").unwrap().as_float().unwrap() - 1.5).abs() < 1e-4);
+
+        // The scallops are in the appearance stream too, so a viewer that
+        // ignores /BE still shows a cloud rather than a triangle.
+        let lo = LoDocument::load_mem(&bytes).unwrap();
+        let ap = cloud
+            .get(b"AP")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"N")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        let stream = lo.get_object(ap).unwrap().as_stream().unwrap();
+        let ops = String::from_utf8_lossy(&stream.content).into_owned();
+        assert!(ops.matches(" c\n").count() > 12, "no scallops in: {ops}");
+
+        // The bumps stand outside the vertices; /Rect has to hold them.
+        let rect = cloud.get(b"Rect").unwrap().as_array().unwrap();
+        assert!(rect[0].as_float().unwrap() < 100.0 - 5.0, "{rect:?}");
+
+        // And the whole file still parses, with hayro as well as lopdf.
+        assert!(hayro::hayro_syntax::Pdf::new(bytes).is_ok());
+    }
+
+    /// A polyline is `/PolyLine` with its own vertices, and an arrow-ended one
+    /// says so in `/LE` the way a `/Line` does.
+    #[test]
+    fn exports_polylines_with_their_line_endings() {
+        let doc = fixture();
+        let pages = PageList::new(doc.pages.len());
+        let store = polygon_store(vec![
+            AnnotationKind::PolyLine {
+                points: triangle(),
+                arrow_end: false,
+            },
+            AnnotationKind::PolyLine {
+                points: triangle(),
+                arrow_end: true,
+            },
+        ]);
+
+        let bytes = export_pdf_bytes(&doc, &pages, &store, ExportOptions::default()).unwrap();
+
+        let plain = exported_annot(&bytes, 0);
+        assert_eq!(
+            plain.get(b"Subtype").unwrap().as_name().unwrap(),
+            b"PolyLine"
+        );
+        assert_eq!(plain.get(b"Vertices").unwrap().as_array().unwrap().len(), 6);
+        assert!(plain.get(b"LE").is_err());
+
+        let arrowed = exported_annot(&bytes, 1);
+        let ends = arrowed.get(b"LE").unwrap().as_array().unwrap();
+        assert_eq!(ends[0].as_name().unwrap(), b"None");
+        assert_eq!(ends[1].as_name().unwrap(), b"OpenArrow");
+
+        assert!(hayro::hayro_syntax::Pdf::new(bytes).is_ok());
+    }
+
+    /// Flattening bakes the same shapes into the page instead, so a cloud
+    /// printed from a flattened export is still a cloud.
+    #[test]
+    fn flattening_bakes_the_new_shapes_into_the_page() {
+        let doc = fixture();
+        let pages = PageList::new(doc.pages.len());
+        let store = polygon_store(vec![
+            AnnotationKind::Polygon {
+                points: triangle(),
+                cloudy: Some(2.0),
+            },
+            AnnotationKind::PolyLine {
+                points: triangle(),
+                arrow_end: true,
+            },
+        ]);
+
+        let bytes = export_pdf_bytes(
+            &doc,
+            &pages,
+            &store,
+            ExportOptions {
+                flatten: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let lo = LoDocument::load_mem(&bytes).unwrap();
+        let page1 = lo.get_pages()[&1];
+        assert!(
+            lo.get_dictionary(page1).unwrap().get(b"Annots").is_err(),
+            "flattening leaves no annotation objects"
+        );
+        let content = String::from_utf8_lossy(&lo.get_page_content(page1)).into_owned();
+        assert!(content.matches(" c\n").count() > 12, "no scallops");
+        assert!(content.contains("h f\n"), "no arrowhead");
         assert!(hayro::hayro_syntax::Pdf::new(bytes).is_ok());
     }
 
