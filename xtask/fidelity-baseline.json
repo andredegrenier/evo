@@ -1,0 +1,5510 @@
+{
+  "scale": 1.5,
+  "max_pages": 5,
+  "platforms": {
+    "macos-aarch64": [
+      {
+        "corpus": "fixtures",
+        "path": "tests/fixtures/encrypted-aes128.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "94846b25cc93fa6ec2fba2897b820bd455853cf361139f84b5a2d9fdc8e6648a",
+            "mean_abs": 0.1096,
+            "frac_off": 0.00225
+          },
+          {
+            "page": 1,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d814c79b8694b886ac70f1c4ec76c76feceea249a537b09e844897ada27e207a",
+            "mean_abs": 0.1022,
+            "frac_off": 0.002191
+          }
+        ]
+      },
+      {
+        "corpus": "fixtures",
+        "path": "tests/fixtures/encrypted-aes256.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "94846b25cc93fa6ec2fba2897b820bd455853cf361139f84b5a2d9fdc8e6648a",
+            "mean_abs": 0.1096,
+            "frac_off": 0.00225
+          },
+          {
+            "page": 1,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d814c79b8694b886ac70f1c4ec76c76feceea249a537b09e844897ada27e207a",
+            "mean_abs": 0.1022,
+            "frac_off": 0.002191
+          }
+        ]
+      },
+      {
+        "corpus": "fixtures",
+        "path": "tests/fixtures/encrypted-empty-user.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "94846b25cc93fa6ec2fba2897b820bd455853cf361139f84b5a2d9fdc8e6648a",
+            "mean_abs": 0.1096,
+            "frac_off": 0.00225
+          },
+          {
+            "page": 1,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d814c79b8694b886ac70f1c4ec76c76feceea249a537b09e844897ada27e207a",
+            "mean_abs": 0.1022,
+            "frac_off": 0.002191
+          }
+        ]
+      },
+      {
+        "corpus": "fixtures",
+        "path": "tests/fixtures/encrypted-rc4.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "94846b25cc93fa6ec2fba2897b820bd455853cf361139f84b5a2d9fdc8e6648a",
+            "mean_abs": 0.1096,
+            "frac_off": 0.00225
+          },
+          {
+            "page": 1,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d814c79b8694b886ac70f1c4ec76c76feceea249a537b09e844897ada27e207a",
+            "mean_abs": 0.1022,
+            "frac_off": 0.002191
+          }
+        ]
+      },
+      {
+        "corpus": "fixtures",
+        "path": "tests/fixtures/sample.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "94846b25cc93fa6ec2fba2897b820bd455853cf361139f84b5a2d9fdc8e6648a",
+            "mean_abs": 0.1096,
+            "frac_off": 0.00225
+          },
+          {
+            "page": 1,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d814c79b8694b886ac70f1c4ec76c76feceea249a537b09e844897ada27e207a",
+            "mean_abs": 0.1022,
+            "frac_off": 0.002191
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "ISO 32000-1/veraPDF test suite 6-2-2-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "db51cba20fa24d621172493195dfc29891cd6fb70249a5d8e202c0e3fda63d3a",
+            "mean_abs": 0.0011,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "ISO 32000-1/veraPDF test suite 6-2-3-2-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "08a786664efc4656a91a22de93c2204c6d82777c7555dda814580f346a72745a",
+            "mean_abs": 0.1806,
+            "frac_off": 0.002688
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "ISO 32000-1/veraPDF test suite 6-8-2-2-t01-fail-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f6e9e9cd4eb3ca38d72f59a0a940cd01ba05bd862204b39fe9f536e7c2f1ba6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "ISO 32000-1/veraPDF test suite 6-8-3-3-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "ISO 32000-1/veraPDF test suite 6-8-3-3-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          },
+          {
+            "page": 1,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "ISO 32000-2/veraPDF test suite 6-1-3-t04-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "bd1cd1b1e60998976b1116f7d0713817a419ce6de5b9a0ff41da851ae0d1f2f8",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1a/6.3 Fonts/6.3.8 Unicode character maps/veraPDF test suite 6-3-8-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "af04322062fe62d91fd9a1bf1f4f62144d665dd60b42220e5e9125d0f21dec87",
+            "mean_abs": 0.0729,
+            "frac_off": 0.001979
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1a/6.3 Fonts/6.3.8 Unicode character maps/veraPDF test suite 6-3-8-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1263,
+            "hayro_sha256": "93d597f3ad6697b289f45ccc1b442851fb478898c3f56eb3c1ec3d90107ca35f",
+            "mean_abs": 0.0031,
+            "frac_off": 0.000043
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1a/6.3 Fonts/6.3.8 Unicode character maps/veraPDF test suite 6-3-8-t01-pass-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "af637d6caa184c2b2403336c9de18b51acfd194b5798c5d728f9532dd9514be9",
+            "mean_abs": 0.0091,
+            "frac_off": 0.00025
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1a/6.3 Fonts/6.3.8 Unicode character maps/veraPDF test suite 6-3-8-t01-pass-i.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1a/6.8 Logical structure/6.8.2 Tagged PDF/6.8.2.2 Mark information dictionary/veraPDF test suite 6-8-2-2-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f6e9e9cd4eb3ca38d72f59a0a940cd01ba05bd862204b39fe9f536e7c2f1ba6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1a/6.8 Logical structure/6.8.3 Artifacts/6.8.3.4 Structure types/veraPDF test suite 6-8-3-4-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f6e9e9cd4eb3ca38d72f59a0a940cd01ba05bd862204b39fe9f536e7c2f1ba6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1a/6.8 Logical structure/6.8.4 Natural language specification/veraPDF test suite 6-8-4-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "2b6b5580d1748fe7b059be76dd7f33eeb9a6d6179576d242d01cafdd7e86b061",
+            "mean_abs": 0.0141,
+            "frac_off": 0.000157
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1a/6.8 Logical structure/6.8.4 Natural language specification/veraPDF test suite 6-8-4-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "2b6b5580d1748fe7b059be76dd7f33eeb9a6d6179576d242d01cafdd7e86b061",
+            "mean_abs": 0.0141,
+            "frac_off": 0.000157
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1a/6.8 Logical structure/6.8.4 Natural language specification/veraPDF test suite 6-8-4-t01-pass-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "2b6b5580d1748fe7b059be76dd7f33eeb9a6d6179576d242d01cafdd7e86b061",
+            "mean_abs": 0.0141,
+            "frac_off": 0.000157
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.10 Content streams/veraPDF test suite 6-2-10-t02-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.2 Output intent/veraPDF test suite 6-2-2-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "008960a832745bbf11faa1a20bab3b945ab5a533fbc446880f8d72554c16f9cf",
+            "mean_abs": 0.0007,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.2 Output intent/veraPDF test suite 6-2-2-t02-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.2 Output intent/veraPDF test suite 6-2-2-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "32c9d144d1f4c5f1b294c533f23de5fc06a095ae823783309cb666007534abe4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.2 Output intent/veraPDF test suite 6-2-2-t03-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.2 ICCBased colour spaces/veraPDF test suite 6-2-3-2-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "ff4075c4666fe43d095f0022b0090cff5a5aea5946aaeb7c9b0363d58702c24d",
+            "mean_abs": 0.0021,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2d0d083bdb367f13ef72ec2c3ac68cc8120cde3f053f32363f8bd0f1d429b9e0",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "4b58b2f8d8966d9ef390f34fd21744172ae694e1f6414f50d0c5b1621dee5cca",
+            "mean_abs": 0.0004,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "caca324bb81700d45a7efb63f4599254e511f969f3edbf5b34a4a1dc7cbb6e60",
+            "mean_abs": 0.0005,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "9291c12489a288c4027bbc6ce7e32a4ce00c5d9876959c3298400fa6fc352136",
+            "mean_abs": 0.034,
+            "frac_off": 0.002007
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "586841947e7e31fa70208a10fd9bc375eb07073a7368f7d7918275fc6c14df8d",
+            "mean_abs": 0.0038,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-f.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "2a7b2fb4ddbf4b438ff3827d4d3a572918156bcd13bdd86094e3b73d966b3a1f",
+            "mean_abs": 0.0061,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-h.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "ae024310b7ecd6e9e456df9fb91d781bb46525d7b15145f09b2393f647149596",
+            "mean_abs": 0.38,
+            "frac_off": 0.005748
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-i.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "ae024310b7ecd6e9e456df9fb91d781bb46525d7b15145f09b2393f647149596",
+            "mean_abs": 0.38,
+            "frac_off": 0.005748
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-j.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "ae024310b7ecd6e9e456df9fb91d781bb46525d7b15145f09b2393f647149596",
+            "mean_abs": 0.38,
+            "frac_off": 0.005748
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-k.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "ae024310b7ecd6e9e456df9fb91d781bb46525d7b15145f09b2393f647149596",
+            "mean_abs": 0.38,
+            "frac_off": 0.005748
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-l.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "754446a16d8a7afd45f878d45db30b3317b5ebd088c02f5b48b74627f1a2a4bb",
+            "mean_abs": 0.3549,
+            "frac_off": 0.005405
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-m.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "754446a16d8a7afd45f878d45db30b3317b5ebd088c02f5b48b74627f1a2a4bb",
+            "mean_abs": 0.3549,
+            "frac_off": 0.005405
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-n.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "754446a16d8a7afd45f878d45db30b3317b5ebd088c02f5b48b74627f1a2a4bb",
+            "mean_abs": 0.3549,
+            "frac_off": 0.005405
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-o.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2977685aca3b4a0e6843ff6b44aaf7b7835af6874551f6ba2cebc63982ea7d06",
+            "mean_abs": 0.0346,
+            "frac_off": 0.001201
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-p.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2977685aca3b4a0e6843ff6b44aaf7b7835af6874551f6ba2cebc63982ea7d06",
+            "mean_abs": 0.0346,
+            "frac_off": 0.001201
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-t.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "910b9aadc526465f938fc48dc7f00f0f9bc8140a77632abf50922caa1f81f77d",
+            "mean_abs": 0.2,
+            "frac_off": 0.003516
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-u.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "831621513b1ab2852d3c38547b160352d7b728eef5c58141cdbd99bcf9aaaeca",
+            "mean_abs": 0.081,
+            "frac_off": 0.002007
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-fail-v.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "7d09a540eaebbae5a50bf9b2fa1af30c0c94900a9ffd29be1c453a7150881855",
+            "mean_abs": 0.0081,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "433133da2c6bb4bbe4e41f084364ffe91e14dcc0b2b424af738aaa9e8fe4dc8c",
+            "mean_abs": 0.0011,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 1333,
+            "height": 1350,
+            "hayro_sha256": "6740713be6475b3c9c1d5b9901268f031749bc65eebdac140b5b0e7ae71e2903",
+            "mean_abs": 0.2445,
+            "frac_off": 0.004375
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t01-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "1c4ee26010a28e3d315b5634bba1c26a8b09790176165ff37b3cbe2332ecda89",
+            "mean_abs": 0.0063,
+            "frac_off": 0.000157
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t02-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "910b9aadc526465f938fc48dc7f00f0f9bc8140a77632abf50922caa1f81f77d",
+            "mean_abs": 0.148,
+            "frac_off": 0.00326
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t02-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "910b9aadc526465f938fc48dc7f00f0f9bc8140a77632abf50922caa1f81f77d",
+            "mean_abs": 0.0236,
+            "frac_off": 0.000868
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t02-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "910b9aadc526465f938fc48dc7f00f0f9bc8140a77632abf50922caa1f81f77d",
+            "mean_abs": 0.0236,
+            "frac_off": 0.000868
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t02-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "2d736b19b8aef03ce3f46ec900d38fb6be091f38118d1679d1bb82f5e77e6f4a",
+            "mean_abs": 0.0046,
+            "frac_off": 0.000157
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t02-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "1bdede32118f27c169cac29b79bc08092ba5d16a766a9b2cf1d32053ac4941a0",
+            "mean_abs": 0.002,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          },
+          {
+            "page": 1,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "40225a4baff5115b23c61ed7e30165e8ceeae02131a59dd82750a9dd9d35a5e7",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "b42b1f0af81154e867ec1647006d7ee146cfb2676e671f2e40dfebadb51f5c61",
+            "mean_abs": 0.0001,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "fe62795b0dddbe30baa0ece222d57aadbcd70df65558d5a5f33ee21b42992e9f",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f6e9e9cd4eb3ca38d72f59a0a940cd01ba05bd862204b39fe9f536e7c2f1ba6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "4f58d689fc4c350b523c087f7d28be0f8ebf5d8a83e7fb365238d597541a2070",
+            "mean_abs": 0.0034,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d6226d8551cc2f17f161466dc7cd5fd1edf6ebc91ce41e175cf8edc56b0c7fda",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2d0d083bdb367f13ef72ec2c3ac68cc8120cde3f053f32363f8bd0f1d429b9e0",
+            "mean_abs": 0.0034,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-f.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 1333,
+            "height": 1350,
+            "hayro_sha256": "6740713be6475b3c9c1d5b9901268f031749bc65eebdac140b5b0e7ae71e2903",
+            "mean_abs": 0.2464,
+            "frac_off": 0.004732
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-g.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "f52ab3e9ecb7b925cd911739551616ee23ebf813915850b3133c5d193685d42d",
+            "mean_abs": 0.1302,
+            "frac_off": 0.003689
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-i.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "fc5cda979a014a2d73e44e1b20b8e45bc0dc3d8fc90c3885ca8e648114ba4fdc",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-j.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "fc5cda979a014a2d73e44e1b20b8e45bc0dc3d8fc90c3885ca8e648114ba4fdc",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.3 Uncalibrated color space/veraPDF test suite 6-2-3-3-t03-pass-k.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "7e003aca3559c1e4d7cc37669db2da11ecd9aedf98c000d8f92c98af0a77c32e",
+            "mean_abs": 0.3632,
+            "frac_off": 0.004432
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.4 Separation and DeviceN colour spaces/veraPDF test suite 6-2-3-4-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "69259855727dd20d82ee3f784007c235e433ab7d29e938eaf8c6b9ba2b328728",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.3.4 Separation and DeviceN colour spaces/veraPDF test suite 6-2-3-4-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "7c396e36519c584fdf868bd0b2fd87a6a02968dc3695e18f0db9f2f69e9b1dde",
+            "mean_abs": 0.143,
+            "frac_off": 0.002545
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.4 Images/veraPDF test suite 6-2-4-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2d0d083bdb367f13ef72ec2c3ac68cc8120cde3f053f32363f8bd0f1d429b9e0",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.4 Images/veraPDF test suite 6-2-4-t03-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 1200,
+            "height": 900,
+            "hayro_sha256": "70f9e520827e27ad84c56f433464c31bc9a7b2d05eb09ff27ebfaf1d7a9dd66b",
+            "mean_abs": 0.8034,
+            "frac_off": 0.021215
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.5 Form XObjects/veraPDF test suite 6-2-5-t02-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.5 Form XObjects/veraPDF test suite 6-2-5-t02-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.5 Form XObjects/veraPDF test suite 6-2-5-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.5 Form XObjects/veraPDF test suite 6-2-5-t03-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.8 Extended graphics state/veraPDF test suite 6-2-8-t02-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "7d358e9124b48e98efe268b7e3eaf96d086fa294bb9a23fa62d017677079c6c7",
+            "mean_abs": 0.0097,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.8 Extended graphics state/veraPDF test suite 6-2-8-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "843aed84c64fdbf596dee190ef6656877561ac1083d57ebbbb305f24dceb82e3",
+            "mean_abs": 0.0007,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.8 Extended graphics state/veraPDF test suite 6-2-8-t03-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "7c84b57f6c73f172c21bd98ba12a774a3472c701186b5c480ad0fb0fcc080509",
+            "mean_abs": 0.0021,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.9 Rendering intents/veraPDF test suite 6-2-9-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2d0d083bdb367f13ef72ec2c3ac68cc8120cde3f053f32363f8bd0f1d429b9e0",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.9 Rendering intents/veraPDF test suite 6-2-9-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "4b7b4e9b860eeb601506a6be27c046453272bf75ee21aab6b60d5814638d88b7",
+            "mean_abs": 0.0021,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.2 Graphics/6.2.9 Rendering intents/veraPDF test suite 6-2-9-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "5a09a4f8cb82bf7d0d7930cd0882747c4fcf06ee9fe40272d5da9a7ce5c5f628",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.3.1 General/veraPDF test suite 6-3-3-1-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "7bfe055c83976043dc7482dd909ee2ed0e885fce46c6f557a3a7baac59e8cba6",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.3.1 General/veraPDF test suite 6-3-3-1-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "7bfe055c83976043dc7482dd909ee2ed0e885fce46c6f557a3a7baac59e8cba6",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.3.1 General/veraPDF test suite 6-3-3-1-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "7bfe055c83976043dc7482dd909ee2ed0e885fce46c6f557a3a7baac59e8cba6",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.3.2 CIDFonts/veraPDF test suite 6-3-3-2-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1263,
+            "hayro_sha256": "d5dc4f972b31efbd47d8a1f4f0cbdb017e5ba6fccdfe45f02e515217b9266e31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.3.2 CIDFonts/veraPDF test suite 6-3-3-2-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1263,
+            "hayro_sha256": "e88501ed83b7c966340d35645bafeb93600cc06fa026b9cb67e834fb3763d88f",
+            "mean_abs": 0.0024,
+            "frac_off": 0.000071
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.5 Font subsets/6-3-5-t02-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "4afb66ba6436b148e53c61465502fcd26696e33829438fc3ffa5bc55ded21bde",
+            "mean_abs": 0.023,
+            "frac_off": 0.000797
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.5 Font subsets/6-3-5-t02-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "4afb66ba6436b148e53c61465502fcd26696e33829438fc3ffa5bc55ded21bde",
+            "mean_abs": 0.023,
+            "frac_off": 0.000797
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.5 Font subsets/6-3-5-t02-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "4afb66ba6436b148e53c61465502fcd26696e33829438fc3ffa5bc55ded21bde",
+            "mean_abs": 0.023,
+            "frac_off": 0.000797
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.5 Font subsets/6-3-5-t02-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "4afb66ba6436b148e53c61465502fcd26696e33829438fc3ffa5bc55ded21bde",
+            "mean_abs": 0.023,
+            "frac_off": 0.000797
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.5 Font subsets/6-3-5-t02-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "4edeaf39d811640f2720d9ffaaf1ada9ad9542ec8304960792451fb76f4635dd",
+            "mean_abs": 0.022,
+            "frac_off": 0.000769
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.5 Font subsets/6-3-5-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.5 Font subsets/6-3-5-t03-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.5 Font subsets/6-3-5-t03-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.6 Font metrics/veraPDF test suite 6-3-6-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "ac0f06ebbf9c0b337f5fa7ef6dc2c3fd59166400321b7da9acd91ffa1f9fd085",
+            "mean_abs": 0.0876,
+            "frac_off": 0.00072
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.3 Fonts/6.3.6 Font metrics/veraPDF test suite 6-3-6-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.4 Transparency/veraPDF test suite 6-4-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.4 Transparency/veraPDF test suite 6-4-t02-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "aa38d60df0ac31994ac2c73e9d356a46d875c09c68da84800f4ca86f75117e31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.4 Transparency/veraPDF test suite 6-4-t03-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "0c1da176ba56776284e3f65843b08937b5bba743a2a6be59014c087b43471a7c",
+            "mean_abs": 0.0011,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.4 Transparency/veraPDF test suite 6-4-t03-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "4d55557c1836c7b5cb6b805e5c5d9c64cb18a6f2b6318b8e5e9fa309614ba9b3",
+            "mean_abs": 0.0018,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.5 Annotations/6.5.3 Annotation dictionaries/veraPDF test suite 6-5-3-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "8f2b05151f665d3567bdba25212294390f4e51c4da133810a21f26e493a0e6e9",
+            "mean_abs": 0.0307,
+            "frac_off": 0.001172
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-1b/6.5 Annotations/6.5.3 Annotation dictionaries/veraPDF test suite 6-5-3-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 1.3094,
+            "frac_off": 0.012611
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2a/6.2 Graphics/6.2.11 Fonts/6.2.11.7 Unicode character maps/6.2.11.7.3 Level A conformance/veraPDF test suite 6-2-11-7-3-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "c2edc0c7cb74d3b68b882d56776444cde9130b74450d6b0ed87d2f21e2e74b4b",
+            "mean_abs": 0.0003,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2a/6.2 Graphics/6.2.11 Fonts/6.2.11.7 Unicode character maps/6.2.11.7.3 Level A conformance/veraPDF test suite 6-2-11-7-3-t01-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "27eb340ad1bdd85f9138678573039dc163a6c7fcc55e56fb28a0d18f425ff8cd",
+            "mean_abs": 0.0069,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2a/6.2 Graphics/6.2.11 Fonts/6.2.11.7 Unicode character maps/6.2.11.7.3 Level A conformance/veraPDF test suite 6-2-11-7-3-t01-pass-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f6e9e9cd4eb3ca38d72f59a0a940cd01ba05bd862204b39fe9f536e7c2f1ba6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2a/6.7 Logical structure/6.7.2 Tagged PDF/6.7.2.2 Mark information dictionary/veraPDF test suite 6-7-2-2-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f6e9e9cd4eb3ca38d72f59a0a940cd01ba05bd862204b39fe9f536e7c2f1ba6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2a/6.7 Logical structure/6.7.3 Artefacts/6.7.3.4 Structure types/veraPDF test suite 6-7-3-4-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f6e9e9cd4eb3ca38d72f59a0a940cd01ba05bd862204b39fe9f536e7c2f1ba6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2a/6.7 Logical structure/6.7.4 Natural language specification/veraPDF test suite 6-7-4-t01-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "886effbda82d46868a9894131d84b73648165e71594eb7518f40087cdaf6c642",
+            "mean_abs": 0.0141,
+            "frac_off": 0.000171
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2a/6.7 Logical structure/6.7.4 Natural language specification/veraPDF test suite 6-7-4-t01-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "886effbda82d46868a9894131d84b73648165e71594eb7518f40087cdaf6c642",
+            "mean_abs": 0.0141,
+            "frac_off": 0.000171
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "07404ef9f377fdb3e2e09d53f720c210582a31aa0d8a4b4f7477fe552482c861",
+            "mean_abs": 0.0095,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t01-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "07404ef9f377fdb3e2e09d53f720c210582a31aa0d8a4b4f7477fe552482c861",
+            "mean_abs": 0.0095,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "07404ef9f377fdb3e2e09d53f720c210582a31aa0d8a4b4f7477fe552482c861",
+            "mean_abs": 0.0095,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t03-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "a1a14834dc80190c20170a77481b2f9a6f13933c3dbb12a4b41ec2d7626a4118",
+            "mean_abs": 0.002,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t03-fail-f.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "07404ef9f377fdb3e2e09d53f720c210582a31aa0d8a4b4f7477fe552482c861",
+            "mean_abs": 0.0095,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t04-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "798bc7660c39dfbe615f9c1a0623547849c0144a215ad63538285ef1e334ea37",
+            "mean_abs": 0.0426,
+            "frac_off": 0.000515
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t04-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "6325947baa479a714aea8a14c7b1648d52d912db22dd2e101c5279a9ee1c0cb1",
+            "mean_abs": 0.0002,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t04-fail-i.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "1693b841762c8e34c0736d8b6227df076dc0e459421275c315084bfd0a642d81",
+            "mean_abs": 0.0001,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t05-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "cfd60368bfb8fe3ba091cd10ed6a89ca96744411835c9b0b016b1053de89955f",
+            "mean_abs": 0.0121,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t05-fail-g.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "240bd060f5e17cf7874018194100169b7fcb5b600c0dc53149bec1c4f86be288",
+            "mean_abs": 0.006,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t06-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 5.6736,
+            "frac_off": 0.218479
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t06-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 5.6736,
+            "frac_off": 0.218479
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t07-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "7d69fb5f5c593f74f5830beb8d1bd28dff8642447c966db67284ce4aeca64c92",
+            "mean_abs": 0.0733,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.10 Transparency/veraPDF test suite 6-2-10-t07-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "7d69fb5f5c593f74f5830beb8d1bd28dff8642447c966db67284ce4aeca64c92",
+            "mean_abs": 0.0733,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.3 Composite fonts/6.2.11.3.1 General/veraPDF test suite 6-2-11-3-1-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.3 Composite fonts/6.2.11.3.1 General/veraPDF test suite 6-2-11-3-1-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.3 Composite fonts/6.2.11.3.2 CIDFonts/veraPDF test suite 6-2-11-3-2-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bb4fefae1bced45f78529a1844e89912262af5a49bff81aa1a214a60f9629d93",
+            "mean_abs": 0.0248,
+            "frac_off": 0.000456
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.3 Composite fonts/6.2.11.3.3 CMaps/veraPDF test suite 6-2-11-3-3-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.3 Composite fonts/6.2.11.3.3 CMaps/veraPDF test suite 6-2-11-3-3-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.4 Embedding/6.2.11.4.1 General/veraPDF test suite 6-2-11-4-1-t01-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "d62284c91be3af2d524450028d003114717f6a44feae55920ae3eff3f5b89a8c",
+            "mean_abs": 0.2774,
+            "frac_off": 0.005452
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.4 Embedding/6.2.11.4.1 General/veraPDF test suite 6-2-11-4-1-t02-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "910b9aadc526465f938fc48dc7f00f0f9bc8140a77632abf50922caa1f81f77d",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.4 Embedding/6.2.11.4.2 Subset embedding/veraPDF test suite 6-2-11-4-2-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "3eb8f06f049a1a87e2dab391ab80e857b2468c8aa160eae2d8ec44e18db6369e",
+            "mean_abs": 0.0096,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.5 Font metrics/veraPDF test suite 6-2-11-5-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "100d62abbb1254beb4044840b8edfc75d8a506ea1664f190f490698cbc857582",
+            "mean_abs": 0.0042,
+            "frac_off": 0.000028
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.5 Font metrics/veraPDF test suite 6-2-11-5-t01-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "8b37afb3f2ee3278902a592c9046d5b96f8f45cf3ef74b35a647bb5f653f0a09",
+            "mean_abs": 0.0098,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.6 Character encodings/veraPDF test suite 6-2-11-6-t02-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "cd50bfa868751c50fb3dd393cbe537c2ddda0f1b90a275d7667665613c55f08d",
+            "mean_abs": 0.0504,
+            "frac_off": 0.000265
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.6 Character encodings/veraPDF test suite 6-2-11-6-t02-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "cd50bfa868751c50fb3dd393cbe537c2ddda0f1b90a275d7667665613c55f08d",
+            "mean_abs": 0.0504,
+            "frac_off": 0.000265
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.11 Fonts/6.2.11.8 Use of .notdef glyph/veraPDF test suite 6-2-11-8-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "b724fc0768c5f336b76f01adaa7f681a395649fa0a2db0495339d2d67ec693b5",
+            "mean_abs": 0.0087,
+            "frac_off": 0.000142
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.2 Content streams/veraPDF test suite 6-2-2-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "fc5cda979a014a2d73e44e1b20b8e45bc0dc3d8fc90c3885ca8e648114ba4fdc",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.2 Content streams/veraPDF test suite 6-2-2-t02-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "5dc84461b81f295389e3dfdd70bef8ea7a28d304b0f13116989b088625e0163a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.2 Content streams/veraPDF test suite 6-2-2-t04-fail-f.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f1b9a08b01a56318a60e914e860bcc63cd45a1ccc2b03d25926d752e11e8e1ef",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.3 Output intent/veraPDF test suite 6-2-3-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "eb33a8107681c9453850a14ddfb28651c0cb8b66f197440252bd84d01c886f62",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.3 Output intent/veraPDF test suite 6-2-3-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "eb33a8107681c9453850a14ddfb28651c0cb8b66f197440252bd84d01c886f62",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.3 Output intent/veraPDF test suite 6-2-3-t03-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.2 ICCBased colour spaces/veraPDF test suite 6-2-4-2-t02-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "2ec6f5f55c95463715ef56fcaa6ec30f5ff1bc285d646e83b6ceae8434948937",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "db47225843edf8d4108d0dfd35762b57919336f07990b6a1201a86f71c1e683e",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t01-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2d0d083bdb367f13ef72ec2c3ac68cc8120cde3f053f32363f8bd0f1d429b9e0",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t01-fail-i.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          },
+          {
+            "page": 1,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "40225a4baff5115b23c61ed7e30165e8ceeae02131a59dd82750a9dd9d35a5e7",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t01-fail-m.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2d0d083bdb367f13ef72ec2c3ac68cc8120cde3f053f32363f8bd0f1d429b9e0",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t01-fail-q.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "586841947e7e31fa70208a10fd9bc375eb07073a7368f7d7918275fc6c14df8d",
+            "mean_abs": 0.0038,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "1c4ee26010a28e3d315b5634bba1c26a8b09790176165ff37b3cbe2332ecda89",
+            "mean_abs": 0.0063,
+            "frac_off": 0.000157
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t01-pass-g.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f6e9e9cd4eb3ca38d72f59a0a940cd01ba05bd862204b39fe9f536e7c2f1ba6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t02-fail-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "7620a1bfedfff6e6cbbf95f2943173f589c55edb1dc20ab3c3ae89e55509930e",
+            "mean_abs": 0.0621,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t02-fail-h.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "f52ab3e9ecb7b925cd911739551616ee23ebf813915850b3133c5d193685d42d",
+            "mean_abs": 0.1454,
+            "frac_off": 0.004318
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t02-pass-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 24.7656,
+            "frac_off": 0.444708
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t03-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "7280e613232a2880d2b550176233792c5230fbcafc49ac913c5a136193b0507f",
+            "mean_abs": 0.0452,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t03-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "b6425b7a529bd2c2ca5c3c8c99efa1eacb8441ada5d43195cff1f493fc5096f3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.4 Separation and DeviceN colour spaces/veraPDF test suite 6-2-4-4-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "9903fc285c6500f94122a12cf07d0e9ca1700b22e5b800d54881c14eb2403b34",
+            "mean_abs": 0.0095,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.4 Separation and DeviceN colour spaces/veraPDF test suite 6-2-4-4-t01-fail-f.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "1508242ea17c0583803cbf145495d89f12680c04ee4c9ffb896bfa33eb692631",
+            "mean_abs": 1.6442,
+            "frac_off": 0.011189
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.4 Separation and DeviceN colour spaces/veraPDF test suite 6-2-4-4-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "1508242ea17c0583803cbf145495d89f12680c04ee4c9ffb896bfa33eb692631",
+            "mean_abs": 1.6442,
+            "frac_off": 0.011189
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.4 Separation and DeviceN colour spaces/veraPDF test suite 6-2-4-4-t01-pass-f.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bb7042692523ea259348235925f22795339835b225b2e714309c7f772b727565",
+            "mean_abs": 0.8436,
+            "frac_off": 0.011189
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.4 Separation and DeviceN colour spaces/veraPDF test suite 6-2-4-4-t02-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "9903fc285c6500f94122a12cf07d0e9ca1700b22e5b800d54881c14eb2403b34",
+            "mean_abs": 0.0095,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.4 Separation and DeviceN colour spaces/veraPDF test suite 6-2-4-4-t03-fail-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d79703075c49a5e66eff3399f6395691d5b7432a112c56b059bb7b18691ca48e",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.4.5 Indexed and Pattern colour spaces/veraPDF test suite 6-2-4-5-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bb51b9614fe93c2f03fdff73c63e78cf3c9d7d4687ca69d6c4f45484db5dee13",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.5 Extended graphics state/veraPDF test suite 6-2-5-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "fc5cda979a014a2d73e44e1b20b8e45bc0dc3d8fc90c3885ca8e648114ba4fdc",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.5 Extended graphics state/veraPDF test suite 6-2-5-t03-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "fc5cda979a014a2d73e44e1b20b8e45bc0dc3d8fc90c3885ca8e648114ba4fdc",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.5 Extended graphics state/veraPDF test suite 6-2-5-t05-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "3f5246d0d4082ac08d02f0ecae255f8a4d4a6298f4dd2a554659f83b59e5d9ca",
+            "mean_abs": 0.0159,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.8 Images/6.2.8.1 General/veraPDF test suite 6-2-8-1-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "40c0ccada940b57f7930d4ea5e6d314abc17a268fa8696cd8c5bc2541f9b90c8",
+            "mean_abs": 0.0444,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.8 Images/6.2.8.1 General/veraPDF test suite 6-2-8-1-t02-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "40c0ccada940b57f7930d4ea5e6d314abc17a268fa8696cd8c5bc2541f9b90c8",
+            "mean_abs": 0.0444,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.8 Images/6.2.8.3 JPEG2000/veraPDF test suite 6-2-8-3-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "b772a982d055272fca37f87f1064e5377a92651682110d4fb58df7a3b0054fac",
+            "mean_abs": 0.2375,
+            "frac_off": 0.002852
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.8 Images/6.2.8.3 JPEG2000/veraPDF test suite 6-2-8-3-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "b772a982d055272fca37f87f1064e5377a92651682110d4fb58df7a3b0054fac",
+            "mean_abs": 0.2375,
+            "frac_off": 0.002852
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.2 Graphics/6.2.9 XObjects/6.2.9.1 Form XObjects/veraPDF test suite 6-2-9-1-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "400d4b00692ffb07b3be9033e92132e326d498c5472c706ff95e74a3aa5be6aa",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.1 Annotation types/veraPDF test suite 6-3-1-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.1 Annotation types/veraPDF test suite 6-3-1-t01-fail-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "38c3fe30493ab9a4db364335844ca364af583a0e9ddbac52aa9ae530cfe186d4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "04368dd2d241ef84eaeb32672d83dfa27011f0ac9559331af26e1b9f4e0d6b31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "04368dd2d241ef84eaeb32672d83dfa27011f0ac9559331af26e1b9f4e0d6b31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-h.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "04368dd2d241ef84eaeb32672d83dfa27011f0ac9559331af26e1b9f4e0d6b31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-k.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "04368dd2d241ef84eaeb32672d83dfa27011f0ac9559331af26e1b9f4e0d6b31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-n.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "04368dd2d241ef84eaeb32672d83dfa27011f0ac9559331af26e1b9f4e0d6b31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-q.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "38c3fe30493ab9a4db364335844ca364af583a0e9ddbac52aa9ae530cfe186d4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-t.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "38c3fe30493ab9a4db364335844ca364af583a0e9ddbac52aa9ae530cfe186d4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-w.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "04368dd2d241ef84eaeb32672d83dfa27011f0ac9559331af26e1b9f4e0d6b31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "04368dd2d241ef84eaeb32672d83dfa27011f0ac9559331af26e1b9f4e0d6b31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-fail-h.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-fail-k.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.3012,
+            "frac_off": 0.002999
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-fail-n.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-fail-q.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-fail-t.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-fail-w.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2b/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t02-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "8f2b05151f665d3567bdba25212294390f4e51c4da133810a21f26e493a0e6e9",
+            "mean_abs": 0.0307,
+            "frac_off": 0.001172
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2u/6.2 Graphics/6.2.11 Fonts/6.2.11.7 Unicode character maps/6.2.11.7.2 Level A and Level U conformance/veraPDF test suite 6-2-11-7-2-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "318ce5d363e918e3fac488e6dcb2fd323f1685b9914b371c2f3d09fb38ab99cd",
+            "mean_abs": 0.073,
+            "frac_off": 0.001979
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2u/6.2 Graphics/6.2.11 Fonts/6.2.11.7 Unicode character maps/6.2.11.7.2 Level A and Level U conformance/veraPDF test suite 6-2-11-7-2-t01-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "2600d11b5d4b03a4f31e413f53f67857e2f800ba8f9ecd11f1907ba1dfcf4e2c",
+            "mean_abs": 0.0077,
+            "frac_off": 0.000185
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2u/6.2 Graphics/6.2.11 Fonts/6.2.11.7 Unicode character maps/6.2.11.7.2 Level A and Level U conformance/veraPDF test suite 6-2-11-7-2-t01-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "3eb8f06f049a1a87e2dab391ab80e857b2468c8aa160eae2d8ec44e18db6369e",
+            "mean_abs": 0.0096,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2u/6.2 Graphics/6.2.11 Fonts/6.2.11.7 Unicode character maps/6.2.11.7.2 Level A and Level U conformance/veraPDF test suite 6-2-11-7-2-t01-pass-h.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2u/6.2 Graphics/6.2.11 Fonts/6.2.11.7 Unicode character maps/6.2.11.7.2 Level A and Level U conformance/veraPDF test suite 6-2-11-7-2-t01-pass-l.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "2600d11b5d4b03a4f31e413f53f67857e2f800ba8f9ecd11f1907ba1dfcf4e2c",
+            "mean_abs": 0.0077,
+            "frac_off": 0.000185
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-2u/6.2 Graphics/6.2.11 Fonts/6.2.11.7 Unicode character maps/6.2.11.7.2 Level A and Level U conformance/veraPDF test suite 6-2-11-7-2-t02-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "02f1099c47371307e692376756b1ad726247b5c49abb0852919a4fbdb23a495a",
+            "mean_abs": 0.0009,
+            "frac_off": 0.000015
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-3b/6.8 Embedded files/veraPDF test suite 6-8-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-3b/6.8 Embedded files/veraPDF test suite 6-8-t02-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-3b/6.8 Embedded files/veraPDF test suite 6-8-t02-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "f195cc6befa97f086a7737c7deb36e5ca76a2e9164e2828055ee6645d731aaf2",
+            "mean_abs": 0.0271,
+            "frac_off": 0.000199
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-3b/6.8 Embedded files/veraPDF test suite 6-8-t02-pass-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "e04ecec638ec684be4fa4b2d06d86f0d6357abd2fec3ac13335adb24887cda2e",
+            "mean_abs": 1.2348,
+            "frac_off": 0.051784
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.1 File structure/6.1.11 Permissions/veraPDF test suite 6-1-11-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.1 File structure/6.1.3 File trailer/veraPDF test suite 6-1-3-t02-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "bd1cd1b1e60998976b1116f7d0713817a419ce6de5b9a0ff41da851ae0d1f2f8",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.1 File structure/6.1.7 Name objects/veraPDF test suite 6-1-7-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "69259855727dd20d82ee3f784007c235e433ab7d29e938eaf8c6b9ba2b328728",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.10 Optional content/veraPDF test suite 6-10-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1263,
+            "hayro_sha256": "0535a2ea0cd314bebc96633736ce4591ab130abbfb9d8f27cad85a46bae16194",
+            "mean_abs": 0.0115,
+            "frac_off": 0.000028
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.10 Fonts/6.2.10.3 Composite fonts/6.2.10.3.3 CMaps/veraPDF test suite 6-2-10-3-3-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ac6f69e4f334841fad5a0eafa247da24de99d66ba442cb22d5f0d1f6a02e0690",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.10 Fonts/6.2.10.5 Font metrics/veraPDF test suite 6-2-10-5-t01-fail-h.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "4a4d479ec30073d3645dacea69b312e3f3921328c9a5cf284a03490c650db921",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.10 Fonts/6.2.10.9 Use of .notdef glyph/veraPDF test suite 6-2-10-9-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "b724fc0768c5f336b76f01adaa7f681a395649fa0a2db0495339d2d67ec693b5",
+            "mean_abs": 0.0087,
+            "frac_off": 0.000142
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.2 Content streams/veraPDF test suite 6-2-2-t04-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f1b9a08b01a56318a60e914e860bcc63cd45a1ccc2b03d25926d752e11e8e1ef",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.4 Colour spaces/6.2.4.2 ICCBased colour spaces/veraPDF test suite 6-2-4-2-t03-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "2ec6f5f55c95463715ef56fcaa6ec30f5ff1bc285d646e83b6ceae8434948937",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.4 Colour spaces/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t01-fail-j.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 1.614,
+            "frac_off": 0.012611
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.4 Colour spaces/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t02-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "7620a1bfedfff6e6cbbf95f2943173f589c55edb1dc20ab3c3ae89e55509930e",
+            "mean_abs": 0.0621,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.4 Colour spaces/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t04-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "94fb5c71ee4c33213bdd1bfc7afea82132342547769f5c0bcec8d73f4a83b88e",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.4 Colour spaces/6.2.4.3 Uncalibrated -Device colour spaces/veraPDF test suite 6-2-4-3-t04-fail-v.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "798395746848cedba232fdeac2739ede62b6ec1bc20b1c4220c7c978f5030f91",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.4 Colour spaces/6.2.4.4 Separation and DeviceN colour spaces/veraPDF test suite 6-2-4-4-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "9903fc285c6500f94122a12cf07d0e9ca1700b22e5b800d54881c14eb2403b34",
+            "mean_abs": 0.0095,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.4 Colour spaces/6.2.4.5 Indexed and Pattern colour spaces/veraPDF test suite 6-2-4-5-t01-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "4983987563096de2d41039fc798525bdb7b0262b070c65d1d6e0a31f87cbf919",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.7 Images/6.2.7.1 General/veraPDF test suite 6-2-7-1-t02-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "40c0ccada940b57f7930d4ea5e6d314abc17a268fa8696cd8c5bc2541f9b90c8",
+            "mean_abs": 0.0444,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.9 Transparency/veraPDF test suite 6-2-9-t02-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2c2ff7e5b2c2bfbacb57469d88109ecbe42fc4c4bee0b1f916b88b9988c16711",
+            "mean_abs": 0.0144,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.9 Transparency/veraPDF test suite 6-2-9-t04-fail-h.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "1693b841762c8e34c0736d8b6227df076dc0e459421275c315084bfd0a642d81",
+            "mean_abs": 0.0001,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.2 Graphics/6.2.9 Transparency/veraPDF test suite 6-2-9-t06-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 12.3698,
+            "frac_off": 0.265864
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "04368dd2d241ef84eaeb32672d83dfa27011f0ac9559331af26e1b9f4e0d6b31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t02-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.3 Annotations/6.3.3 Annotation appearances/veraPDF test suite 6-3-3-t01-fail-q.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.6 Action/6.6.1 General/veraPDF test suite 6-6-1-t01-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "38c3fe30493ab9a4db364335844ca364af583a0e9ddbac52aa9ae530cfe186d4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.6 Action/6.6.3 Trigger events/veraPDF test suite 6-6-3-t01-pass-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "99a0ce84f8f0daf3307cb622b9b985dada14c60e7f286e183581d806eeba6da9",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4/6.9 Embedded files/veraPDF test suite 6-9-t02-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "23779a67476aa798f1f4969f84293a783e27142c19327027a8bed095dd9d7934",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4e/6.2 Graphics/6.2.4 Colour spaces/6.2.4.1 General/veraPDF test suite 6-2-4-1-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "38c3fe30493ab9a4db364335844ca364af583a0e9ddbac52aa9ae530cfe186d4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4e/6.3 Annotations/6.3.1 Annotation types/veraPDF test suite 6-3-1-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "38c3fe30493ab9a4db364335844ca364af583a0e9ddbac52aa9ae530cfe186d4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4e/6.3 Annotations/6.3.2 Annotation dictionaries/veraPDF test suite 6-3-2-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "38c3fe30493ab9a4db364335844ca364af583a0e9ddbac52aa9ae530cfe186d4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4e/6.6 Action/6.6.1 General/veraPDF test suite 6-6-1-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "c273f680fbbfe42341078a5f4690322a276ce8260cfb5e20925c83a70aec96be",
+            "mean_abs": 0.0786,
+            "frac_off": 0.000279
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4e/6.7 Metadata/6.7.3 Version identification/veraPDF test suite 6-7-3-t01-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "8c0eb8094eaac00a3c3c1e49347113f3e700c082f8b8cd8f5ed99fdbcc2ae82a",
+            "mean_abs": 0.0007,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4f/6.3 Annotations/6.3.1 Annotation types/veraPDF test suite 6-3-1-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "321e0bb6eb175130af311d7d7bd980ed5ba13f8c64f7287beede71687e5014fb",
+            "mean_abs": 0.0015,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4f/6.7 Metadata/6.7.3 Version identification/veraPDF test suite 6-7-3-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_A-4f/6.9 Embedded files/veraPDF test suite 6-9-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "23779a67476aa798f1f4969f84293a783e27142c19327027a8bed095dd9d7934",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t02-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "2694b383fa3bbc7034e3520bd8db742d8ea6d7c12117a50e27080fd341f67340",
+            "mean_abs": 0.3849,
+            "frac_off": 0.006072
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t03-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "31c10c1a4fe41a4b9a2a3375f4b07f4eb5dbf1a68ae6372181bfb1baef98ac4a",
+            "mean_abs": 0.115,
+            "frac_off": 0.001191
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t08-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "eba6ce21e0be383ea653e2e42e00a3124ef573d06f4eca41834e6a35ca55d2cd",
+            "mean_abs": 0.0883,
+            "frac_off": 0.000632
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t14-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "eba6ce21e0be383ea653e2e42e00a3124ef573d06f4eca41834e6a35ca55d2cd",
+            "mean_abs": 0.0883,
+            "frac_off": 0.000632
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t17-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "7f34ee7dedf2eb7ac400ef5170875fb5334d3ffc736a3f43b47f6f36991d55c1",
+            "mean_abs": 0.0034,
+            "frac_off": 0.000015
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t19-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "b15b9e09c7bc170e76ad25889b2fa8bc05e3244114653337def48df03eceebce",
+            "mean_abs": 0.4634,
+            "frac_off": 0.005808
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t21-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f73feaf3a4c5a59470b093ad82d8157afa620d71a47f8fa823c3e12410f1bbc0",
+            "mean_abs": 0.1408,
+            "frac_off": 0.002882
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t22-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "c6b7e8c2e0bbaa81e4620a02b2f2345647f42906c968c5917dee15a7c22d8b48",
+            "mean_abs": 0.3145,
+            "frac_off": 0.006161
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t24-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "a1e12326e2b2710491302f54c31ea81df7baf6b3c9381ad1e17e3adaada9684f",
+            "mean_abs": 0.1223,
+            "frac_off": 0.002617
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t26-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "8a3265efdf239b95561b7451b855b82224048895a018d0c95cc7d8eb3513989d",
+            "mean_abs": 0.2681,
+            "frac_off": 0.003764
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t29-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "939ade84e9d50b7e8c44e812ba7646368bc8788355c15ae4df33637eadc629dc",
+            "mean_abs": 0.0176,
+            "frac_off": 0.000147
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t29-fail-h.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "939ade84e9d50b7e8c44e812ba7646368bc8788355c15ae4df33637eadc629dc",
+            "mean_abs": 0.0176,
+            "frac_off": 0.000147
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t29-fail-n.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "939ade84e9d50b7e8c44e812ba7646368bc8788355c15ae4df33637eadc629dc",
+            "mean_abs": 0.0176,
+            "frac_off": 0.000147
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t29-pass-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "939ade84e9d50b7e8c44e812ba7646368bc8788355c15ae4df33637eadc629dc",
+            "mean_abs": 0.0176,
+            "frac_off": 0.000147
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t29-pass-j.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "939ade84e9d50b7e8c44e812ba7646368bc8788355c15ae4df33637eadc629dc",
+            "mean_abs": 0.0176,
+            "frac_off": 0.000147
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t31-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "c4624e4ca89ba80aaec5f3f5176c094bf734725bcd19eb57cd715e350fb8dc11",
+            "mean_abs": 0.2167,
+            "frac_off": 0.002544
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t33-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "3fa3efe4ce9691b2aef6d45c6589e93fcb8de0c6e7a755cc9cf8e90c71f93e58",
+            "mean_abs": 0.0813,
+            "frac_off": 0.000765
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t36-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "eba6ce21e0be383ea653e2e42e00a3124ef573d06f4eca41834e6a35ca55d2cd",
+            "mean_abs": 0.0883,
+            "frac_off": 0.000632
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.2 Text/7.2-t43-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "912dc10dfa6ec63fa30c8d423361715dc9a1eb344080af7952966bf99dc28c39",
+            "mean_abs": 0.1393,
+            "frac_off": 0.001808
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.3 Graphics/7.3-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d7b82613e4f6c7dae37c7d107b02f547e50a8f5a2653dbde700c1356d90e4d06",
+            "mean_abs": 0.0664,
+            "frac_off": 0.001411
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.3 Graphics/7.3-t01-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d7b82613e4f6c7dae37c7d107b02f547e50a8f5a2653dbde700c1356d90e4d06",
+            "mean_abs": 0.0664,
+            "frac_off": 0.001411
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.3 Graphics/7.3-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d7b82613e4f6c7dae37c7d107b02f547e50a8f5a2653dbde700c1356d90e4d06",
+            "mean_abs": 0.0664,
+            "frac_off": 0.001411
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.3 Graphics/7.3-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d7b82613e4f6c7dae37c7d107b02f547e50a8f5a2653dbde700c1356d90e4d06",
+            "mean_abs": 0.0664,
+            "frac_off": 0.001411
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-1/7.3 Graphics/7.3-t01-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d7b82613e4f6c7dae37c7d107b02f547e50a8f5a2653dbde700c1356d90e4d06",
+            "mean_abs": 0.0664,
+            "frac_off": 0.001411
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/5 Version identification/5-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "977a9eafdc7dc64df1691ad2a3e52bc3277c96b92ac017681844e83298f2c26d",
+            "mean_abs": 0.5889,
+            "frac_off": 0.007851
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.11 Metadata/8.11.2 Interactive aspects/8.11.2-t01-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0d5081f563995922f2427c2fbc56f8f2f368ce85f2ff2dceedfd4f42db43ffa8",
+            "mean_abs": 0.1548,
+            "frac_off": 0.000691
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.2 Logical structure/8.2.4 Structure types/8.2.4-t01-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "47d3e43ff6963552fb2a4c48c6b4502e4ac20fe3e9fc7fa8b25b4be03d81c791",
+            "mean_abs": 0.0392,
+            "frac_off": 0.000691
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.2 Logical structure/8.2.5 Additional requirements for specific structure types/8.2.5.2 Document and DocumentFragment/8.2.5.2-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "fc5cda979a014a2d73e44e1b20b8e45bc0dc3d8fc90c3885ca8e648114ba4fdc",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.2 Logical structure/8.2.5 Additional requirements for specific structure types/8.2.5.26 Table (Table, TR, TH, TD, THead, TBody, TFoot)/8.2.5.26-t05-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "e4a0c3607cfa89ada49277e663fecea91bfaad3a822df1c949b34ab58d5b4489",
+            "mean_abs": 0.1994,
+            "frac_off": 0.003499
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.4 Text representation for content/8.4.4 Declaring natural language/8.4.4-t02-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "939ade84e9d50b7e8c44e812ba7646368bc8788355c15ae4df33637eadc629dc",
+            "mean_abs": 0.0176,
+            "frac_off": 0.000147
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.4 Text representation for content/8.4.4 Declaring natural language/8.4.4-t02-fail-n.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "939ade84e9d50b7e8c44e812ba7646368bc8788355c15ae4df33637eadc629dc",
+            "mean_abs": 0.0176,
+            "frac_off": 0.000147
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.4 Text representation for content/8.4.4 Declaring natural language/8.4.4-t02-pass-j.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "939ade84e9d50b7e8c44e812ba7646368bc8788355c15ae4df33637eadc629dc",
+            "mean_abs": 0.0176,
+            "frac_off": 0.000147
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.4 Text representation for content/8.4.5 Fonts/8.4.5.4 CMaps/8.4.5.4-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "c6f38fbf74b4d6ee5e24503a08b6d8aaf5b36ee57eb686160e76aa99d9d9d76d",
+            "mean_abs": 0.0999,
+            "frac_off": 0.001381
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.4 Text representation for content/8.4.5 Fonts/8.4.5.7 Character encodings/8.4.5.7-t02-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "cd50bfa868751c50fb3dd393cbe537c2ddda0f1b90a275d7667665613c55f08d",
+            "mean_abs": 0.0504,
+            "frac_off": 0.000265
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.4 Text representation for content/8.4.5 Fonts/8.4.5.8 Unicode character maps/8.4.5.8-t01-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "cd50bfa868751c50fb3dd393cbe537c2ddda0f1b90a275d7667665613c55f08d",
+            "mean_abs": 0.0504,
+            "frac_off": 0.000265
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "PDF_UA-2/8.9 Annotations/8.9.2 Semantics and content/8.9.2.4 Annotation types/8.9.2.4.10 File attachment/8.9.2.4.10-t01-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "fc5cda979a014a2d73e44e1b20b8e45bc0dc3d8fc90c3885ca8e648114ba4fdc",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A001-pdfa1-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "169b8ab82bb8ced2e952ede12318e95b52ce51df43ec6c51381a9db746562090",
+            "mean_abs": 0.0021,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A001-pdfa1-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "cd22ace3755f1f3b639fbf64d94cb66fd392d2ee40e89d68814d82a19efda002",
+            "mean_abs": 0.2797,
+            "frac_off": 0.001965
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A001-pdfa1-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "d2f3176c24271446496b5e50b3b0dfbb4a7f9e5c639400bd6b0575acddbccd9f",
+            "mean_abs": 0.0021,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A001-pdfa1-fail-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "a24d2c474f94b59dd6094414d3f15859c427ff8bd8c10eb3dee64dcbf5c4859a",
+            "mean_abs": 0.2797,
+            "frac_off": 0.001965
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A001-pdfa1-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A001-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "7a875ad58323cfef7ded4462d2ee04689fe1236b1e3d02f97910fea49972fd90",
+            "mean_abs": 0.0011,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A001-pdfa1-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "aa31bdbdf24790700b742c2e88eda3a0c80634414117f6004de046dd752ef15d",
+            "mean_abs": 0.0675,
+            "frac_off": 0.000555
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A001-pdfa1-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "4b65dcec5e30dca4732e7a633f502add9fd27c03d764e31be0d4cd1f15f7f0f8",
+            "mean_abs": 0.0011,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A001-pdfa1-pass-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "1a40170bf6da21e85023c48b19a929bbf052d3c77edb2455f701fa6f3aca60d8",
+            "mean_abs": 0.0675,
+            "frac_off": 0.000555
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A002-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "f1b9a08b01a56318a60e914e860bcc63cd45a1ccc2b03d25926d752e11e8e1ef",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A002-pdfa2-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "01929f3c68d976c78e5ef68991623c4f26e06304c684d9d9dda1e5aebfd12e89",
+            "mean_abs": 0.0222,
+            "frac_off": 0.000456
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A002-pdfa2-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "9b9ebb17591571412bb5ebaa68833e4294943dc602fcaaab1800edc06aac4c8a",
+            "mean_abs": 0.6277,
+            "frac_off": 0.010836
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A003-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "096151a39516f7493090e29abc3e2910955023b988f28c227fb2f74146a1b53c",
+            "mean_abs": 0.0052,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A003-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "096151a39516f7493090e29abc3e2910955023b988f28c227fb2f74146a1b53c",
+            "mean_abs": 0.0052,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A004-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "8bcb193c87aa5a0d5158d57ebba0e945adb6acfa382838f84180d6d638c122f4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A005-pdfa1-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A005-pdfa1-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A005-pdfa1-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "159da3a3f473a3ee03758ee88d35ecc4061d0e50840cc8265dbb001679230792",
+            "mean_abs": 0.1073,
+            "frac_off": 0.000572
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A005-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A005-pdfa1-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A005-pdfa1-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A006-pdfa1-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "ac0f06ebbf9c0b337f5fa7ef6dc2c3fd59166400321b7da9acd91ffa1f9fd085",
+            "mean_abs": 0.0876,
+            "frac_off": 0.00072
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A006-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A007-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "4940f7b82bb371675288cd5756ca83f073e2ae8c53feb22fc3d3cbe574de9b1f",
+            "mean_abs": 0.0101,
+            "frac_off": 0.000356
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A007-pdfa2-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "7bfe055c83976043dc7482dd909ee2ed0e885fce46c6f557a3a7baac59e8cba6",
+            "mean_abs": 0.0097,
+            "frac_off": 0.000128
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A008-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "ab672343b2894726ec37e59b315c8462c1a3033fa8f945bcdfa46b7f89156341",
+            "mean_abs": 0.0448,
+            "frac_off": 0.000584
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A009-pdfa1-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "c2a9b14aaac4739a965a1b2388e4a8ee1fab51c30d86e4b143db28b83ec4e241",
+            "mean_abs": 0.0095,
+            "frac_off": 0.000157
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A009-pdfa1-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34cbec389bdc906d9edbf4e114c047b5d322e3781a4df1f94a74145b4cacfe08",
+            "mean_abs": 0.013,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A010-pdfa1-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34ab47d87f68d43cc274ee1339a8765ec9df043a406bc2f1ec0e945d55d819d0",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A011-A015-pdfa1-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "e4c9b185cb53f0c797520b1d4366827211f901be31df0d7837aa7e6d97ca3e39",
+            "mean_abs": 0.0002,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A011-A015-pdfa1-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "8bcb193c87aa5a0d5158d57ebba0e945adb6acfa382838f84180d6d638c122f4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A011-A015-pdfa1-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "8bcb193c87aa5a0d5158d57ebba0e945adb6acfa382838f84180d6d638c122f4",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A011-A015-pdfa1-fail-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "e4c9b185cb53f0c797520b1d4366827211f901be31df0d7837aa7e6d97ca3e39",
+            "mean_abs": 0.0002,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A012-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 1.3094,
+            "frac_off": 0.012611
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A012-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "8f2b05151f665d3567bdba25212294390f4e51c4da133810a21f26e493a0e6e9",
+            "mean_abs": 0.0307,
+            "frac_off": 0.001172
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A012-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 1.3094,
+            "frac_off": 0.012611
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A013-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "34ab47d87f68d43cc274ee1339a8765ec9df043a406bc2f1ec0e945d55d819d0",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A014-pdfa1-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1263,
+            "hayro_sha256": "8f2b5c50b820457f27ccd0ce2cc4ae424f42476db6a679585b8ed84b91fb554d",
+            "mean_abs": 0.0013,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A016-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "3eb8f06f049a1a87e2dab391ab80e857b2468c8aa160eae2d8ec44e18db6369e",
+            "mean_abs": 0.0096,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A016-pdfa2-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1263,
+            "hayro_sha256": "3a9a652e57145e227b1db8ce773e9e4ecc70ee0cdb8b11e06d3d94c213b11bac",
+            "mean_abs": 0.0067,
+            "frac_off": 0.000028
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A016-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "3eb8f06f049a1a87e2dab391ab80e857b2468c8aa160eae2d8ec44e18db6369e",
+            "mean_abs": 0.0096,
+            "frac_off": 0.000114
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A016-pdfa2-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "b6160c03b1226c68a34d8e0e898695bdebbcd14a0dbd4bb1f0644d7e77982500",
+            "mean_abs": 0.0208,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A017-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "d695fc9e9bf36adfd6ac23840845123b855ad456197008a9b700a5ba05f3cea6",
+            "mean_abs": 0.0008,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A018-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d583f38fdfe7e85b22eee062ee1ebc0d05ec2b6a3d80bace56f94b2d4cbe3d6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A018-pdfa2-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A018-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "d583f38fdfe7e85b22eee062ee1ebc0d05ec2b6a3d80bace56f94b2d4cbe3d6a",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A018-pdfa2-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "6c73f96bc6b63c1f7e374573bbdd0c31da615893a8503c2f631486eacb313132",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A019-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "aa4a1c32497ae2b9779c0eb850e016bf74ff722d61bfade2ef08fe93608a9517",
+            "mean_abs": 2.5475,
+            "frac_off": 0.030626
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A019-pdfa2-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A020-pdfa1-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "9b5adfa2a62832b635ec7345e2268241d32d30076daeb29f7e915362356f2183",
+            "mean_abs": 0.0007,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A020-pdfa1-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "9b5adfa2a62832b635ec7345e2268241d32d30076daeb29f7e915362356f2183",
+            "mean_abs": 0.0007,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A021-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "9b5adfa2a62832b635ec7345e2268241d32d30076daeb29f7e915362356f2183",
+            "mean_abs": 0.0007,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A021-pdfa2-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "9b5adfa2a62832b635ec7345e2268241d32d30076daeb29f7e915362356f2183",
+            "mean_abs": 0.0007,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A021-pdfa2-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "9b5adfa2a62832b635ec7345e2268241d32d30076daeb29f7e915362356f2183",
+            "mean_abs": 0.0007,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A021-pdfa2-pass-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "9b5adfa2a62832b635ec7345e2268241d32d30076daeb29f7e915362356f2183",
+            "mean_abs": 0.0007,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A024-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "68e5c3e88dfd0e7be5dfbd14180a55ac3afe4d727568b96ce85fdc621ee105c5",
+            "mean_abs": 0.0017,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A024-pdfa2-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "2ec6f5f55c95463715ef56fcaa6ec30f5ff1bc285d646e83b6ceae8434948937",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A024-pdfa2-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "2ec6f5f55c95463715ef56fcaa6ec30f5ff1bc285d646e83b6ceae8434948937",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A024-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "b78e2408959d1a515b05528caa215e97e6a8c8beb52a0f5817c0ef2badd9b0d6",
+            "mean_abs": 0.0032,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A024-pdfa2-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "2ec6f5f55c95463715ef56fcaa6ec30f5ff1bc285d646e83b6ceae8434948937",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A024-pdfa2-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "8a767ad48298d5e3558ca28750b4956c16890eb2c3272b80c27b6162dd2c7cef",
+            "mean_abs": 0.0026,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A025-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "c9f454a1255e18c686f5aa33101bb3e44f88712c58b2fd01aecd285237161fb6",
+            "mean_abs": 0.1144,
+            "frac_off": 0.001523
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A025-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "910b9aadc526465f938fc48dc7f00f0f9bc8140a77632abf50922caa1f81f77d",
+            "mean_abs": 0.0217,
+            "frac_off": 0.000285
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A026-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "0d4871f61bfffad671686ef90bfc742bce2dd3208bd2440908ab92dbf496428b",
+            "mean_abs": 0.1121,
+            "frac_off": 0.000772
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "f195cc6befa97f086a7737c7deb36e5ca76a2e9164e2828055ee6645d731aaf2",
+            "mean_abs": 0.0271,
+            "frac_off": 0.000199
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-fail-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-fail-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "a3fad33b59ec861f5ac2ac084c1d2b268c2c0577273a4ce7f9a12d3b805c9b9b",
+            "mean_abs": 0.03,
+            "frac_off": 0.00072
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-fail-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "f195cc6befa97f086a7737c7deb36e5ca76a2e9164e2828055ee6645d731aaf2",
+            "mean_abs": 0.0271,
+            "frac_off": 0.000199
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-pass-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "a3fad33b59ec861f5ac2ac084c1d2b268c2c0577273a4ce7f9a12d3b805c9b9b",
+            "mean_abs": 0.03,
+            "frac_off": 0.00072
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-pass-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "e04ecec638ec684be4fa4b2d06d86f0d6357abd2fec3ac13335adb24887cda2e",
+            "mean_abs": 1.2348,
+            "frac_off": 0.051784
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-pass-f.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 892,
+            "height": 1262,
+            "hayro_sha256": "f195cc6befa97f086a7737c7deb36e5ca76a2e9164e2828055ee6645d731aaf2",
+            "mean_abs": 0.0271,
+            "frac_off": 0.000199
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A027-pdfa3-pass-g.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "04368dd2d241ef84eaeb32672d83dfa27011f0ac9559331af26e1b9f4e0d6b31",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A028-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "f52ab3e9ecb7b925cd911739551616ee23ebf813915850b3133c5d193685d42d",
+            "mean_abs": 0.1454,
+            "frac_off": 0.004318
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A028-pdfa2-fail-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "0994391e3939bf38d926c8927fc29c1caa2a7d4435503dc505e8143c9008d723",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          },
+          {
+            "page": 1,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "40225a4baff5115b23c61ed7e30165e8ceeae02131a59dd82750a9dd9d35a5e7",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A028-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "30c320e93ddc58f061691cb32014db2828cd10b8c1adf85a96d9440f20bd8508",
+            "mean_abs": 0.0095,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A028-pdfa2-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "2d0d083bdb367f13ef72ec2c3ac68cc8120cde3f053f32363f8bd0f1d429b9e0",
+            "mean_abs": 0.0034,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A029-pdfa2-fail-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A029-pdfa2-pass-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A029-pdfa2-pass-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A029-pdfa2-pass-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "TWG test files/TWG test suite A029-pdfa2-pass-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "bd34e64bf7558c0dea29570e6701364426b570d347b31ab7362d75370e0169a3",
+            "mean_abs": 0.0,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-2-3-2-t01-undefined-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "e452a77ef48c333ac807149e85a449015fd821a1b42e44f80260444cc8ae9205",
+            "mean_abs": 0.0043,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-2-3-3-t03-undefined-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "f52ab3e9ecb7b925cd911739551616ee23ebf813915850b3133c5d193685d42d",
+            "mean_abs": 0.1454,
+            "frac_off": 0.004318
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-2-3-3-t04-undefined-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 918,
+            "height": 1188,
+            "hayro_sha256": "1693b841762c8e34c0736d8b6227df076dc0e459421275c315084bfd0a642d81",
+            "mean_abs": 0.0001,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-2-4-3-t02-undefined-h.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "f52ab3e9ecb7b925cd911739551616ee23ebf813915850b3133c5d193685d42d",
+            "mean_abs": 0.1454,
+            "frac_off": 0.004318
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-7-9-t01-undefined-a.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "d695fc9e9bf36adfd6ac23840845123b855ad456197008a9b700a5ba05f3cea6",
+            "mean_abs": 0.0008,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-7-9-t01-undefined-b.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "d695fc9e9bf36adfd6ac23840845123b855ad456197008a9b700a5ba05f3cea6",
+            "mean_abs": 0.0008,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-7-9-t01-undefined-c.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "d695fc9e9bf36adfd6ac23840845123b855ad456197008a9b700a5ba05f3cea6",
+            "mean_abs": 0.0008,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-7-9-t01-undefined-d.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "d695fc9e9bf36adfd6ac23840845123b855ad456197008a9b700a5ba05f3cea6",
+            "mean_abs": 0.0008,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-7-9-t01-undefined-e.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "d695fc9e9bf36adfd6ac23840845123b855ad456197008a9b700a5ba05f3cea6",
+            "mean_abs": 0.0008,
+            "frac_off": 0.0
+          }
+        ]
+      },
+      {
+        "corpus": "verapdf",
+        "path": "Undefined/veraPDF test suite 6-7-9-t01-undefined-f.pdf",
+        "status": "ok",
+        "pages": [
+          {
+            "page": 0,
+            "width": 750,
+            "height": 750,
+            "hayro_sha256": "d695fc9e9bf36adfd6ac23840845123b855ad456197008a9b700a5ba05f3cea6",
+            "mean_abs": 0.0008,
+            "frac_off": 0.0
+          }
+        ]
+      }
+    ]
+  }
+}

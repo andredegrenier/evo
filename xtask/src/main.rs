@@ -1,17 +1,34 @@
 //! Dev-time tasks. `cargo run -p xtask -- icons` regenerates all icon
-//! artifacts from assets/icon/evo.svg. Never a dependency of the app.
+//! artifacts from assets/icon/evo.svg; `cargo run -p xtask -- fidelity`
+//! measures how evo draws a corpus of PDFs. Never a dependency of the app.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+mod fidelity;
 
 fn main() {
-    let task = std::env::args().nth(1).unwrap_or_default();
-    match task.as_str() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let task = args.first().map(String::as_str).unwrap_or_default();
+    match task {
         "icons" => icons(),
+        "fidelity" => fidelity::main(&args[1..]),
         _ => {
-            eprintln!("usage: cargo run -p xtask -- icons");
+            eprintln!("usage: cargo run -p xtask -- <icons|fidelity>");
+            eprintln!();
+            eprintln!("{}", fidelity::USAGE);
             std::process::exit(1);
         }
     }
+}
+
+/// The repository, found from where this crate is rather than from where it
+/// was run: `cargo run -p xtask` keeps the caller's working directory, and the
+/// harness has to find the same corpus manifests either way.
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask/ has a parent")
+        .to_path_buf()
 }
 
 fn render_png(tree: &resvg::usvg::Tree, size: u32) -> resvg::tiny_skia::Pixmap {

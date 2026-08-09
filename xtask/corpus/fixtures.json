@@ -1,0 +1,13 @@
+{
+  "name": "fixtures",
+  "title": "evo's own committed fixtures",
+  "license": "MIT OR Apache-2.0 (part of evo)",
+  "source": "tests/fixtures/",
+  "files": [
+    { "path": "tests/fixtures/sample.pdf" },
+    { "path": "tests/fixtures/encrypted-rc4.pdf", "password": "evo" },
+    { "path": "tests/fixtures/encrypted-aes128.pdf", "password": "evo" },
+    { "path": "tests/fixtures/encrypted-aes256.pdf", "password": "evo" },
+    { "path": "tests/fixtures/encrypted-empty-user.pdf" }
+  ]
+}

@@ -38,6 +38,15 @@ jobs:
         if: runner.os == 'Linux'
       - run: cargo build
       - run: cargo test
+      # xtask is a workspace member the root `cargo clippy`/`cargo test` do not
+      # reach. Its tests include the fidelity smoke run -- evo's own committed
+      # fixtures, no network, no PDFium, a couple of seconds -- which keeps the
+      # harness compiling and honest between the monthly corpus runs in
+      # fidelity.yml. `--include-ignored` is what pulls that one in.
+      - run: cargo clippy -p xtask --all-targets -- -D warnings
+        if: runner.os == 'Linux'
+      - run: cargo test -p xtask -- --include-ignored
+        if: runner.os == 'Linux'
       # The PDFium pixel contract, on one platform. The library is pinned by
       # deploy/pdfium.lock and checked against its SHA-256, so a failure here
       # is a real failure and never a flaky download.

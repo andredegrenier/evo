@@ -1,0 +1,68 @@
+name: Fidelity
+
+# How close evo's pure-Rust rasterizer is to PDFium, over a few hundred PDFs
+# from the veraPDF corpus. Deliberately NOT part of per-push CI: it downloads
+# a corpus and a shared library and takes minutes, and nothing it measures
+# changes between one commit and the next. Monthly, or on demand.
+#
+# The first run on a new runner has nothing to compare against -- the baseline
+# is keyed by platform and `xtask/fidelity-baseline.json` may not have a
+# section for this one yet. Dispatch it once with `bless: true`, download the
+# `fidelity` artifact, and commit the baseline it contains; after that the
+# schedule fails when, and only when, something got worse.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bless:
+        description: "Record this runner's baseline instead of checking it"
+        type: boolean
+        default: false
+  schedule:
+    # 05:00 UTC on the first of the month.
+    - cron: "0 5 1 * *"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fidelity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Only xtask is built here, and none of its dependencies want a GUI, so
+      # the Linux GTK packages the main job installs are not needed.
+      - name: Cache the corpora
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/evo-fidelity
+          # The manifests pin every file by URL and SHA-256, so a cache is
+          # valid exactly as long as they are unchanged.
+          key: fidelity-corpus-${{ hashFiles('xtask/corpus/*.json') }}
+      - name: Fetch the pinned PDFium
+        run: |
+          set -euo pipefail
+          set -a; . deploy/pdfium.lock; set +a
+          curl -fsSL -o pdfium.tgz "$PDFIUM_BASE_URL/pdfium-linux-x64.tgz"
+          echo "$PDFIUM_LINUX_X64_SHA256  pdfium.tgz" | sha256sum -c -
+          mkdir -p pdfium && tar -xzf pdfium.tgz -C pdfium
+          echo "EVO_PDFIUM_PATH=$PWD/pdfium/lib" >> "$GITHUB_ENV"
+      - name: Render the corpora
+        run: |
+          if [ "${{ inputs.bless }}" = "true" ]; then
+            cargo run -p xtask -- fidelity --bless
+          else
+            cargo run -p xtask -- fidelity
+          fi
+      - name: Upload the report, the diffs and the baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fidelity
+          path: |
+            target/fidelity/fidelity-report.md
+            target/fidelity/diffs/
+            xtask/fidelity-baseline.json
+          if-no-files-found: warn

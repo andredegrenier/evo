@@ -7615,9 +7615,17 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "directories",
+ "hayro",
  "icns",
  "ico",
+ "image",
+ "pdfium-render",
  "resvg",
+ "serde",
+ "serde_json",
+ "sha2",
+ "ureq",
 ]
 
 [[package]]
