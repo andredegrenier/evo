@@ -949,6 +949,105 @@ mod tests {
         );
     }
 
+    /// Stamps go over the wire like everything else: an agent PUTs them, the
+    /// server hands them straight back, and the overlay the phone draws holds
+    /// the words and the picture. The PNG travels as base64 inside the JSON,
+    /// which is the part worth pinning -- it is the only markup that carries
+    /// bytes rather than numbers.
+    #[test]
+    fn stamps_round_trip_through_the_api_and_reach_the_overlay() {
+        use base64::Engine as _;
+
+        let evo = Harness::start("stamps");
+        let session = sign_in(&evo);
+        let docs = format!("{}/api/docs", evo.url);
+        let id = post_bytes(&docs, &session, &[], fixture()).json()["id"]
+            .as_str()
+            .expect("an id")
+            .to_owned();
+        let markup = format!("{docs}/{id}/markup");
+        let tag = get(&markup, Some(&session))
+            .headers
+            .get("etag")
+            .expect("a version tag")
+            .to_owned();
+
+        let png = crate::export::pdf::tests::png_fixture(12, 6);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&png);
+        let style = json!({
+            "stroke": {"r": 193, "g": 39, "b": 45, "a": 255},
+            "stroke_width": 1.5,
+            "fill": {"r": 0, "g": 0, "b": 0, "a": 0},
+            "opacity": 1.0
+        });
+        let saved = put_json(
+            &markup,
+            &session,
+            &[("If-Match", &tag)],
+            json!({
+                "version": 2,
+                "annotations": [{
+                    "id": 1,
+                    "page": 0,
+                    "kind": {"Stamp": {"text": "APPROVED", "font_size": 20.0}},
+                    "rect": {"min": {"x": 100.0, "y": 700.0}, "max": {"x": 260.0, "y": 744.0}},
+                    "style": style,
+                }, {
+                    "id": 2,
+                    "page": 0,
+                    "kind": {"ImageStamp": {"png": encoded}},
+                    "rect": {"min": {"x": 300.0, "y": 700.0}, "max": {"x": 360.0, "y": 730.0}},
+                    "style": style,
+                }]
+            }),
+        );
+        assert_eq!(saved.status, 200, "{}", saved.text());
+
+        let back = get(&markup, Some(&session));
+        assert_eq!(back.json()["version"], 2);
+        assert_eq!(
+            back.json()["annotations"][0]["kind"]["Stamp"]["text"],
+            "APPROVED"
+        );
+        assert_eq!(
+            back.json()["annotations"][1]["kind"]["ImageStamp"]["png"],
+            encoded.as_str(),
+            "the picture came back byte for byte"
+        );
+
+        let svg = get(&format!("{docs}/{id}/markup.svg?page=1"), Some(&session)).text();
+        assert!(svg.contains(">APPROVED</text>"), "{svg}");
+        assert!(
+            svg.contains("data:image/png;base64,"),
+            "no picture in: {svg}"
+        );
+
+        // A stamp is not a version-1 shape, and a client that says it is has
+        // muddled its own format.
+        let tag = back.headers.get("etag").expect("a tag").to_owned();
+        let muddled = put_json(
+            &markup,
+            &session,
+            &[("If-Match", &tag)],
+            json!({
+                "version": 1,
+                "annotations": [{
+                    "id": 1,
+                    "page": 0,
+                    "kind": {"Stamp": {"text": "DRAFT", "font_size": 20.0}},
+                    "rect": {"min": {"x": 1.0, "y": 2.0}, "max": {"x": 3.0, "y": 4.0}},
+                    "style": style,
+                }]
+            }),
+        );
+        assert_eq!(muddled.status, 400, "{}", muddled.text());
+        assert!(
+            muddled.text().contains("need format 2"),
+            "{}",
+            muddled.text()
+        );
+    }
+
     /// The promise the whole markup format is for: a highlight drawn on a
     /// phone is a highlight the desktop app opens.
     ///

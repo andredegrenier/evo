@@ -36,6 +36,8 @@ pub struct DocState {
     pub engine: Option<Engine>,
     pub cache: TextureCache,
     pub thumb_cache: TextureCache,
+    /// Decoded pictures for image stamps, one per annotation.
+    pub stamp_images: crate::ui::canvas::StampTextures,
     pub viewport: Viewport,
 
     pub tool: ActiveTool,
@@ -153,6 +155,7 @@ impl DocState {
             engine: None,
             cache: TextureCache::with_budget(cache::CANVAS_BUDGET),
             thumb_cache: TextureCache::with_budget(cache::THUMB_BUDGET),
+            stamp_images: Default::default(),
             viewport: Viewport::default(),
             tool: ActiveTool::Select,
             tool_ctl: ToolController::default(),

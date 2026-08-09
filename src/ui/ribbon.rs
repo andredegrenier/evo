@@ -45,7 +45,7 @@ pub enum RibbonItem {
 impl RibbonItem {
     /// Every item that exists, in default order. `sanitize` uses this to
     /// restore anything a stored layout is missing.
-    pub const ALL: [RibbonItem; 22] = [
+    pub const ALL: [RibbonItem; 25] = [
         Self::Undo,
         Self::Redo,
         Self::Tool(ActiveTool::Select),
@@ -60,6 +60,9 @@ impl RibbonItem {
         Self::Tool(ActiveTool::Polygon),
         Self::Tool(ActiveTool::PolyLine),
         Self::Tool(ActiveTool::Cloud),
+        Self::Tool(ActiveTool::Stamp),
+        Self::Tool(ActiveTool::ImageStamp),
+        Self::Tool(ActiveTool::Sequence),
         Self::StrokeColor,
         Self::FillColor,
         Self::StrokeWidth,
@@ -232,6 +235,10 @@ struct DragGroup(usize);
 pub enum RibbonAction {
     /// The evo button: back to the document library.
     GoToLibrary,
+    /// The image-stamp button: choose a PNG to stamp with. The file dialog
+    /// (and what to say when the file will not do) lives in the app, beside
+    /// every other dialog, rather than in a ribbon button.
+    PickStampImage,
 }
 
 pub fn show(
@@ -271,7 +278,7 @@ pub fn show(
         ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), |ui| {
             ui.horizontal_centered(|ui| {
                 for &index in left {
-                    draw_group(ui, dc, cfg, keymap, t, index, &mut edit);
+                    draw_group(ui, dc, cfg, keymap, t, index, &mut edit, &mut action);
                 }
             });
         });
@@ -280,7 +287,7 @@ pub fn show(
         ui.scope_builder(egui::UiBuilder::new().max_rect(right_rect), |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 for &index in right.iter().rev() {
-                    draw_group(ui, dc, cfg, keymap, t, index, &mut edit);
+                    draw_group(ui, dc, cfg, keymap, t, index, &mut edit, &mut action);
                 }
             });
         });
@@ -389,6 +396,7 @@ fn draw_group(
     t: &Tokens,
     index: usize,
     edit: &mut Option<Edit>,
+    action: &mut Option<RibbonAction>,
 ) {
     let id = ui.id().with("ribbon-group").with(index);
     let frame = t
@@ -402,7 +410,7 @@ fn draw_group(
                         group: index,
                         index: slot,
                     };
-                    draw_item(ui, dc, cfg, keymap, t, addr);
+                    draw_item(ui, dc, cfg, keymap, t, addr, action);
                 }
             });
         });
@@ -453,6 +461,7 @@ fn draw_item(
     keymap: &Keymap,
     t: &Tokens,
     addr: ItemAddr,
+    action: &mut Option<RibbonAction>,
 ) {
     let item = cfg.groups[addr.group].items[addr.index];
 
@@ -462,7 +471,7 @@ fn draw_item(
         let resp = ui
             .scope(|ui| {
                 ui.disable();
-                item_widget(ui, dc, keymap, t, item);
+                item_widget(ui, dc, keymap, t, item, &mut None);
             })
             .response;
         let hit = ui.interact(
@@ -483,7 +492,7 @@ fn draw_item(
         return;
     }
 
-    item_widget(ui, dc, keymap, t, item);
+    item_widget(ui, dc, keymap, t, item, action);
 }
 
 fn item_widget(
@@ -492,6 +501,7 @@ fn item_widget(
     keymap: &Keymap,
     t: &Tokens,
     item: RibbonItem,
+    action: &mut Option<RibbonAction>,
 ) {
     let ctx = ui.ctx().clone();
     match item {
@@ -519,10 +529,29 @@ fn item_widget(
                 dc.history.redo(&mut dc.store, &mut dc.pages);
             }
         }
+        RibbonItem::Tool(ActiveTool::Stamp) => {
+            stamp_menu(ui, dc, keymap);
+        }
+        RibbonItem::Tool(ActiveTool::ImageStamp) => {
+            let (glyph, act) = tool_icon(ActiveTool::ImageStamp);
+            if ui
+                .add(icon_button(glyph).selected(dc.tool == ActiveTool::ImageStamp))
+                .on_hover_text(format!(
+                    "{} — choose a PNG, then click to place it",
+                    keymap.tooltip(&ctx, act)
+                ))
+                .clicked()
+            {
+                if dc.editing_text.is_some() {
+                    canvas::commit_text_edit(dc);
+                }
+                *action = Some(RibbonAction::PickStampImage);
+            }
+        }
         RibbonItem::Tool(tool) => {
-            let (glyph, action) = tool_icon(tool);
+            let (glyph, act) = tool_icon(tool);
             let selected = dc.tool == tool;
-            let mut tip = keymap.tooltip(&ctx, action);
+            let mut tip = keymap.tooltip(&ctx, act);
             if tool == ActiveTool::Pan {
                 tip.push_str(" — or hold Space");
             }
@@ -534,7 +563,7 @@ fn item_widget(
                 if dc.editing_text.is_some() {
                     canvas::commit_text_edit(dc);
                 }
-                dc.tool = tool;
+                crate::tools::set_tool(dc, tool);
             }
         }
         RibbonItem::StrokeColor => {
@@ -620,6 +649,66 @@ fn item_widget(
     }
 }
 
+/// The stamp button: a dropdown of the stamps everybody already uses, plus a
+/// box to type your own into.
+///
+/// It is a menu rather than a plain tool button because a stamp is a tool *and*
+/// a choice of words; picking the tool without saying what it says would put an
+/// APPROVED on the drawing because that happens to be first in the list.
+fn stamp_menu(ui: &mut egui::Ui, dc: &mut DocState, keymap: &Keymap) {
+    let ctx = ui.ctx().clone();
+    let (glyph, action) = tool_icon(ActiveTool::Stamp);
+    let selected = dc.tool == ActiveTool::Stamp;
+    let response = ui
+        .menu_button(egui::RichText::new(glyph).size(ICON_SIZE), |ui| {
+            ui.set_min_width(220.0);
+            ui.label(egui::RichText::new("Stamps").strong());
+            for (label, _) in crate::doc::annotation::STANDARD_STAMPS {
+                if ui.button(label).clicked() {
+                    dc.tool_ctl.stamp.text = label.to_owned();
+                    crate::tools::set_tool(dc, ActiveTool::Stamp);
+                    ui.close();
+                }
+            }
+
+            ui.separator();
+            ui.label(egui::RichText::new("Your own words").strong());
+            ui.add(
+                egui::TextEdit::singleline(&mut dc.tool_ctl.stamp.text)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("REVIEWED %date"),
+            );
+            ui.horizontal(|ui| {
+                ui.label("Size");
+                ui.add(
+                    egui::DragValue::new(&mut dc.tool_ctl.stamp.font_size)
+                        .range(6.0..=96.0)
+                        .speed(0.5),
+                );
+            });
+            if ui.button("Use this stamp").clicked() {
+                crate::tools::set_tool(dc, ActiveTool::Stamp);
+                ui.close();
+            }
+
+            ui.separator();
+            ui.weak("Filled in when the stamp is placed:");
+            for (token, meaning) in crate::doc::annotation::STAMP_TOKENS {
+                ui.weak(format!("{token} — {meaning}"));
+            }
+        })
+        .response;
+    if selected {
+        ui.painter().rect_stroke(
+            response.rect,
+            egui::CornerRadius::same(4),
+            egui::Stroke::new(1.0, ui.visuals().selection.bg_fill),
+            StrokeKind::Inside,
+        );
+    }
+    response.on_hover_text(keymap.tooltip(&ctx, action));
+}
+
 fn tool_icon(tool: ActiveTool) -> (&'static str, Action) {
     match tool {
         ActiveTool::Select => (icon::CURSOR, Action::ToolSelect),
@@ -634,6 +723,9 @@ fn tool_icon(tool: ActiveTool) -> (&'static str, Action) {
         ActiveTool::Cloud => (icon::CLOUD, Action::ToolCloud),
         ActiveTool::Polygon => (icon::POLYGON, Action::ToolPolygon),
         ActiveTool::PolyLine => (icon::LINE_SEGMENTS, Action::ToolPolyLine),
+        ActiveTool::Stamp => (icon::STAMP, Action::ToolStamp),
+        ActiveTool::ImageStamp => (icon::IMAGE, Action::ToolImageStamp),
+        ActiveTool::Sequence => (icon::LIST_NUMBERS, Action::ToolSequence),
     }
 }
 

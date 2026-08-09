@@ -62,7 +62,7 @@ pub struct OpenArgs {
 pub struct MarkupArgs {
     /// Page to draw on, 1-based.
     pub page: usize,
-    /// One of: highlight, rect, ellipse, cloud, line, arrow, text.
+    /// One of: highlight, rect, ellipse, cloud, line, arrow, text, stamp.
     pub kind: String,
     /// Left edge, in PDF points from the left of the page.
     pub x0: f32,
@@ -74,7 +74,7 @@ pub struct MarkupArgs {
     pub y1: f32,
     /// Colour as #rrggbb or #rrggbbaa. Defaults to the editor's current colour.
     pub color: Option<String>,
-    /// The words to write, for kind "text".
+    /// The words to write, for kind "text" and kind "stamp".
     pub text: Option<String>,
 }
 
@@ -183,7 +183,7 @@ impl EvoMcp {
     }
 
     /// Draw one piece of markup on the open document: a highlight, rectangle,
-    /// ellipse, revision cloud, line, arrow or text box. Coordinates are PDF
+    /// ellipse, revision cloud, line, arrow, text box or stamp. Coordinates are PDF
     /// points measured from the bottom-left of the page. It is added to the
     /// undo history, so the user can take it back.
     #[tool]

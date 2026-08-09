@@ -48,6 +48,9 @@ pub enum Action {
     ToolCloud,
     ToolPolygon,
     ToolPolyLine,
+    ToolStamp,
+    ToolImageStamp,
+    ToolSequence,
 }
 
 /// Where an action appears in the Preferences list.
@@ -73,7 +76,7 @@ impl Category {
 }
 
 impl Action {
-    pub const ALL: [Action; 26] = [
+    pub const ALL: [Action; 29] = [
         Self::Open,
         Self::Save,
         Self::Print,
@@ -100,6 +103,9 @@ impl Action {
         Self::ToolCloud,
         Self::ToolPolygon,
         Self::ToolPolyLine,
+        Self::ToolStamp,
+        Self::ToolImageStamp,
+        Self::ToolSequence,
     ];
 
     pub fn label(self) -> &'static str {
@@ -130,6 +136,9 @@ impl Action {
             Self::ToolCloud => "Cloud",
             Self::ToolPolygon => "Polygon",
             Self::ToolPolyLine => "Polyline",
+            Self::ToolStamp => "Stamp",
+            Self::ToolImageStamp => "Image Stamp…",
+            Self::ToolSequence => "Sequence",
         }
     }
 
@@ -183,6 +192,12 @@ impl Action {
             // The polyline is the polygon left open, so it is the polygon key
             // with a shift on it -- the pairing every drawing app uses.
             Self::ToolPolyLine => shortcut(Modifiers::SHIFT, Key::Y),
+            Self::ToolStamp => shortcut(none, Key::S),
+            // The picture stamp is the stamp with a picture in it, so it is
+            // the stamp key with a shift on it, as the polyline is to the
+            // polygon.
+            Self::ToolImageStamp => shortcut(Modifiers::SHIFT, Key::S),
+            Self::ToolSequence => shortcut(none, Key::N),
         }
     }
 }

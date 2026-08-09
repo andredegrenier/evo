@@ -69,7 +69,7 @@ pub struct EvoApp {
 pub const ZOOM_STEP: f32 = 1.25;
 
 /// Tool actions and the tool each selects.
-const TOOL_ACTIONS: [(Action, ActiveTool); 12] = [
+const TOOL_ACTIONS: [(Action, ActiveTool); 14] = [
     (Action::ToolSelect, ActiveTool::Select),
     (Action::ToolPan, ActiveTool::Pan),
     (Action::ToolHighlight, ActiveTool::Highlight),
@@ -82,6 +82,8 @@ const TOOL_ACTIONS: [(Action, ActiveTool); 12] = [
     (Action::ToolCloud, ActiveTool::Cloud),
     (Action::ToolPolygon, ActiveTool::Polygon),
     (Action::ToolPolyLine, ActiveTool::PolyLine),
+    (Action::ToolStamp, ActiveTool::Stamp),
+    (Action::ToolSequence, ActiveTool::Sequence),
 ];
 
 fn cmd() -> Modifiers {
@@ -438,6 +440,49 @@ impl EvoApp {
         }
     }
 
+    /// Choose the picture the image-stamp tool will place, and arm the tool.
+    ///
+    /// The bytes are read here rather than at placement time: a picture that
+    /// cannot be used is worth saying so about while the user is still looking
+    /// at the file they picked, not three clicks later on the page.
+    fn pick_stamp_image(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("PNG image", &["png"])
+            .pick_file()
+        else {
+            return;
+        };
+        let png = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.error = Some(format!("Could not read {}: {e}", path.display()));
+                return;
+            }
+        };
+        // The bytes live inside the markup from here on, and the markup travels
+        // to phones and back on every save, so there is a limit and it is worth
+        // saying out loud.
+        if png.len() > tools::MAX_STAMP_PNG {
+            self.error = Some(format!(
+                "That PNG is {:.1} MB. A stamp image travels inside the markup, so evo keeps \
+                 them under {} MB — save a smaller copy and try again.",
+                png.len() as f32 / (1024.0 * 1024.0),
+                tools::MAX_STAMP_PNG / (1024 * 1024)
+            ));
+            return;
+        }
+        if image::load_from_memory_with_format(&png, image::ImageFormat::Png).is_err() {
+            self.error = Some(format!(
+                "{} is not a PNG evo can read. Stamp images have to be PNG files.",
+                path.display()
+            ));
+            return;
+        }
+        let Some(dc) = &mut self.dc else { return };
+        dc.tool_ctl.stamp.image = Some(png);
+        tools::set_tool(dc, ActiveTool::ImageStamp);
+    }
+
     /// Whether the ⌘F cache holds OCR text that could be embedded on save.
     fn has_ocr_text(&self) -> bool {
         self.dc.as_ref().is_some_and(|dc| {
@@ -636,6 +681,12 @@ impl EvoApp {
             self.toggle_chat(ctx);
         }
 
+        // The picture stamp needs a picture before it is a tool at all, so its
+        // key opens the file dialog rather than switching tools and waiting.
+        if self.keymap.consume(ctx, Action::ToolImageStamp) {
+            self.pick_stamp_image();
+        }
+
         // Redo before undo: with the default bindings ⇧⌘Z would otherwise also
         // satisfy ⌘Z.
         let redo = self.keymap.consume(ctx, Action::Redo);
@@ -696,11 +747,7 @@ impl EvoApp {
         }
 
         for tool in tools_pressed {
-            // Half-placed vertices belong to the tool that was placing them.
-            if dc.tool != tool {
-                tools::cancel(dc);
-            }
-            dc.tool = tool;
+            tools::set_tool(dc, tool);
         }
 
         // Escape: cancel gesture / deselect / back to select tool.
@@ -1638,8 +1685,10 @@ impl eframe::App for EvoApp {
                 .show(ui, |ui| ui::ribbon::show(ui, dc, ribbon, keymap, &tokens))
                 .inner;
         }
-        if let Some(ui::ribbon::RibbonAction::GoToLibrary) = ribbon_action {
-            self.close_document();
+        match ribbon_action {
+            Some(ui::ribbon::RibbonAction::GoToLibrary) => self.close_document(),
+            Some(ui::ribbon::RibbonAction::PickStampImage) => self.pick_stamp_image(),
+            None => {}
         }
 
         // Shortcuts, ribbon layout and script settings are only worth writing

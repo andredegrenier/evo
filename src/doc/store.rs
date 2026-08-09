@@ -49,6 +49,22 @@ impl AnnotationStore {
         self.annotations.is_empty()
     }
 
+    /// What every stamp on the document says.
+    pub fn stamp_texts(&self) -> impl Iterator<Item = &str> {
+        self.annotations.iter().filter_map(|a| match &a.kind {
+            super::annotation::AnnotationKind::Stamp { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Every image stamp's id and PNG bytes, for the texture cache to decode.
+    pub fn image_stamps(&self) -> impl Iterator<Item = (AnnotationId, &[u8])> {
+        self.annotations.iter().filter_map(|a| match &a.kind {
+            super::annotation::AnnotationKind::ImageStamp { png } => Some((a.id, png.as_slice())),
+            _ => None,
+        })
+    }
+
     /// Snapshot for sidecar persistence.
     pub fn to_vec(&self) -> Vec<Annotation> {
         self.annotations.clone()

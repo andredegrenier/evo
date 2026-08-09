@@ -11,7 +11,10 @@ keywords = ["pdf", "editor", "markup", "annotation"]
 
 [dependencies]
 argon2 = "0.5"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+# Image stamps carry their PNG inside the markup JSON, and JSON's way of
+# carrying bytes is base64.
+base64 = "0.22"
+axum ={ version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 catppuccin = "2.8"
 directories = "6.0.0"
 eframe = { version = "0.35", features = ["persistence"] }

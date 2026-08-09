@@ -260,6 +260,51 @@ pub(crate) fn write_annotation(g: &mut String, ann: &Annotation, page_h: f32) ->
                 )?;
             }
         }
+        AnnotationKind::Stamp { text, font_size } => {
+            let radius = (h * 0.18).clamp(1.0, 12.0);
+            let border = (style.stroke_width * 1.5).max(1.0);
+            write!(
+                g,
+                "<rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" rx=\"{radius}\"{fill_attr} \
+                 stroke=\"{}\" stroke-width=\"{border}\" opacity=\"{opacity}\"/>",
+                css(style.stroke)
+            )?;
+            if !text.is_empty() {
+                // Shrunk to the box exactly as the canvas shrinks it, so a
+                // stamp on a phone reads as the one on the desktop.
+                let natural: f32 = text
+                    .chars()
+                    .map(|c| crate::export::pdf::char_width(c, *font_size))
+                    .sum();
+                let inner = (w - 2.0 * radius).max(1.0);
+                let size = if natural > inner && natural > 0.0 {
+                    font_size * inner / natural
+                } else {
+                    *font_size
+                };
+                write!(
+                    g,
+                    "<text x=\"{}\" y=\"{}\" font-family=\"Helvetica, Liberation Sans, Arial, sans-serif\" \
+                     font-size=\"{size}\" font-weight=\"bold\" fill=\"{}\" opacity=\"{opacity}\" \
+                     text-anchor=\"middle\" dominant-baseline=\"central\">{}</text>",
+                    x + w / 2.0,
+                    y + h / 2.0,
+                    css(style.stroke),
+                    xml_escape(text)
+                )?;
+            }
+        }
+        AnnotationKind::ImageStamp { png } => {
+            // The picture goes inline: the overlay is one file the browser
+            // already has, and there is no second URL for it to fetch.
+            use base64::Engine as _;
+            let data = base64::engine::general_purpose::STANDARD.encode(png);
+            write!(
+                g,
+                "<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" opacity=\"{opacity}\" \
+                 preserveAspectRatio=\"none\" href=\"data:image/png;base64,{data}\"/>"
+            )?;
+        }
         AnnotationKind::TextBox {
             text,
             font_size,
@@ -501,6 +546,83 @@ mod tests {
         );
         assert!(!line.contains(" Z\""), "a polyline is not closed");
         assert!(line.contains("<polygon points="), "no arrowhead: {line}");
+    }
+
+    /// Stamps reach a phone the same way every other shape does: as elements
+    /// the browser already knows. A word stamp is a rounded box with text in
+    /// it; a picture stamp carries its picture inline, so the overlay is still
+    /// one file and there is no second URL to fetch.
+    #[test]
+    fn stamps_reach_the_overlay_as_a_box_of_words_and_an_inline_picture() {
+        let make = |id: u64, kind: AnnotationKind| Annotation {
+            id,
+            page: 0,
+            kind,
+            rect: PdfRect::from_min_size(PdfPoint::new(100.0, 700.0), 160.0, 44.0),
+            style: Style {
+                stroke: Color::rgb(193, 39, 45),
+                stroke_width: 1.5,
+                ..Style::default()
+            },
+        };
+
+        let words = svg_overlay(
+            &[make(
+                1,
+                AnnotationKind::Stamp {
+                    text: "APPROVED".into(),
+                    font_size: 20.0,
+                },
+            )],
+            612.0,
+            792.0,
+        );
+        // y = 792 - 744 (the top edge in PDF space), and a rounded box.
+        assert!(
+            words.contains("<rect x=\"100\" y=\"48\" width=\"160\" height=\"44\" rx=\""),
+            "{words}"
+        );
+        assert!(words.contains("font-weight=\"bold\""), "{words}");
+        assert!(words.contains("text-anchor=\"middle\""), "{words}");
+        assert!(words.contains(">APPROVED</text>"), "{words}");
+        // Centred on the box: 100 + 160/2, 48 + 44/2.
+        assert!(words.contains("<text x=\"180\" y=\"70\""), "{words}");
+
+        let png = crate::export::pdf::tests::png_fixture(8, 8);
+        let picture = svg_overlay(
+            &[make(2, AnnotationKind::ImageStamp { png: png.clone() })],
+            612.0,
+            792.0,
+        );
+        assert!(
+            picture.contains("<image x=\"100\" y=\"48\" width=\"160\" height=\"44\""),
+            "{picture}"
+        );
+        assert!(
+            picture.contains("href=\"data:image/png;base64,iVBOR"),
+            "{picture}"
+        );
+        // The bytes are the ones that went in, not a re-encoding of them.
+        use base64::Engine as _;
+        assert!(
+            picture.contains(&base64::engine::general_purpose::STANDARD.encode(&png)),
+            "the picture was changed on the way out"
+        );
+
+        // Long words are shrunk to the box, exactly as the canvas shrinks them.
+        let long = svg_overlay(
+            &[make(
+                3,
+                AnnotationKind::Stamp {
+                    text: "SUPERSEDED BY REVISION C".into(),
+                    font_size: 40.0,
+                },
+            )],
+            612.0,
+            792.0,
+        );
+        let size = attribute_of(&long, "font-size");
+        assert!(size < 40.0 && size > 4.0, "font-size came back as {size}");
     }
 
     /// The whole trip a highlight drawn on a phone makes, in arithmetic.

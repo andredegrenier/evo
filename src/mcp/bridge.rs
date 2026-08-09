@@ -130,7 +130,7 @@ impl AppBridge {
 const CLOSED: &str = "evo is no longer accepting requests";
 
 /// The markup kinds a caller may ask for, named the way the toolbar names them.
-pub const MARKUP_KINDS: [&str; 7] = [
+pub const MARKUP_KINDS: [&str; 8] = [
     "highlight",
     "rect",
     "ellipse",
@@ -138,6 +138,7 @@ pub const MARKUP_KINDS: [&str; 7] = [
     "line",
     "arrow",
     "text",
+    "stamp",
 ];
 
 /// Turn a request into an annotation, or say why it is not one.
@@ -208,6 +209,28 @@ pub fn annotation_from(
                     align: TextAlign::Left,
                 },
                 stroked(base, color),
+            )
+        }
+        "stamp" => {
+            let text = req
+                .text
+                .clone()
+                .filter(|t| !t.trim().is_empty())
+                .ok_or_else(|| {
+                    "a stamp needs some words to stamp; APPROVED and DRAFT are the usual ones"
+                        .to_owned()
+                })?;
+            (
+                AnnotationKind::Stamp {
+                    text,
+                    font_size: crate::tools::DEFAULT_STAMP_FONT,
+                },
+                Style {
+                    stroke: color.unwrap_or(crate::tools::STAMP_RED),
+                    stroke_width: 1.5,
+                    fill: Color::TRANSPARENT,
+                    opacity: base.opacity,
+                },
             )
         }
         other => {
@@ -386,6 +409,13 @@ mod tests {
                     }
                 )),
                 "text" => assert!(matches!(ann.kind, AnnotationKind::TextBox { .. })),
+                "stamp" => match &ann.kind {
+                    AnnotationKind::Stamp { text, .. } => {
+                        assert_eq!(text, "a note");
+                        assert_eq!(ann.style.stroke, crate::tools::STAMP_RED);
+                    }
+                    other => panic!("a stamp came back as {other:?}"),
+                },
                 "cloud" => match &ann.kind {
                     AnnotationKind::Polygon { points, cloudy } => {
                         assert_eq!(points.len(), 4, "a cloud is drawn round a rectangle");
@@ -461,6 +491,11 @@ mod tests {
         let err = annotation_from(&markup("text"), 1, Style::default(), 12.0)
             .expect_err("nothing to write");
         assert!(err.contains("needs some text"), "{err}");
+
+        let err = annotation_from(&markup("stamp"), 1, Style::default(), 12.0)
+            .expect_err("nothing to stamp");
+        assert!(err.contains("needs some words"), "{err}");
+        assert!(err.contains("APPROVED"), "the usual ones are named: {err}");
     }
 
     /// A closed app is not a hang: the tool fails at once.

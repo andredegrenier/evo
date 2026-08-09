@@ -94,6 +94,120 @@ pub enum AnnotationKind {
         points: Vec<PdfPoint>,
         arrow_end: bool,
     },
+    /// A rubber stamp: a word in a box, the way a drawing gets marked
+    /// APPROVED. The dynamic tokens (`%date`, `%user`, `%filename`) are
+    /// expanded when the stamp is placed, so a stamp says the same thing in a
+    /// year as it said the day it was applied -- which is the only thing a
+    /// record of approval may do.
+    Stamp {
+        text: String,
+        font_size: f32,
+    },
+    /// A picture stamp: a PNG placed on the page, for a signature or a company
+    /// mark. The bytes travel inside the markup, so a sidecar carries the whole
+    /// stamp and a phone gets it for free.
+    ImageStamp {
+        #[serde(with = "png_base64")]
+        png: Vec<u8>,
+    },
+}
+
+/// PNG bytes as base64 in JSON.
+///
+/// The sidecar is read by hand, by `curl`, and by a browser; a byte array of
+/// four thousand numbers is none of those things' idea of a picture. Base64 is
+/// what every other format puts an image in, and it is what `data:` URLs --
+/// which is how the phone overlay draws these -- already speak.
+mod png_base64 {
+    use base64::Engine as _;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        base64::engine::general_purpose::STANDARD
+            .decode(text.trim())
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+/// The stamps every reviewer expects to find already made, paired with the
+/// `/Name` ISO 32000-1 §12.5.6.12 gives them. A stamp whose text is one of
+/// these leaves as a named standard stamp; anything else leaves as a stamp
+/// with an appearance and no name, which is the same thing minus the label.
+pub const STANDARD_STAMPS: [(&str, &str); 6] = [
+    ("APPROVED", "Approved"),
+    ("NOT APPROVED", "NotApproved"),
+    ("DRAFT", "Draft"),
+    ("FINAL", "Final"),
+    ("CONFIDENTIAL", "Confidential"),
+    ("FOR COMMENT", "ForComment"),
+];
+
+/// The `/Name` for a stamp reading `text`, if it reads as one of the standards.
+pub fn standard_stamp_name(text: &str) -> Option<&'static str> {
+    let wanted = text.trim();
+    STANDARD_STAMPS
+        .iter()
+        .find(|(label, _)| label.eq_ignore_ascii_case(wanted))
+        .map(|(_, name)| *name)
+}
+
+/// The tokens a stamp's text may carry, and what each one stands for. Shown in
+/// the stamp popover, because a token nobody is told about is a typo.
+pub const STAMP_TOKENS: [(&str, &str); 3] = [
+    ("%date", "today's date"),
+    ("%user", "the name you are signed in as"),
+    ("%filename", "the document's title"),
+];
+
+/// Replace the dynamic tokens in a stamp's text with what they stand for
+/// *now*.
+///
+/// Called once, when the stamp is placed. A stamp that re-evaluated its date
+/// every time it was drawn would be a stamp that quietly rewrites when a
+/// document was approved, which is worse than useless on a drawing set.
+pub fn expand_stamp_tokens(text: &str, filename: &str) -> String {
+    text.replace("%date", &today())
+        .replace("%user", &current_user())
+        .replace("%filename", filename)
+}
+
+/// Today, as `YYYY-MM-DD` in UTC.
+///
+/// Days-to-civil-date arithmetic rather than a calendar crate: this is the only
+/// date evo ever formats, and the algorithm is older than any of the crates
+/// that would do it (Howard Hinnant's `civil_from_days`).
+fn today() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (y, m, d) = civil_from_days(secs.div_euclid(86_400));
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// Whoever is at the keyboard, as the operating system knows them.
+fn current_user() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_default()
 }
 
 impl AnnotationKind {
@@ -111,7 +225,10 @@ impl AnnotationKind {
             | AnnotationKind::Ellipse
             | AnnotationKind::Line { .. }
             | AnnotationKind::Freehand { .. } => 1,
-            AnnotationKind::Polygon { .. } | AnnotationKind::PolyLine { .. } => 2,
+            AnnotationKind::Polygon { .. }
+            | AnnotationKind::PolyLine { .. }
+            | AnnotationKind::Stamp { .. }
+            | AnnotationKind::ImageStamp { .. } => 2,
         }
     }
 
@@ -129,7 +246,17 @@ impl AnnotationKind {
             } => "cloud",
             AnnotationKind::Polygon { .. } => "polygon",
             AnnotationKind::PolyLine { .. } => "polyline",
+            AnnotationKind::Stamp { .. } => "stamp",
+            AnnotationKind::ImageStamp { .. } => "image stamp",
         }
+    }
+
+    /// Whether a resize should hold the shape's proportions unless told
+    /// otherwise. A stretched signature is a forged one, so a picture keeps its
+    /// aspect ratio by default and shift is what lets go of it -- the opposite
+    /// of every other shape, and the right way round for this one.
+    pub fn keeps_aspect(&self) -> bool {
+        matches!(self, AnnotationKind::ImageStamp { .. })
     }
 
     /// The interior points a move or a resize has to carry along, if any.
@@ -347,6 +474,86 @@ mod tests {
         );
     }
 
+    /// The PNG inside an image stamp has to survive the sidecar exactly, and
+    /// it has to go through it as base64 rather than as four thousand numbers
+    /// -- the format is read by people and by `curl`, and a `data:` URL is how
+    /// the phone overlay ends up drawing it.
+    #[test]
+    fn an_image_stamp_carries_its_png_through_json_as_base64() {
+        let png = b"\x89PNG\r\n\x1a\n0123456789".to_vec();
+        let ann = with_kind(AnnotationKind::ImageStamp { png: png.clone() });
+        let json = serde_json::to_string(&ann).expect("serialize");
+        assert!(
+            json.contains("\"ImageStamp\":{\"png\":\"iVBORw0KGgowMTIzNDU2Nzg5\"}"),
+            "{json}"
+        );
+        let back: Annotation = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, ann);
+
+        // Bytes that are not base64 are a broken sidecar, not silent emptiness.
+        let broken = json.replace("iVBORw0KGgowMTIzNDU2Nzg5", "not base64!!");
+        assert!(
+            serde_json::from_str::<Annotation>(&broken).is_err(),
+            "{broken}"
+        );
+    }
+
+    #[test]
+    fn a_stamp_survives_a_json_round_trip() {
+        let ann = with_kind(AnnotationKind::Stamp {
+            text: "APPROVED".into(),
+            font_size: 24.0,
+        });
+        let json = serde_json::to_string(&ann).expect("serialize");
+        assert!(
+            json.contains("\"Stamp\":{\"text\":\"APPROVED\",\"font_size\":24.0}"),
+            "{json}"
+        );
+        assert_eq!(
+            serde_json::from_str::<Annotation>(&json).expect("deserialize"),
+            ann
+        );
+    }
+
+    /// The standard stamps are matched by what they say, however it is typed;
+    /// anything else is a stamp with no standard name, which is fine.
+    #[test]
+    fn the_standard_stamps_are_recognized_by_their_words() {
+        assert_eq!(standard_stamp_name("APPROVED"), Some("Approved"));
+        assert_eq!(standard_stamp_name("  approved "), Some("Approved"));
+        assert_eq!(standard_stamp_name("Not Approved"), Some("NotApproved"));
+        assert_eq!(standard_stamp_name("For Comment"), Some("ForComment"));
+        assert_eq!(standard_stamp_name("Reviewed by me"), None);
+        assert_eq!(standard_stamp_name(""), None);
+    }
+
+    /// A stamp is baked when it is placed: what it says is fixed from then on,
+    /// so the tokens have to be gone by the time it is stored.
+    #[test]
+    fn the_dynamic_tokens_are_expanded_once_and_leave_nothing_behind() {
+        // SAFETY: single-threaded test setup, before any thread is spawned.
+        unsafe { std::env::set_var("USER", "ada") };
+        let out = expand_stamp_tokens("%user %filename %date", "plans.pdf");
+        assert!(out.starts_with("ada plans.pdf "), "{out}");
+        assert!(!out.contains('%'), "{out}");
+        let date = out.rsplit(' ').next().expect("a date");
+        assert_eq!(date.len(), 10, "{date}");
+        assert_eq!(date.matches('-').count(), 2, "{date}");
+
+        // Text with no tokens is left exactly as it was typed.
+        assert_eq!(expand_stamp_tokens("100% done", "x.pdf"), "100% done");
+    }
+
+    /// The date arithmetic is written out here rather than pulled in, so the
+    /// days it gets wrong are the ones worth pinning: epoch, and a leap day.
+    #[test]
+    fn the_calendar_arithmetic_lands_on_the_right_days() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+        assert_eq!(civil_from_days(19_782), (2024, 2, 29), "a leap day");
+        assert_eq!(civil_from_days(20_671), (2026, 8, 6));
+    }
+
     /// Old readers cannot be handed shapes they have never heard of.
     #[test]
     fn only_the_new_kinds_need_the_new_sidecar_version() {
@@ -369,6 +576,18 @@ mod tests {
                 arrow_end: false
             }
             .min_sidecar_version(),
+            2
+        );
+        assert_eq!(
+            AnnotationKind::Stamp {
+                text: "DRAFT".into(),
+                font_size: 20.0
+            }
+            .min_sidecar_version(),
+            2
+        );
+        assert_eq!(
+            AnnotationKind::ImageStamp { png: Vec::new() }.min_sidecar_version(),
             2
         );
     }

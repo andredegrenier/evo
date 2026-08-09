@@ -37,6 +37,13 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
     ui.heading("Inspector");
     ui.separator();
 
+    // The sequence tool is a setting, not a selection: what it will place next
+    // belongs in the panel whether or not anything is selected.
+    if dc.tool == crate::tools::ActiveTool::Sequence {
+        sequence_settings(ui, dc);
+        ui.separator();
+    }
+
     let Some(ann) = dc.selected_annotation().cloned() else {
         ui.weak("No selection.\n\nSelect a markup to edit its exact position and size.");
         return;
@@ -219,6 +226,33 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
         }
     }
 
+    if let AnnotationKind::Stamp { text, font_size } = &ann.kind {
+        let mut edited = text.clone();
+        ui.label("Text");
+        if ui
+            .add(egui::TextEdit::singleline(&mut edited).desired_width(f32::INFINITY))
+            .changed()
+        {
+            record_style(dc, ann.clone(), &|a| {
+                if let AnnotationKind::Stamp { text, .. } = &mut a.kind {
+                    // Already-placed stamps say what they say: the tokens were
+                    // spent when it was applied, and typing "%date" into one
+                    // now is a word, not a date.
+                    text.clone_from(&edited);
+                }
+            });
+        }
+        let mut size = *font_size;
+        let fs = field(ui, "Font size", &mut size, 0.5);
+        if fs.changed {
+            record_style(dc, ann.clone(), &|a| {
+                if let AnnotationKind::Stamp { font_size, .. } = &mut a.kind {
+                    *font_size = size.clamp(4.0, 144.0);
+                }
+            });
+        }
+    }
+
     if let AnnotationKind::PolyLine { arrow_end, .. } = ann.kind {
         let mut on = arrow_end;
         if ui.checkbox(&mut on, "Arrowhead at the end").changed() {
@@ -237,6 +271,42 @@ pub fn show(ui: &mut egui::Ui, dc: &mut DocState) {
         }
         dc.selection = None;
     }
+}
+
+/// What the sequence tool will place next: the prefix and the number.
+///
+/// Changing the prefix re-reads the document under the new one, so switching
+/// from `1, 2, 3` to `A1` starts at `A1` rather than at `A4`.
+fn sequence_settings(ui: &mut egui::Ui, dc: &mut DocState) {
+    ui.label(egui::RichText::new("Sequence").strong());
+    ui.horizontal(|ui| {
+        ui.label("Prefix");
+        let mut prefix = dc.tool_ctl.sequence.prefix.clone();
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut prefix)
+                    .desired_width(70.0)
+                    .hint_text("A"),
+            )
+            .changed()
+        {
+            dc.tool_ctl.sequence.prefix = prefix;
+            dc.tool_ctl.sequence.next =
+                crate::tools::next_sequence_number(&dc.store, &dc.tool_ctl.sequence.prefix);
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Next");
+        ui.add(
+            DragValue::new(&mut dc.tool_ctl.sequence.next)
+                .speed(1.0)
+                .range(0..=99_999),
+        );
+    });
+    ui.weak(format!(
+        "Clicking the page places {}{}.",
+        dc.tool_ctl.sequence.prefix, dc.tool_ctl.sequence.next
+    ));
 }
 
 /// One-click centering: move the annotation so its center lands on the page
@@ -291,6 +361,13 @@ mod tests {
                 points: points.clone(),
                 arrow_end: true,
             },
+            AnnotationKind::Stamp {
+                text: "APPROVED".into(),
+                font_size: 20.0,
+            },
+            AnnotationKind::ImageStamp {
+                png: crate::export::pdf::tests::png_fixture(8, 8),
+            },
         ] {
             let id = dc.store.alloc_id();
             let before = Annotation {
@@ -316,5 +393,33 @@ mod tests {
             assert_eq!(dc.store.get(id), Some(&before), "drawing changed it");
             assert!(!dc.history.can_undo(), "drawing recorded history");
         }
+    }
+
+    /// The sequence tool's settings are shown whether or not anything is
+    /// selected -- they are what the *next* click will do, and there is
+    /// nothing selected at the moment it matters most.
+    #[test]
+    fn the_sequence_settings_are_shown_while_the_tool_is_active() {
+        let ctx = egui::Context::default();
+        let bytes = std::fs::read("tests/fixtures/sample.pdf").expect("fixture");
+        let doc = crate::doc::Document::load_bytes(bytes, None).expect("load");
+        let mut dc = DocState::new(doc, &ctx, crate::render::engine::EnginePref::Hayro);
+        dc.tool = crate::tools::ActiveTool::Sequence;
+        dc.tool_ctl.sequence.prefix = "A".into();
+        dc.tool_ctl.sequence.next = 7;
+
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(320.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| show(ui, &mut dc));
+
+        assert_eq!(dc.tool_ctl.sequence.prefix, "A", "drawing changed it");
+        assert_eq!(dc.tool_ctl.sequence.next, 7);
+        assert!(dc.selection.is_none(), "and nothing had to be selected");
     }
 }

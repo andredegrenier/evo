@@ -31,6 +31,12 @@ pub enum ActiveTool {
     Polygon,
     /// Open chain of segments, one clicked vertex at a time.
     PolyLine,
+    /// A word in a box, placed with one click.
+    Stamp,
+    /// A picture, placed with one click once one has been chosen.
+    ImageStamp,
+    /// Numbered stamps, counting up as they are placed.
+    Sequence,
 }
 
 impl ActiveTool {
@@ -48,6 +54,9 @@ impl ActiveTool {
             ActiveTool::Cloud => "Cloud",
             ActiveTool::Polygon => "Polygon",
             ActiveTool::PolyLine => "Polyline",
+            ActiveTool::Stamp => "Stamp",
+            ActiveTool::ImageStamp => "Image Stamp",
+            ActiveTool::Sequence => "Sequence",
         }
     }
 
@@ -79,6 +88,152 @@ impl ActiveTool {
 
 /// The intensity a cloud is drawn with until somebody changes it.
 pub const DEFAULT_CLOUD_INTENSITY: f32 = 1.0;
+
+/// The red a stamp arrives in: the one every review set is already covered in.
+pub const STAMP_RED: Color = Color::rgb(193, 39, 45);
+
+/// How big a stamp's word is until somebody changes it.
+pub const DEFAULT_STAMP_FONT: f32 = 20.0;
+/// And a sequence number, which is a stamp with a number in it.
+pub const DEFAULT_SEQUENCE_FONT: f32 = 12.0;
+
+/// The largest picture a stamp may carry, in bytes of PNG.
+///
+/// The bytes live in the markup sidecar, which travels to phones and back
+/// through an API on every save; a photograph dropped in as a signature would
+/// make every one of those trips carry it.
+pub const MAX_STAMP_PNG: usize = 2 * 1024 * 1024;
+
+/// What the stamp tool will place next.
+#[derive(Clone, Debug)]
+pub struct StampSettings {
+    /// As typed, tokens and all -- they are expanded when the stamp is placed.
+    pub text: String,
+    pub font_size: f32,
+    /// A PNG chosen from disk, waiting for a click to land on.
+    pub image: Option<Vec<u8>>,
+}
+
+impl Default for StampSettings {
+    fn default() -> Self {
+        Self {
+            text: crate::doc::annotation::STANDARD_STAMPS[0].0.to_owned(),
+            font_size: DEFAULT_STAMP_FONT,
+            image: None,
+        }
+    }
+}
+
+/// Where the sequence tool has got to. Per session, not per document: it is
+/// reset from the page every time the tool is picked up, so numbering carries
+/// on from what is already on the drawing rather than from what this window
+/// happens to remember.
+#[derive(Clone, Debug)]
+pub struct SequenceSettings {
+    pub prefix: String,
+    pub next: u32,
+}
+
+impl Default for SequenceSettings {
+    fn default() -> Self {
+        Self {
+            prefix: String::new(),
+            next: 1,
+        }
+    }
+}
+
+/// The number a `<prefix><digits>` stamp is carrying, if it is carrying one.
+fn sequence_number(text: &str, prefix: &str) -> Option<u32> {
+    let rest = text.trim().strip_prefix(prefix)?;
+    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse().ok()
+}
+
+/// The number the sequence tool should place next, given what is already on
+/// the document under this prefix.
+pub fn next_sequence_number(store: &crate::doc::store::AnnotationStore, prefix: &str) -> u32 {
+    store
+        .stamp_texts()
+        .filter_map(|text| sequence_number(text, prefix))
+        .max()
+        .map_or(1, |n| n.saturating_add(1))
+}
+
+/// Switch tools, tidying up after the one being left.
+///
+/// Half-placed vertices belong to the tool that was placing them, and the
+/// sequence counter has to pick up where the document leaves off rather than
+/// where this window last got to -- both of which are easy to forget at a call
+/// site, so neither is left to one.
+pub fn set_tool(dc: &mut DocState, tool: ActiveTool) {
+    if dc.tool != tool {
+        cancel(dc);
+    }
+    if tool == ActiveTool::Sequence {
+        dc.tool_ctl.sequence.next = next_sequence_number(&dc.store, &dc.tool_ctl.sequence.prefix);
+    }
+    dc.tool = tool;
+}
+
+/// The style a stamp is placed in.
+fn stamp_style(opacity: f32) -> Style {
+    Style {
+        stroke: STAMP_RED,
+        stroke_width: 1.5,
+        fill: Color::TRANSPARENT,
+        opacity,
+    }
+}
+
+/// The longest side an image stamp is placed at, in points -- half a US Letter
+/// page, so a picture at any resolution arrives at a size somebody can see and
+/// then drag to what they meant.
+pub const MAX_STAMP_SIDE: f32 = 300.0;
+
+/// A PNG's dimensions in pixels, taken as points, without decoding the pixels.
+fn png_size(png: &[u8]) -> Option<(f32, f32)> {
+    let (w, h) = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+        .ok()
+        .map(|img| (img.width(), img.height()))?;
+    (w > 0 && h > 0).then_some((w as f32, h as f32))
+}
+
+/// Put a stamp on the page, selected and undoable.
+fn place_stamp(dc: &mut DocState, page: usize, rect: PdfRect, kind: AnnotationKind) {
+    let id = dc.store.alloc_id();
+    let ann = Annotation {
+        id,
+        page,
+        kind,
+        rect,
+        style: stamp_style(dc.current_style.opacity),
+    };
+    dc.selection = Some(id);
+    dc.history
+        .apply(Command::AddAnnotation(ann), &mut dc.store, &mut dc.pages);
+}
+
+/// The box a word of this size needs, centred on where it was clicked.
+fn stamp_rect(at: PdfPoint, text: &str, font_size: f32, square: bool) -> PdfRect {
+    let natural: f32 = text
+        .chars()
+        .map(|c| crate::export::pdf::char_width(c, font_size))
+        .sum();
+    let height = font_size * 1.9;
+    let width = if square {
+        (natural + font_size * 0.9).max(height)
+    } else {
+        natural + font_size * 1.4
+    };
+    PdfRect::from_min_size(
+        PdfPoint::new(at.x - width / 2.0, at.y - height / 2.0),
+        width,
+        height,
+    )
+}
 
 /// The four corners of `rect`, counter-clockwise from the bottom left.
 ///
@@ -139,6 +294,10 @@ pub struct ToolController {
     pub editing_focus_pending: bool,
     /// Snapshot for coalescing a numeric-field edit gesture in the inspector.
     pub inspector_before: Option<Annotation>,
+    /// What the stamp tool will put down next.
+    pub stamp: StampSettings,
+    /// Where the sequence tool has counted to.
+    pub sequence: SequenceSettings,
 }
 
 impl Default for ToolController {
@@ -150,6 +309,8 @@ impl Default for ToolController {
             editing_before: None,
             editing_focus_pending: false,
             inspector_before: None,
+            stamp: StampSettings::default(),
+            sequence: SequenceSettings::default(),
         }
     }
 }
@@ -253,6 +414,51 @@ pub fn on_press(dc: &mut DocState, p: &PointerInfo) {
                 page: p.page,
                 points: vec![p.pos],
             };
+        }
+        ActiveTool::Stamp => {
+            let text = crate::doc::annotation::expand_stamp_tokens(
+                &dc.tool_ctl.stamp.text.clone(),
+                &dc.title(),
+            );
+            if text.trim().is_empty() {
+                return;
+            }
+            let font_size = dc.tool_ctl.stamp.font_size;
+            place_stamp(
+                dc,
+                p.page,
+                stamp_rect(p.pos, &text, font_size, false),
+                AnnotationKind::Stamp { text, font_size },
+            );
+        }
+        ActiveTool::Sequence => {
+            let text = format!(
+                "{}{}",
+                dc.tool_ctl.sequence.prefix, dc.tool_ctl.sequence.next
+            );
+            let font_size = DEFAULT_SEQUENCE_FONT;
+            place_stamp(
+                dc,
+                p.page,
+                stamp_rect(p.pos, &text, font_size, true),
+                AnnotationKind::Stamp { text, font_size },
+            );
+            dc.tool_ctl.sequence.next = dc.tool_ctl.sequence.next.saturating_add(1);
+        }
+        ActiveTool::ImageStamp => {
+            let Some(png) = dc.tool_ctl.stamp.image.clone() else {
+                return;
+            };
+            let Some((w, h)) = png_size(&png) else {
+                return;
+            };
+            // Placed at its own size in points, shrunk to something that fits
+            // on a page if the picture is a photograph's worth of pixels.
+            let scale = (MAX_STAMP_SIDE / w.max(h)).min(1.0);
+            let (w, h) = (w * scale, h * scale);
+            let rect =
+                PdfRect::from_min_size(PdfPoint::new(p.pos.x - w / 2.0, p.pos.y - h / 2.0), w, h);
+            place_stamp(dc, p.page, rect, AnnotationKind::ImageStamp { png });
         }
         tool if tool.places_vertices() => {
             dc.selection = None;
@@ -445,7 +651,10 @@ pub fn on_drag(dc: &mut DocState, p: &PointerInfo) {
                 return;
             }
 
-            let mut rect = select::resize_rect(orig.rect, handle, pos, p.modifiers.shift);
+            // A picture holds its proportions unless shift says otherwise;
+            // every other shape is the other way round.
+            let lock_aspect = p.modifiers.shift != orig.kind.keeps_aspect();
+            let mut rect = select::resize_rect(orig.rect, handle, pos, lock_aspect);
             if snapping {
                 let features = SnapFeatures {
                     left: handle.moves_left(),
@@ -460,7 +669,7 @@ pub fn on_drag(dc: &mut DocState, p: &PointerInfo) {
                 if result.correction.dx != 0.0 || result.correction.dy != 0.0 {
                     let snapped =
                         PdfPoint::new(pos.x + result.correction.dx, pos.y + result.correction.dy);
-                    rect = select::resize_rect(orig.rect, handle, snapped, p.modifiers.shift);
+                    rect = select::resize_rect(orig.rect, handle, snapped, lock_aspect);
                 }
                 dc.tool_ctl.set_guides(orig.page, result.guides);
             } else {
@@ -872,6 +1081,123 @@ mod tests {
             assert_eq!(dc.store.get(1).cloned(), expected);
         }
         assert!(!dc.history.can_undo());
+    }
+
+    /// A stamp is placed with one click, says what the tool was told to say,
+    /// and is one undo step -- and the tokens in it are spent at that moment,
+    /// so what is stored is words rather than instructions.
+    #[test]
+    fn stamping_puts_down_one_stamp_with_its_tokens_already_spent() {
+        let mut dc = doc_state();
+        dc.tool_ctl.stamp.text = "APPROVED %date".into();
+        set_tool(&mut dc, ActiveTool::Stamp);
+        click(&mut dc, 200.0, 500.0);
+
+        let made = dc.store.on_page(0).next().expect("a stamp").clone();
+        let AnnotationKind::Stamp { text, font_size } = &made.kind else {
+            panic!("got {:?}", made.kind);
+        };
+        assert!(text.starts_with("APPROVED 20"), "{text}");
+        assert!(!text.contains('%'), "{text}");
+        assert_eq!(*font_size, DEFAULT_STAMP_FONT);
+        assert_eq!(made.style.stroke, STAMP_RED);
+        // Centred on the click, and wide enough for the words.
+        let centre = made.rect.center();
+        assert!((centre.x - 200.0).abs() < 0.01, "{centre:?}");
+        assert!((centre.y - 500.0).abs() < 0.01, "{centre:?}");
+        assert!(made.rect.width() > made.rect.height(), "{:?}", made.rect);
+
+        assert_eq!(dc.selection, Some(made.id));
+        assert!(dc.history.undo(&mut dc.store, &mut dc.pages));
+        assert!(dc.store.get(made.id).is_none(), "one click, one undo");
+
+        // Nothing to say is nothing to stamp.
+        dc.tool_ctl.stamp.text = "   ".into();
+        click(&mut dc, 300.0, 500.0);
+        assert!(dc.store.on_page(0).next().is_none());
+    }
+
+    /// The sequence tool counts up as it goes, and picks up from the document
+    /// rather than from the window: the numbers on the page are the record.
+    #[test]
+    fn the_sequence_tool_counts_up_and_resumes_from_the_page() {
+        let mut dc = doc_state();
+        set_tool(&mut dc, ActiveTool::Sequence);
+        for (i, y) in [700.0f32, 650.0, 600.0].iter().enumerate() {
+            click(&mut dc, 100.0, *y);
+            let placed = dc.store.on_page(0).last().expect("a number");
+            let AnnotationKind::Stamp { text, .. } = &placed.kind else {
+                panic!("got {:?}", placed.kind);
+            };
+            assert_eq!(text, &(i + 1).to_string());
+            // A number is stamped in a box no narrower than it is tall.
+            assert!(placed.rect.width() >= placed.rect.height(), "{placed:?}");
+        }
+        assert_eq!(dc.tool_ctl.sequence.next, 4);
+
+        // Picking the tool up again resumes above what is on the page, not
+        // above what this window last did.
+        dc.tool_ctl.sequence.next = 99;
+        set_tool(&mut dc, ActiveTool::Select);
+        set_tool(&mut dc, ActiveTool::Sequence);
+        assert_eq!(dc.tool_ctl.sequence.next, 4);
+
+        // A prefix is its own count: "A1" is not a fourth "3".
+        dc.tool_ctl.sequence.prefix = "A".into();
+        set_tool(&mut dc, ActiveTool::Select);
+        set_tool(&mut dc, ActiveTool::Sequence);
+        assert_eq!(dc.tool_ctl.sequence.next, 1);
+        click(&mut dc, 300.0, 700.0);
+        let AnnotationKind::Stamp { text, .. } = &dc.store.on_page(0).last().unwrap().kind else {
+            panic!()
+        };
+        assert_eq!(text, "A1");
+
+        // And the numbers a prefix does not own are not counted under it.
+        assert_eq!(next_sequence_number(&dc.store, "A"), 2);
+        assert_eq!(next_sequence_number(&dc.store, ""), 4);
+        assert_eq!(next_sequence_number(&dc.store, "B"), 1);
+    }
+
+    /// Deleting the middle of a sequence leaves the count where the highest
+    /// number is: renumbering behind the user's back would be worse.
+    #[test]
+    fn the_sequence_resumes_above_the_highest_number_left() {
+        let mut dc = doc_state();
+        set_tool(&mut dc, ActiveTool::Sequence);
+        click(&mut dc, 100.0, 700.0);
+        click(&mut dc, 100.0, 650.0);
+        click(&mut dc, 100.0, 600.0);
+        let second = dc.store.on_page(0).nth(1).expect("the second").id;
+        dc.store.remove(second);
+        assert_eq!(next_sequence_number(&dc.store, ""), 4);
+    }
+
+    /// A picture stamp needs a picture: without one the click does nothing,
+    /// with one it lands at the picture's own proportions.
+    #[test]
+    fn an_image_stamp_lands_only_once_a_picture_has_been_chosen() {
+        let mut dc = doc_state();
+        set_tool(&mut dc, ActiveTool::ImageStamp);
+        click(&mut dc, 200.0, 400.0);
+        assert!(dc.store.on_page(0).next().is_none(), "nothing to place yet");
+
+        dc.tool_ctl.stamp.image = Some(crate::export::pdf::tests::png_fixture(40, 20));
+        click(&mut dc, 200.0, 400.0);
+        let made = dc.store.on_page(0).next().expect("a picture").clone();
+        assert!(matches!(made.kind, AnnotationKind::ImageStamp { .. }));
+        assert!((made.rect.width() - 40.0).abs() < 0.01, "{:?}", made.rect);
+        assert!((made.rect.height() - 20.0).abs() < 0.01, "{:?}", made.rect);
+
+        // Dragged by a corner it holds those proportions unless shift says not.
+        dc.tool = ActiveTool::Select;
+        let corner = PdfPoint::new(made.rect.max.x, made.rect.max.y);
+        on_press(&mut dc, &at(corner.x, corner.y));
+        on_drag(&mut dc, &at(corner.x + 40.0, corner.y + 5.0));
+        on_release(&mut dc, &at(corner.x + 40.0, corner.y + 5.0));
+        let resized = dc.store.get(made.id).expect("still there");
+        let ratio = resized.rect.width() / resized.rect.height();
+        assert!((ratio - 2.0).abs() < 0.05, "{:?}", resized.rect);
     }
 
     /// Changing the cloudiness is an ordinary annotation edit, so the history

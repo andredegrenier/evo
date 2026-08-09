@@ -27,11 +27,67 @@ pub fn color32(c: Color, opacity: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r, c.g, c.b, (c.a as f32 * opacity).round() as u8)
 }
 
+/// Decoded pictures for the image stamps on a document, one texture each.
+///
+/// Keyed by annotation id rather than by the bytes: the same signature stamped
+/// twice is two annotations, and either can be deleted on its own.
+/// [`sync`](StampTextures::sync) is what makes the deletion free -- it drops
+/// every texture whose annotation is no longer in the store, which covers Undo
+/// and page deletion as well as the Delete key without any of them knowing this
+/// cache exists. A PNG that does not decode is remembered as `None` so it is
+/// not re-decoded once a frame forever.
+#[derive(Default)]
+pub struct StampTextures {
+    map: std::collections::HashMap<
+        crate::doc::annotation::AnnotationId,
+        Option<egui::TextureHandle>,
+    >,
+}
+
+impl StampTextures {
+    /// Decode what is new, forget what is gone. Called once a frame.
+    pub fn sync(&mut self, ctx: &egui::Context, store: &crate::doc::store::AnnotationStore) {
+        self.map.retain(|id, _| store.get(*id).is_some());
+        for (id, png) in store.image_stamps() {
+            if self.map.contains_key(&id) {
+                continue;
+            }
+            let tex = decode_png(png).map(|(size, rgba)| {
+                ctx.load_texture(
+                    format!("stamp-{id}"),
+                    egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
+                    egui::TextureOptions::LINEAR,
+                )
+            });
+            self.map.insert(id, tex);
+        }
+    }
+
+    fn get(&self, id: crate::doc::annotation::AnnotationId) -> Option<&egui::TextureHandle> {
+        self.map.get(&id)?.as_ref()
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+}
+
+/// A PNG as ([width, height], straight-alpha RGBA), or `None` if it is not one.
+fn decode_png(png: &[u8]) -> Option<([usize; 2], Vec<u8>)> {
+    let img = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+        .ok()?
+        .into_rgba8();
+    let (w, h) = img.dimensions();
+    Some(([w as usize, h as usize], img.into_raw()))
+}
+
 /// Route finished renders from the worker into the texture caches, and start
 /// the caches' frame. Called once per frame, before anything paints.
 pub fn poll_worker(dc: &mut DocState, ctx: &egui::Context) {
     dc.cache.begin_frame();
     dc.thumb_cache.begin_frame();
+    dc.stamp_images.sync(ctx, &dc.store);
     while let Some(res) = dc.worker.try_recv() {
         // The first answer of any kind says which rasterizer opened the
         // document, which is what the status bar reports.
@@ -230,7 +286,7 @@ fn paint_and_interact(
 
         // Markup on this page.
         for ann in dc.store.on_page(slot.original) {
-            paint_annotation(&page_painter, &t, ann);
+            paint_annotation(&page_painter, &t, ann, &dc.stamp_images);
         }
     }
 
@@ -244,7 +300,7 @@ fn paint_and_interact(
     {
         let t = transform_for(dc, slot, content_rect);
         if let Some(preview) = creation_preview(dc.tool, *start, *current, dc) {
-            paint_annotation(&painter, &t, &preview);
+            paint_annotation(&painter, &t, &preview, &dc.stamp_images);
         }
     }
     // Vertices going down: the outline so far, plus a segment following the
@@ -389,7 +445,12 @@ fn creation_preview(
     })
 }
 
-pub fn paint_annotation(painter: &egui::Painter, t: &PageTransform, ann: &Annotation) {
+pub fn paint_annotation(
+    painter: &egui::Painter,
+    t: &PageTransform,
+    ann: &Annotation,
+    images: &StampTextures,
+) {
     let stroke = Stroke::new(
         ann.style.stroke_width * t.zoom,
         color32(ann.style.stroke, ann.style.opacity),
@@ -453,6 +514,35 @@ pub fn paint_annotation(painter: &egui::Painter, t: &PageTransform, ann: &Annota
                 }
             }
         }
+        AnnotationKind::Stamp { text, font_size } => {
+            paint_stamp(painter, rect, text, *font_size * t.zoom, ann);
+        }
+        AnnotationKind::ImageStamp { .. } => {
+            match images.get(ann.id) {
+                Some(tex) => {
+                    let tint = Color32::from_white_alpha(
+                        (ann.style.opacity.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    );
+                    let mut mesh = Mesh::with_texture(tex.id());
+                    mesh.add_rect_with_uv(
+                        rect,
+                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                        tint,
+                    );
+                    painter.add(Shape::mesh(mesh));
+                }
+                // A picture that will not decode still occupies the page, and
+                // saying so beats a hole where a signature should be.
+                None => {
+                    painter.rect_stroke(
+                        rect,
+                        CornerRadius::same(2),
+                        Stroke::new(1.0, Color32::from_gray(140)),
+                        StrokeKind::Inside,
+                    );
+                }
+            }
+        }
         AnnotationKind::TextBox {
             text,
             font_size,
@@ -476,6 +566,55 @@ pub fn paint_annotation(painter: &egui::Painter, t: &PageTransform, ann: &Annota
             painter.galley(Pos2::new(x, rect.min.y), galley, color);
         }
     }
+}
+
+/// Draw a stamp: a rounded box in the stamp's colour with its word centred
+/// inside, shrunk to fit if the box is narrower than the word.
+///
+/// The word is drawn heavy rather than in a bold face: evo ships one weight of
+/// Liberation Sans, and painting the galley a few tenths of a pixel apart is
+/// what the PDF appearance stream does too (text rendering mode 2, fill *and*
+/// stroke). Screen and print thicken the same letters the same way.
+fn paint_stamp(painter: &egui::Painter, rect: Rect, text: &str, font_px: f32, ann: &Annotation) {
+    let ink = color32(ann.style.stroke, ann.style.opacity);
+    if ann.style.fill.is_visible() {
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(stamp_radius(rect) as u8),
+            color32(ann.style.fill, ann.style.opacity),
+        );
+    }
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(stamp_radius(rect) as u8),
+        Stroke::new((ann.style.stroke_width * 1.5).max(1.0), ink),
+        StrokeKind::Inside,
+    );
+    if text.is_empty() {
+        return;
+    }
+    let inner = rect.width() - stamp_radius(rect) * 2.0;
+    let mut galley =
+        painter.layout_no_wrap(text.to_owned(), FontId::proportional(font_px.max(1.0)), ink);
+    if galley.size().x > inner && galley.size().x > 0.0 {
+        let shrunk = (font_px * inner / galley.size().x).max(1.0);
+        galley = painter.layout_no_wrap(text.to_owned(), FontId::proportional(shrunk), ink);
+    }
+    let pos = rect.center() - galley.size() / 2.0;
+    let weight = (font_px * 0.03).clamp(0.3, 1.2);
+    for offset in [
+        Vec2::ZERO,
+        Vec2::new(weight, 0.0),
+        Vec2::new(0.0, weight),
+        Vec2::new(weight, weight),
+    ] {
+        painter.galley(pos + offset, galley.clone(), ink);
+    }
+}
+
+/// The corner rounding of a stamp box, in the same units as the box.
+fn stamp_radius(rect: Rect) -> f32 {
+    (rect.height() * 0.18).clamp(1.0, 12.0)
 }
 
 /// Draw a cloudy polygon: the base shape's fill, with the scalloped outline
@@ -943,5 +1082,83 @@ mod tests {
         };
         one_frame(&mut dc);
         assert_eq!(dc.store.on_page(0).count(), 5, "drawing changed nothing");
+    }
+
+    /// A frame with both kinds of stamp on it, and the picture cache that
+    /// serves one of them: a texture is made once, kept while its annotation
+    /// is, and thrown away with it -- which is what makes Delete and Undo free
+    /// without either of them knowing the cache exists.
+    #[test]
+    fn stamps_draw_and_their_pictures_are_cached_for_exactly_as_long_as_they_last() {
+        let ctx = egui::Context::default();
+        let mut dc = state(&ctx);
+        let place = |dc: &mut DocState, kind: AnnotationKind, y: f32| -> u64 {
+            let id = dc.store.alloc_id();
+            dc.store.insert(Annotation {
+                id,
+                page: 0,
+                kind,
+                rect: PdfRect::from_min_size(PdfPoint::new(100.0, y), 160.0, 44.0),
+                style: Style::default(),
+            });
+            id
+        };
+        let words = place(
+            &mut dc,
+            AnnotationKind::Stamp {
+                text: "APPROVED".into(),
+                font_size: 20.0,
+            },
+            600.0,
+        );
+        // A word too long for its box, which is the branch that re-lays it out.
+        place(
+            &mut dc,
+            AnnotationKind::Stamp {
+                text: "SUPERSEDED BY REVISION C".into(),
+                font_size: 48.0,
+            },
+            500.0,
+        );
+        place(
+            &mut dc,
+            AnnotationKind::Stamp {
+                text: String::new(),
+                font_size: 20.0,
+            },
+            450.0,
+        );
+        let picture = place(
+            &mut dc,
+            AnnotationKind::ImageStamp {
+                png: crate::export::pdf::tests::png_fixture(24, 12),
+            },
+            400.0,
+        );
+        // And one that will never decode: it may not take the frame down.
+        place(
+            &mut dc,
+            AnnotationKind::ImageStamp {
+                png: b"not a png".to_vec(),
+            },
+            350.0,
+        );
+
+        dc.selection = Some(words);
+        one_frame(&mut dc);
+        assert_eq!(
+            dc.stamp_images.len(),
+            2,
+            "one entry per picture, good or not"
+        );
+
+        dc.store.remove(picture);
+        one_frame(&mut dc);
+        assert_eq!(
+            dc.stamp_images.len(),
+            1,
+            "the deleted picture's texture went with it"
+        );
+        assert_eq!(dc.store.on_page(0).count(), 4, "drawing changed nothing");
     }
 }

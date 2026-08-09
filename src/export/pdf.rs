@@ -263,7 +263,10 @@ fn color_array(c: Color) -> Vec<Object> {
 }
 
 fn fmt(v: f32) -> String {
-    // Compact fixed-point formatting for content streams.
+    // Compact fixed-point formatting for content streams. Negative zero is
+    // written as zero: it is the same number, and `-0` in a matrix reads as a
+    // bug to anyone opening the stream.
+    let v = if v == 0.0 { 0.0 } else { v };
     let s = format!("{v:.2}");
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
@@ -298,8 +301,14 @@ fn paint_op(ann: &Annotation) -> &'static str {
     }
 }
 
+/// Resource names of the image XObjects a content stream may draw, by
+/// annotation id. Image stamps are the only markup that needs anything from
+/// outside its own operators, and this is how it is told what that thing is
+/// called where it is about to be drawn.
+type ImageNames = HashMap<crate::doc::annotation::AnnotationId, String>;
+
 /// Content-stream ops for one annotation, in PDF **user space**.
-fn content_ops(info: &PageInfo, ann: &Annotation) -> String {
+fn content_ops(info: &PageInfo, ann: &Annotation, images: &ImageNames) -> String {
     let mut ops = String::from("q\n");
     let style = &ann.style;
     if style.stroke.is_visible() {
@@ -402,6 +411,17 @@ fn content_ops(info: &PageInfo, ann: &Annotation) -> String {
                 ));
             }
         }
+        AnnotationKind::Stamp { text, font_size } => {
+            ops.push_str(&stamp_ops(info, ann, text, *font_size));
+        }
+        AnnotationKind::ImageStamp { .. } => {
+            if let Some(name) = images.get(&ann.id) {
+                // An image XObject draws into the unit square, so the matrix
+                // that places it is the box itself, turned to face whichever
+                // way the page is rotated.
+                ops.push_str(&placement_matrix(info, ann.rect, &format!("/{name} Do\n")));
+            }
+        }
         AnnotationKind::TextBox {
             text,
             font_size,
@@ -412,6 +432,137 @@ fn content_ops(info: &PageInfo, ann: &Annotation) -> String {
     }
     ops.push_str("Q\n");
     ops
+}
+
+/// The basis vectors of the page's intrinsic rotation: where display-space
+/// `+x` points in user space. Display `+y` is then `(-s, c)`.
+fn rotation_basis(info: &PageInfo) -> (f32, f32) {
+    match info.intrinsic_rotation.rem_euclid(360) {
+        90 => (0.0f32, 1.0f32),
+        180 => (-1.0, 0.0),
+        270 => (0.0, -1.0),
+        _ => (1.0, 0.0),
+    }
+}
+
+/// Wrap `body` in a `cm` that maps the unit square onto `rect` as it is
+/// displayed: `(0,0)` is the box's bottom-left corner, `(1,1)` its top-right,
+/// whichever way the page itself is turned.
+fn placement_matrix(info: &PageInfo, rect: PdfRect, body: &str) -> String {
+    let (c, s) = rotation_basis(info);
+    let (ox, oy) = display_to_user(info, rect.min);
+    let (w, h) = (rect.width(), rect.height());
+    format!(
+        "q\n{} {} {} {} {} {} cm\n{body}Q\n",
+        fmt(w * c),
+        fmt(w * s),
+        fmt(-h * s),
+        fmt(h * c),
+        fmt(ox),
+        fmt(oy)
+    )
+}
+
+/// A stamp: a rounded box with its word centred inside, drawn in a local space
+/// where the box is `w` by `h` with its origin at the bottom-left corner.
+///
+/// The word is set in Helvetica in text rendering mode 2 -- filled *and*
+/// stroked -- which is how it comes out heavy without a second font programme,
+/// and it keeps the standard widths honest so the centring is arithmetic
+/// rather than guesswork.
+fn stamp_ops(info: &PageInfo, ann: &Annotation, text: &str, font_size: f32) -> String {
+    let (c, s) = rotation_basis(info);
+    let (ox, oy) = display_to_user(info, ann.rect.min);
+    let (w, h) = (ann.rect.width(), ann.rect.height());
+    let mut ops = format!(
+        "q\n{} {} {} {} {} {} cm\n",
+        fmt(c),
+        fmt(s),
+        fmt(-s),
+        fmt(c),
+        fmt(ox),
+        fmt(oy)
+    );
+
+    let radius = (h * 0.18).clamp(1.0, 12.0);
+    let border = (ann.style.stroke_width * 1.5).max(1.0);
+    ops.push_str(&format!(
+        "{}\n{}\n{} w\n1 j 1 J\n",
+        stroke_rg(ann.style.stroke),
+        rg(ann.style.fill),
+        fmt(border)
+    ));
+    ops.push_str(&rounded_rect_path(w, h, radius));
+    ops.push_str(if ann.style.fill.is_visible() {
+        "B\n"
+    } else {
+        "S\n"
+    });
+
+    if !text.is_empty() {
+        let natural: f32 = text.chars().map(|ch| char_width(ch, font_size)).sum();
+        let inner = (w - 2.0 * radius).max(1.0);
+        let size = if natural > inner && natural > 0.0 {
+            font_size * inner / natural
+        } else {
+            font_size
+        };
+        let line_w: f32 = text.chars().map(|ch| char_width(ch, size)).sum();
+        // Caps sit from the baseline up to about 0.72em, so their middle is
+        // 0.36em above it: that is what centres the word rather than its box.
+        let x = (w - line_w) / 2.0;
+        let y = h / 2.0 - 0.36 * size;
+        ops.push_str(&format!(
+            "BT\n/EvoHelv {} Tf\n2 Tr\n{} w\n{}\n{}\n1 0 0 1 {} {} Tm\n({}) Tj\nET\n",
+            fmt(size),
+            fmt((size * 0.035).max(0.2)),
+            rg(ann.style.stroke),
+            stroke_rg(ann.style.stroke),
+            fmt(x),
+            fmt(y),
+            escape_pdf_string(text)
+        ));
+    }
+    ops.push_str("Q\n");
+    ops
+}
+
+/// A rounded rectangle from (0,0) to (w,h), as a closed path.
+fn rounded_rect_path(w: f32, h: f32, radius: f32) -> String {
+    const K: f32 = 0.552_284_8;
+    let r = radius.min(w / 2.0).min(h / 2.0).max(0.0);
+    if r <= 0.01 {
+        return format!("0 0 {} {} re\n", fmt(w), fmt(h));
+    }
+    let k = r * K;
+    let m = |x: f32, y: f32| format!("{} {} m\n", fmt(x), fmt(y));
+    let l = |x: f32, y: f32| format!("{} {} l\n", fmt(x), fmt(y));
+    let c = |x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32| {
+        format!(
+            "{} {} {} {} {} {} c\n",
+            fmt(x1),
+            fmt(y1),
+            fmt(x2),
+            fmt(y2),
+            fmt(x),
+            fmt(y)
+        )
+    };
+    // Counter-clockwise from the bottom-left corner's end, rounding each corner
+    // with the usual quarter-circle bezier.
+    [
+        m(r, 0.0),
+        l(w - r, 0.0),
+        c(w - r + k, 0.0, w, r - k, w, r),
+        l(w, h - r),
+        c(w, h - r + k, w - r + k, h, w - r, h),
+        l(r, h),
+        c(r - k, h, 0.0, h - r + k, 0.0, h - r),
+        l(0.0, r),
+        c(0.0, r - k, r - k, 0.0, r, 0.0),
+        "h\n".to_owned(),
+    ]
+    .concat()
 }
 
 /// A straight path through `points`, closed for a polygon and left open for a
@@ -763,6 +914,85 @@ pub fn helvetica_font_dict() -> Dictionary {
 // Building annotation dictionaries
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Image XObjects (image stamps)
+// ---------------------------------------------------------------------------
+
+/// zlib-compressed bytes, which is what `/FlateDecode` names.
+fn deflate(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    // Writing to a Vec cannot fail; a corrupt stream is not a failure mode we
+    // can reach here, so the fallback is simply the bytes uncompressed -- which
+    // would then be tagged wrongly, so we keep the panic-free path honest by
+    // returning the raw bytes only via the caller's `None`.
+    if encoder.write_all(bytes).is_err() {
+        return Vec::new();
+    }
+    encoder.finish().unwrap_or_default()
+}
+
+/// Turn a PNG into an image XObject (plus a soft mask when it has any
+/// transparency), and return its object id.
+///
+/// PDF has no PNG: an image is samples plus a colour space, and the alpha
+/// channel is a second, greyscale image hung off `/SMask`. The samples go in
+/// `/FlateDecode`d, which is the same compression the PNG already used and the
+/// only one every viewer is required to understand.
+fn image_xobject(lo: &mut LoDocument, png: &[u8]) -> Option<ObjectId> {
+    let decoded = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+        .ok()?
+        .into_rgba8();
+    let (w, h) = decoded.dimensions();
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let pixels = decoded.into_raw();
+    let mut rgb = Vec::with_capacity(pixels.len() / 4 * 3);
+    let mut alpha = Vec::with_capacity(pixels.len() / 4);
+    for px in pixels.chunks_exact(4) {
+        rgb.extend_from_slice(&px[..3]);
+        alpha.push(px[3]);
+    }
+
+    let smask = if alpha.iter().any(|a| *a != 255) {
+        let samples = deflate(&alpha);
+        if samples.is_empty() {
+            return None;
+        }
+        let dict = dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Image",
+            "Width" => w as i64,
+            "Height" => h as i64,
+            "ColorSpace" => "DeviceGray",
+            "BitsPerComponent" => 8,
+            "Filter" => "FlateDecode",
+        };
+        Some(lo.add_object(Stream::new(dict, samples)))
+    } else {
+        None
+    };
+
+    let samples = deflate(&rgb);
+    if samples.is_empty() {
+        return None;
+    }
+    let mut dict = dictionary! {
+        "Type" => "XObject",
+        "Subtype" => "Image",
+        "Width" => w as i64,
+        "Height" => h as i64,
+        "ColorSpace" => "DeviceRGB",
+        "BitsPerComponent" => 8,
+        "Filter" => "FlateDecode",
+    };
+    if let Some(smask) = smask {
+        dict.set("SMask", Object::Reference(smask));
+    }
+    Some(lo.add_object(Stream::new(dict, samples)))
+}
+
 fn build_annotation(lo: &mut LoDocument, info: &PageInfo, ann: &Annotation) -> ObjectId {
     // Derive the box from the actual geometry so the appearance stream is
     // never clipped, even if `rect` is stale for line/pen shapes.
@@ -803,19 +1033,41 @@ fn build_annotation(lo: &mut LoDocument, info: &PageInfo, ann: &Annotation) -> O
     let r = [r[0] - pad, r[1] - pad, r[2] + pad, r[3] + pad];
     let bbox = r;
 
+    // The picture an image stamp draws has to exist before the stream that
+    // draws it, and it is named inside that stream's own resources.
+    let mut images = ImageNames::new();
+    let mut image_id = None;
+    if let AnnotationKind::ImageStamp { png } = &ann.kind
+        && let Some(id) = image_xobject(lo, png)
+    {
+        image_id = Some(id);
+        images.insert(ann.id, "EvoImg".to_owned());
+    }
+
     // Appearance stream: a Form XObject drawn in user-space coordinates.
     let mut ap_dict = dictionary! {
         "Type" => "XObject",
         "Subtype" => "Form",
         "BBox" => bbox.iter().map(|v| Object::Real(*v)).collect::<Vec<_>>(),
     };
-    if matches!(ann.kind, AnnotationKind::TextBox { .. }) {
+    if matches!(
+        ann.kind,
+        AnnotationKind::TextBox { .. } | AnnotationKind::Stamp { .. }
+    ) {
         ap_dict.set(
             "Resources",
             dictionary! {
                 "Font" => dictionary! { "EvoHelv" => Object::Dictionary(helvetica_font_dict()) },
             },
         );
+    }
+    if let Some(id) = image_id {
+        let mut resources = match ap_dict.get(b"Resources").ok().cloned() {
+            Some(Object::Dictionary(d)) => d,
+            _ => Dictionary::new(),
+        };
+        resources.set("XObject", dictionary! { "EvoImg" => Object::Reference(id) });
+        ap_dict.set("Resources", resources);
     }
     if ann.style.opacity < 1.0 {
         ap_dict.set(
@@ -828,7 +1080,7 @@ fn build_annotation(lo: &mut LoDocument, info: &PageInfo, ann: &Annotation) -> O
     if ann.style.opacity < 1.0 {
         ops.push_str("q\n/EvoGS gs\n");
     }
-    ops.push_str(&content_ops(info, ann));
+    ops.push_str(&content_ops(info, ann, &images));
     if ann.style.opacity < 1.0 {
         ops.push_str("Q\n");
     }
@@ -843,6 +1095,7 @@ fn build_annotation(lo: &mut LoDocument, info: &PageInfo, ann: &Annotation) -> O
         AnnotationKind::TextBox { .. } => "FreeText",
         AnnotationKind::Polygon { .. } => "Polygon",
         AnnotationKind::PolyLine { .. } => "PolyLine",
+        AnnotationKind::Stamp { .. } | AnnotationKind::ImageStamp { .. } => "Stamp",
     };
 
     let mut dict = dictionary! {
@@ -976,6 +1229,21 @@ fn build_annotation(lo: &mut LoDocument, info: &PageInfo, ann: &Annotation) -> O
                 );
             }
         }
+        AnnotationKind::Stamp { text, .. } => {
+            // `/Name` is the standard stamp a viewer may substitute its own
+            // artwork for, so it is set only when the words really are one of
+            // the standards. The appearance stream is written either way: a
+            // stamp reading "Reviewed by Ada" has no name to go by, and a
+            // viewer that recognizes /Approved still has to be shown what evo
+            // drew rather than left to guess at the box size.
+            if let Some(name) = crate::doc::annotation::standard_stamp_name(text) {
+                dict.set("Name", Object::Name(name.as_bytes().to_vec()));
+            }
+            dict.set("Contents", Object::string_literal(text.as_str()));
+        }
+        AnnotationKind::ImageStamp { .. } => {
+            dict.set("Contents", Object::string_literal("Image stamp"));
+        }
         AnnotationKind::TextBox {
             text,
             font_size,
@@ -1049,24 +1317,44 @@ fn flatten_annotations(
     info: &PageInfo,
     annotations: &[Annotation],
 ) -> Result<(), ExportError> {
-    let needs_font = annotations
-        .iter()
-        .any(|a| matches!(a.kind, AnnotationKind::TextBox { .. }));
+    let needs_font = annotations.iter().any(|a| {
+        matches!(
+            a.kind,
+            AnnotationKind::TextBox { .. } | AnnotationKind::Stamp { .. }
+        )
+    });
     let min_opacity = annotations
         .iter()
         .map(|a| a.style.opacity)
         .fold(1.0f32, f32::min);
 
+    // Every image stamp's picture, added to the page's own resources: baked
+    // markup draws from the page, not from an appearance stream of its own.
+    let mut images = ImageNames::new();
+    let mut image_objects: Vec<(String, ObjectId)> = Vec::new();
+    for ann in annotations {
+        if let AnnotationKind::ImageStamp { png } = &ann.kind
+            && let Some(id) = image_xobject(lo, png)
+        {
+            let name = format!("EvoImg{}", ann.id);
+            images.insert(ann.id, name.clone());
+            image_objects.push((name, id));
+        }
+    }
+
     materialize_resources(lo, page_id, needs_font, min_opacity < 1.0)?;
+    if !image_objects.is_empty() {
+        add_image_xobjects(lo, page_id, &image_objects)?;
+    }
 
     let mut ops = String::from("q\n");
     for ann in annotations {
         if ann.style.opacity < 1.0 {
             ops.push_str(&format!("q\n/EvoGS{} gs\n", gs_key(ann.style.opacity)));
-            ops.push_str(&content_ops(info, ann));
+            ops.push_str(&content_ops(info, ann, &images));
             ops.push_str("Q\n");
         } else {
-            ops.push_str(&content_ops(info, ann));
+            ops.push_str(&content_ops(info, ann, &images));
         }
     }
     ops.push_str("Q\n");
@@ -1143,6 +1431,34 @@ fn materialize_resources(
     Ok(())
 }
 
+/// Register image XObjects on the page's (already materialized) resources.
+fn add_image_xobjects(
+    lo: &mut LoDocument,
+    page_id: ObjectId,
+    images: &[(String, ObjectId)],
+) -> Result<(), ExportError> {
+    let page_dict = lo.get_dictionary(page_id)?;
+    let mut resources = match page_dict.get(b"Resources") {
+        Ok(Object::Dictionary(d)) => d.clone(),
+        _ => Dictionary::new(),
+    };
+    let mut xobjects = match resources.get(b"XObject") {
+        Ok(Object::Dictionary(d)) => d.clone(),
+        Ok(Object::Reference(r)) => match lo.get_object(*r) {
+            Ok(Object::Dictionary(d)) => d.clone(),
+            _ => Dictionary::new(),
+        },
+        _ => Dictionary::new(),
+    };
+    for (name, id) in images {
+        xobjects.set(name.as_str(), Object::Reference(*id));
+    }
+    resources.set("XObject", xobjects);
+    let page_dict = lo.get_dictionary_mut(page_id)?;
+    page_dict.set("Resources", resources);
+    Ok(())
+}
+
 fn add_gs_states(
     lo: &mut LoDocument,
     page_id: ObjectId,
@@ -1198,10 +1514,30 @@ fn append_content_stream(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::doc::annotation::Style;
     use crate::doc::geometry::PdfRect;
+
+    /// A `w` by `h` PNG with a transparent left half, made on the spot.
+    ///
+    /// Built rather than committed: a fixture whose alpha channel is the whole
+    /// point is clearer as three lines of code than as a binary blob nobody can
+    /// read in a diff.
+    pub(crate) fn png_fixture(w: u32, h: u32) -> Vec<u8> {
+        let img = image::RgbaImage::from_fn(w, h, |x, y| {
+            if x < w / 2 {
+                image::Rgba([0, 0, 0, 0])
+            } else {
+                image::Rgba([(x * 4) as u8, (y * 4) as u8, 200, 255])
+            }
+        });
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .expect("encode");
+        png.into_inner()
+    }
 
     fn fixture() -> Document {
         Document::load_path("tests/fixtures/sample.pdf".into(), None).unwrap()
@@ -1571,6 +1907,333 @@ mod tests {
         let content = String::from_utf8_lossy(&lo.get_page_content(page1)).into_owned();
         assert!(content.matches(" c\n").count() > 12, "no scallops");
         assert!(content.contains("h f\n"), "no arrowhead");
+        assert!(hayro::hayro_syntax::Pdf::new(bytes).is_ok());
+    }
+
+    fn stamp_store(kinds: Vec<AnnotationKind>) -> AnnotationStore {
+        let mut store = AnnotationStore::default();
+        for (i, kind) in kinds.into_iter().enumerate() {
+            let id = store.alloc_id();
+            store.insert(Annotation {
+                id,
+                page: 0,
+                kind,
+                rect: PdfRect::from_min_size(
+                    PdfPoint::new(100.0, 400.0 + 80.0 * i as f32),
+                    160.0,
+                    44.0,
+                ),
+                style: crate::doc::annotation::Style {
+                    stroke: crate::tools::STAMP_RED,
+                    stroke_width: 1.5,
+                    ..Style::default()
+                },
+            });
+        }
+        store
+    }
+
+    /// A stamp leaves as `/Stamp`, and one whose words are a standard stamp
+    /// says so in `/Name` -- but both carry an appearance stream, because a
+    /// viewer that substitutes its own artwork for /Approved is not the only
+    /// viewer, and one reading "Reviewed by Ada" has no name to go by at all.
+    #[test]
+    fn exports_stamps_naming_only_the_standard_ones() {
+        let doc = fixture();
+        let pages = PageList::new(doc.pages.len());
+        let store = stamp_store(vec![
+            AnnotationKind::Stamp {
+                text: "APPROVED".into(),
+                font_size: 20.0,
+            },
+            AnnotationKind::Stamp {
+                text: "Reviewed by Ada".into(),
+                font_size: 20.0,
+            },
+        ]);
+
+        let bytes = export_pdf_bytes(&doc, &pages, &store, ExportOptions::default()).unwrap();
+
+        let standard = exported_annot(&bytes, 0);
+        assert_eq!(
+            standard.get(b"Subtype").unwrap().as_name().unwrap(),
+            b"Stamp"
+        );
+        assert_eq!(
+            standard.get(b"Name").unwrap().as_name().unwrap(),
+            b"Approved"
+        );
+
+        let custom = exported_annot(&bytes, 1);
+        assert_eq!(custom.get(b"Subtype").unwrap().as_name().unwrap(), b"Stamp");
+        assert!(
+            custom.get(b"Name").is_err(),
+            "there is no standard stamp for those words"
+        );
+
+        // Both were drawn: a rounded box and the words inside it.
+        let lo = LoDocument::load_mem(&bytes).unwrap();
+        for annot in [&standard, &custom] {
+            let ap = annot
+                .get(b"AP")
+                .unwrap()
+                .as_dict()
+                .unwrap()
+                .get(b"N")
+                .unwrap()
+                .as_reference()
+                .unwrap();
+            let stream = lo.get_object(ap).unwrap().as_stream().unwrap();
+            let ops = String::from_utf8_lossy(&stream.content).into_owned();
+            assert!(
+                ops.matches(" c\n").count() >= 4,
+                "no rounded corners: {ops}"
+            );
+            assert!(ops.contains("2 Tr"), "the word is not drawn heavy: {ops}");
+            assert!(ops.contains(" Tj\n"), "no words at all: {ops}");
+        }
+        assert!(
+            String::from_utf8_lossy(
+                &lo.get_object(
+                    standard
+                        .get(b"AP")
+                        .unwrap()
+                        .as_dict()
+                        .unwrap()
+                        .get(b"N")
+                        .unwrap()
+                        .as_reference()
+                        .unwrap()
+                )
+                .unwrap()
+                .as_stream()
+                .unwrap()
+                .content
+            )
+            .contains("(APPROVED) Tj"),
+            "the standard stamp still draws its own words"
+        );
+
+        assert!(hayro::hayro_syntax::Pdf::new(bytes).is_ok());
+    }
+
+    /// An image stamp is the one piece of markup that is not a path: it leaves
+    /// as a `/Stamp` whose appearance draws an image XObject, with the picture's
+    /// transparency hung off it as an `/SMask`. Both readers have to open it.
+    #[test]
+    fn exports_an_image_stamp_as_an_image_xobject_with_its_transparency() {
+        let doc = fixture();
+        let pages = PageList::new(doc.pages.len());
+        let store = stamp_store(vec![AnnotationKind::ImageStamp {
+            png: png_fixture(64, 32),
+        }]);
+
+        let bytes = export_pdf_bytes(&doc, &pages, &store, ExportOptions::default()).unwrap();
+        if let Ok(dir) = std::env::var("EVO_DUMP") {
+            std::fs::write(std::path::Path::new(&dir).join("export-stamp.pdf"), &bytes).unwrap();
+        }
+
+        let annot = exported_annot(&bytes, 0);
+        assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Stamp");
+
+        let lo = LoDocument::load_mem(&bytes).expect("lopdf reopens the export");
+        let ap_id = annot
+            .get(b"AP")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"N")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        let ap = lo.get_object(ap_id).unwrap().as_stream().unwrap();
+        let ops = String::from_utf8_lossy(&ap.content).into_owned();
+        assert!(
+            ops.contains("/EvoImg Do"),
+            "the picture is not drawn: {ops}"
+        );
+        // Placed by the box, not by the pixel count.
+        assert!(ops.contains("160 0 0 44"), "{ops}");
+
+        let image_id = ap
+            .dict
+            .get(b"Resources")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"XObject")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"EvoImg")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        let image = lo.get_object(image_id).unwrap().as_stream().unwrap();
+        assert_eq!(
+            image.dict.get(b"Subtype").unwrap().as_name().unwrap(),
+            b"Image"
+        );
+        assert_eq!(image.dict.get(b"Width").unwrap().as_i64().unwrap(), 64);
+        assert_eq!(image.dict.get(b"Height").unwrap().as_i64().unwrap(), 32);
+        assert_eq!(
+            image.dict.get(b"ColorSpace").unwrap().as_name().unwrap(),
+            b"DeviceRGB"
+        );
+        assert_eq!(
+            image.dict.get(b"Filter").unwrap().as_name().unwrap(),
+            b"FlateDecode"
+        );
+        // Three bytes a pixel, once the samples are inflated again.
+        assert_eq!(image.decompressed_content().unwrap().len(), 64 * 32 * 3);
+
+        let smask_id = image.dict.get(b"SMask").unwrap().as_reference().unwrap();
+        let smask = lo.get_object(smask_id).unwrap().as_stream().unwrap();
+        assert_eq!(
+            smask.dict.get(b"ColorSpace").unwrap().as_name().unwrap(),
+            b"DeviceGray"
+        );
+        let alpha = smask.decompressed_content().unwrap();
+        assert_eq!(alpha.len(), 64 * 32, "one byte a pixel");
+        assert_eq!(alpha[0], 0, "the left half of the fixture is transparent");
+        assert_eq!(alpha[63], 255, "and the right half is not");
+
+        // And hayro -- the other reader in this program -- opens it too.
+        assert!(hayro::hayro_syntax::Pdf::new(bytes).is_ok());
+    }
+
+    /// A picture with no transparency needs no soft mask, and must not be
+    /// given an empty one.
+    #[test]
+    fn an_opaque_picture_carries_no_soft_mask() {
+        let doc = fixture();
+        let pages = PageList::new(doc.pages.len());
+        let opaque = image::RgbaImage::from_pixel(8, 8, image::Rgba([10, 20, 30, 255]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(opaque)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .expect("encode");
+        let store = stamp_store(vec![AnnotationKind::ImageStamp {
+            png: png.into_inner(),
+        }]);
+
+        let bytes = export_pdf_bytes(&doc, &pages, &store, ExportOptions::default()).unwrap();
+        let lo = LoDocument::load_mem(&bytes).unwrap();
+        let ap_id = exported_annot(&bytes, 0)
+            .get(b"AP")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"N")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        let image_id = lo
+            .get_object(ap_id)
+            .unwrap()
+            .as_stream()
+            .unwrap()
+            .dict
+            .get(b"Resources")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"XObject")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"EvoImg")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        assert!(
+            lo.get_object(image_id)
+                .unwrap()
+                .as_stream()
+                .unwrap()
+                .dict
+                .get(b"SMask")
+                .is_err()
+        );
+    }
+
+    /// Flattened, a stamp is drawn into the page and its picture is registered
+    /// on the page's own resources -- there is no appearance stream left to
+    /// carry it.
+    #[test]
+    fn flattening_bakes_stamps_and_their_pictures_into_the_page() {
+        let doc = fixture();
+        let pages = PageList::new(doc.pages.len());
+        let store = stamp_store(vec![
+            AnnotationKind::Stamp {
+                text: "DRAFT".into(),
+                font_size: 24.0,
+            },
+            AnnotationKind::ImageStamp {
+                png: png_fixture(16, 16),
+            },
+        ]);
+
+        let bytes = export_pdf_bytes(
+            &doc,
+            &pages,
+            &store,
+            ExportOptions {
+                flatten: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let lo = LoDocument::load_mem(&bytes).unwrap();
+        let page1 = lo.get_pages()[&1];
+        assert!(lo.get_dictionary(page1).unwrap().get(b"Annots").is_err());
+        let content = String::from_utf8_lossy(&lo.get_page_content(page1)).into_owned();
+        assert!(content.contains("(DRAFT) Tj"), "{content}");
+        assert!(content.contains("/EvoImg2 Do"), "{content}");
+
+        let resources = lo
+            .get_dictionary(page1)
+            .unwrap()
+            .get(b"Resources")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .clone();
+        assert!(
+            resources
+                .get(b"Font")
+                .unwrap()
+                .as_dict()
+                .unwrap()
+                .get(b"EvoHelv")
+                .is_ok(),
+            "the stamp's font is on the page"
+        );
+        assert!(
+            resources
+                .get(b"XObject")
+                .unwrap()
+                .as_dict()
+                .unwrap()
+                .get(b"EvoImg2")
+                .is_ok(),
+            "and so is its picture"
+        );
+        assert!(hayro::hayro_syntax::Pdf::new(bytes).is_ok());
+    }
+
+    /// A picture that is not a picture must not take the export down with it:
+    /// the stamp simply draws nothing.
+    #[test]
+    fn a_broken_picture_exports_as_nothing_rather_than_as_a_failure() {
+        let doc = fixture();
+        let pages = PageList::new(doc.pages.len());
+        let store = stamp_store(vec![AnnotationKind::ImageStamp {
+            png: b"not a png at all".to_vec(),
+        }]);
+        let bytes = export_pdf_bytes(&doc, &pages, &store, ExportOptions::default())
+            .expect("the export still happens");
         assert!(hayro::hayro_syntax::Pdf::new(bytes).is_ok());
     }
 
