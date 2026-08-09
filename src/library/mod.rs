@@ -140,6 +140,11 @@ pub enum LibraryError {
     Db(String),
     #[error("{0}")]
     Doc(#[from] crate::doc::LoadError),
+    /// Rewriting a protected document as a plain one failed. Separate from
+    /// [`LibraryError::Doc`] because it means evo could *read* the document
+    /// and could not *write* it back out -- a different thing to tell somebody.
+    #[error("this PDF could not be unlocked for the library: {0}")]
+    Decrypt(#[from] lopdf::Error),
 }
 
 pub struct Library {
@@ -154,6 +159,19 @@ pub struct Library {
     /// nothing that reads a document should wait behind it.
     enricher: Option<enrich::Enricher>,
     search_index: std::sync::OnceLock<search::SearchIndex>,
+}
+
+/// The same document with its encryption taken off.
+///
+/// lopdf decrypts every object as it loads and drops `/Encrypt`, so writing
+/// the loaded document straight back out is the whole of it. The bytes that
+/// come back are an ordinary PDF that opens with no password anywhere.
+fn decrypted_copy(bytes: &[u8], password: &str) -> Result<Vec<u8>, LibraryError> {
+    let mut lo =
+        lopdf::Document::load_mem_with_options(bytes, lopdf::LoadOptions::with_password(password))?;
+    let mut out = Vec::new();
+    lo.save_to(&mut out)?;
+    Ok(out)
 }
 
 /// Throw the tantivy index away when it was written to an older layout. It is
@@ -345,10 +363,10 @@ impl Library {
         self.root.join("thumbs").join(format!("{id}.png"))
     }
 
-    /// Import a PDF file: validate, hash, store blob + metadata.
-    /// Returns the metadata (existing metadata if the same bytes were
-    /// imported before).
-    pub fn import(&self, path: &Path) -> Result<DocMeta, LibraryError> {
+    /// Import a PDF file: validate, hash, store blob + metadata, unlocking it
+    /// with `password` first if it needs one. Returns the metadata (existing
+    /// metadata if the same bytes were imported before).
+    pub fn import(&self, path: &Path, password: Option<&str>) -> Result<DocMeta, LibraryError> {
         let bytes = std::fs::read(path)?;
         let filename = path
             .file_name()
@@ -358,7 +376,7 @@ impl Library {
             .file_stem()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Document".into());
-        self.import_bytes(bytes, &title, &filename)
+        self.import_bytes_with_password(bytes, &title, &filename, password)
     }
 
     /// Import a PDF that never was a file -- one a script generated, say.
@@ -370,9 +388,43 @@ impl Library {
         title: &str,
         filename: &str,
     ) -> Result<DocMeta, LibraryError> {
-        // Validate + page count via the normal loader (rejects encrypted).
-        let doc = crate::doc::Document::load_bytes(bytes.clone(), None)?;
+        self.import_bytes_with_password(bytes, title, filename, None)
+    }
 
+    /// Import bytes that need `password` to open.
+    ///
+    /// A protected document is unlocked **once**, here, and what the library
+    /// stores is the decrypted copy. Everything downstream -- the search
+    /// index, OCR, thumbnails, `evo serve` and the phone -- reads the stored
+    /// blob directly and none of them has anywhere to keep a password or
+    /// anybody to ask for one. The password itself is used and dropped; it is
+    /// never written to the database, the blob store or a log. Making that
+    /// trade is the person's decision, so the desktop asks before calling
+    /// this.
+    pub fn import_bytes_with_password(
+        &self,
+        bytes: Vec<u8>,
+        title: &str,
+        filename: &str,
+        password: Option<&str>,
+    ) -> Result<DocMeta, LibraryError> {
+        // Validate + page count via the normal loader.
+        let doc = crate::doc::Document::load_bytes_with_password(bytes.clone(), None, password)?;
+
+        let bytes = match password {
+            None => bytes,
+            Some(password) => {
+                let plain = decrypted_copy(&bytes, password)?;
+                // Prove the copy opens with no password at all before it is
+                // committed: a blob the rest of evo cannot read would be worse
+                // than a refused import.
+                crate::doc::Document::load_bytes(plain.clone(), None)?;
+                plain
+            }
+        };
+
+        // The id is the hash of what is stored, so an unlocked import and the
+        // same file already unlocked by hand are one document, not two.
         let id = hex_digest(&bytes);
         if let Some(existing) = self.db.get_doc(&id)? {
             return Ok(existing);
@@ -505,12 +557,16 @@ mod tests {
     #[test]
     fn import_list_delete_round_trip() {
         let (lib, dir) = temp_library("roundtrip");
-        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let meta = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
         assert_eq!(meta.page_count, 2);
         assert_eq!(meta.title, "sample");
 
         // Re-import dedups to the same id.
-        let again = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let again = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
         assert_eq!(again.id, meta.id);
         assert_eq!(lib.list().unwrap().len(), 1);
 
@@ -520,6 +576,94 @@ mod tests {
 
         lib.delete(&meta.id).unwrap();
         assert!(lib.list().unwrap().is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// Importing a protected PDF unlocks it once and stores the unlocked
+    /// copy. Everything after import -- indexing, OCR, thumbnails, the phone --
+    /// opens the blob with no password, so this test insists the stored bytes
+    /// do, and that the password is nowhere in what was written down.
+    #[test]
+    fn a_protected_import_is_unlocked_once_and_stored_unlocked() {
+        let (lib, dir) = temp_library("encrypted-import");
+
+        for path in crate::doc::tests::PROTECTED {
+            let meta = lib
+                .import(Path::new(path), Some("evo"))
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
+            assert_eq!(meta.page_count, 2, "{path}");
+
+            let stored = lib.load_bytes(&meta.id).expect("the blob");
+            // The id is the hash of what was stored, not of the file on disk.
+            assert_eq!(hex_digest(&stored), meta.id, "{path}");
+            assert_ne!(
+                stored,
+                std::fs::read(path).unwrap(),
+                "{path}: the encrypted bytes were stored as they came"
+            );
+            assert_eq!(meta.file_size, stored.len() as u64, "{path}");
+
+            // The whole point: it opens with nothing at all.
+            let reopened =
+                crate::doc::Document::load_bytes(stored.clone(), None).expect("opens unlocked");
+            assert_eq!(reopened.pages.len(), 2, "{path}");
+            assert_eq!(reopened.password(), None, "{path}");
+            assert!(
+                !lopdf::Document::load_mem(&stored)
+                    .expect("lopdf opens it")
+                    .trailer
+                    .has(b"Encrypt"),
+                "{path}: the stored copy still declares encryption"
+            );
+
+            // The text the index and the phone will read is really there.
+            let text = extract::extract_all_pages(&std::sync::Arc::new(stored), None);
+            assert_eq!(text.len(), 2, "{path}");
+            assert!(!text[0].trim().is_empty(), "{path}: no text on page one");
+
+            // Nothing anywhere remembers the password.
+            let json = serde_json::to_string(&meta).expect("meta serializes");
+            assert!(!json.contains("evo-owner"), "{path}");
+            assert!(!json.contains("\"evo\""), "{path}");
+        }
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// Without a password, a protected document is refused with the error the
+    /// desktop turns into a prompt -- and nothing is written.
+    #[test]
+    fn a_protected_import_without_a_password_asks_rather_than_storing() {
+        let (lib, dir) = temp_library("encrypted-import-refused");
+        let err = lib
+            .import(Path::new(crate::doc::tests::PROTECTED[0]), None)
+            .map(|m| m.id)
+            .expect_err("no password, no import");
+        assert!(
+            matches!(&err, LibraryError::Doc(e) if e.wants_password()),
+            "{err:?}"
+        );
+        assert!(lib.list().unwrap().is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// A document protected with an empty user password needs no consent and
+    /// no prompt: it imports like any other file.
+    #[test]
+    fn an_empty_user_password_import_needs_nothing() {
+        let (lib, dir) = temp_library("encrypted-import-empty");
+        let meta = lib
+            .import(Path::new("tests/fixtures/encrypted-empty-user.pdf"), None)
+            .expect("imports with no password");
+        assert_eq!(meta.page_count, 2);
+        let stored = lib.load_bytes(&meta.id).expect("the blob");
+        assert_eq!(
+            crate::doc::Document::load_bytes(stored, None)
+                .expect("opens")
+                .pages
+                .len(),
+            2
+        );
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -551,7 +695,9 @@ mod tests {
     #[test]
     fn enrichment_round_trips_and_leaves_the_users_tags_alone() {
         let (lib, dir) = temp_library("enrich");
-        let mut meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let mut meta = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
         assert!(meta.summary.is_none());
 
         meta.tags = vec!["mine".into()];
@@ -612,7 +758,9 @@ mod tests {
     #[test]
     fn import_seeds_pending_status_and_reindex_resets_it() {
         let (lib, dir) = temp_library("status");
-        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let meta = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
         assert_eq!(
             meta.text_status,
             vec![PageTextStatus::Pending; meta.page_count]
@@ -642,7 +790,9 @@ mod tests {
     #[test]
     fn markup_sidecar_round_trip() {
         let (lib, dir) = temp_library("markup");
-        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let meta = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
 
         let markup = SavedMarkup {
             version: 1,
@@ -661,7 +811,9 @@ mod tests {
         use crate::script::model::{ChatMessage, Role};
 
         let (lib, dir) = temp_library("chat");
-        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let meta = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
         assert!(lib.load_chat(&meta.id).unwrap().is_empty());
 
         let messages = vec![

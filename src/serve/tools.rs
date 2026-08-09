@@ -566,7 +566,7 @@ mod tests {
         library
             .lock()
             .unwrap()
-            .import(Path::new("tests/fixtures/sample.pdf"))
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
             .expect("the fixture")
             .id
     }

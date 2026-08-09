@@ -50,6 +50,9 @@ impl Default for ScriptPrefs {
 pub struct DocSnapshot {
     pub title: String,
     pub source: Arc<Vec<u8>>,
+    /// The password the open document needed, if any -- without it a script
+    /// asking for the document's text would be told it has none.
+    pub password: Option<String>,
     pub page_count: usize,
 }
 

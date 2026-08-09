@@ -36,6 +36,8 @@ pub struct EvoApp {
     keymap: Keymap,
     prefs: ui::preferences::PreferencesState,
     wizard: ui::merge_wizard::MergeWizardState,
+    /// The password modal, and whatever open or import is waiting on it.
+    password_prompt: ui::password_prompt::PasswordPrompt,
     ribbon: ui::ribbon::RibbonConfig,
     /// Spawned on first use: most sessions never run a script.
     script_engine: Option<crate::script::ScriptEngine>,
@@ -191,6 +193,7 @@ impl EvoApp {
             keymap,
             prefs: ui::preferences::PreferencesState::default(),
             wizard: ui::merge_wizard::MergeWizardState::default(),
+            password_prompt: ui::password_prompt::PasswordPrompt::default(),
             ribbon,
             script_engine: None,
             script_prefs,
@@ -253,11 +256,39 @@ impl EvoApp {
     }
 
     fn open_library_doc_at(&mut self, id: &str, source_page: Option<usize>, ctx: &egui::Context) {
+        self.open_library_doc_with_password(id, source_page, None, ctx);
+    }
+
+    /// Open a library document, offering `password` if it wants one.
+    ///
+    /// Library documents are stored unlocked -- import decrypts once -- so the
+    /// password is only ever for a blob some other tool wrote into the store.
+    fn open_library_doc_with_password(
+        &mut self,
+        id: &str,
+        source_page: Option<usize>,
+        password: Option<&str>,
+        ctx: &egui::Context,
+    ) {
         let Some(lib) = &self.library else { return };
-        let result = lib
-            .load_bytes(id)
-            .map_err(|e| e.to_string())
-            .and_then(|bytes| Document::load_bytes(bytes, None).map_err(|e| e.to_string()));
+        let loaded = match lib.load_bytes(id) {
+            Ok(bytes) => Document::load_bytes_with_password(bytes, None, password),
+            Err(e) => {
+                self.error = Some(format!("Could not open library document: {e}"));
+                return;
+            }
+        };
+        // The variant is kept all the way here: `NeedsPassword` is a question
+        // to ask, not a message to show.
+        let result = loaded.map_err(|e| {
+            (
+                e,
+                ui::password_prompt::Pending::Library {
+                    id: id.to_owned(),
+                    page: source_page,
+                },
+            )
+        });
         match result {
             Ok(doc) => {
                 self.close_document();
@@ -297,19 +328,105 @@ impl EvoApp {
                 }
                 self.dc = Some(dc);
                 self.error = None;
+                self.password_prompt.close();
             }
-            Err(e) => self.error = Some(format!("Could not open library document: {e}")),
+            Err((e, pending)) => self.after_failed_open(e, pending),
         }
     }
 
     fn open_path(&mut self, path: PathBuf, ctx: &egui::Context) {
-        match Document::load_path(path) {
+        self.open_path_with_password(path, None, ctx);
+    }
+
+    /// Open a file from disk, offering `password` if it wants one.
+    fn open_path_with_password(
+        &mut self,
+        path: PathBuf,
+        password: Option<&str>,
+        ctx: &egui::Context,
+    ) {
+        match Document::load_path(path.clone(), password) {
             Ok(doc) => {
                 self.close_document();
                 self.dc = Some(DocState::new(doc, ctx, self.engine_pref));
                 self.error = None;
+                self.password_prompt.close();
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => self.after_failed_open(e, ui::password_prompt::Pending::File(path)),
+        }
+    }
+
+    /// Put `path` in the library, unlocking it with `password` first if it
+    /// needs one.
+    fn import_to_library(&mut self, path: PathBuf, password: Option<&str>, ctx: &egui::Context) {
+        let Some(lib) = &self.library else { return };
+        match lib.import(&path, password) {
+            Ok(meta) => {
+                if let Ok(bytes) = lib.load_bytes(&meta.id) {
+                    crate::library::spawn_thumbnail_job(
+                        std::sync::Arc::new(bytes),
+                        lib.thumb_path(&meta.id),
+                        ctx.clone(),
+                        self.engine_pref,
+                    );
+                }
+                self.lib_view.mark_dirty();
+                self.password_prompt.close();
+            }
+            Err(crate::library::LibraryError::Doc(e)) => {
+                self.after_failed_open(e, ui::password_prompt::Pending::Import(path));
+            }
+            Err(e) => {
+                self.password_prompt.close();
+                self.error = Some(e.to_string());
+            }
+        }
+    }
+
+    /// A load that did not happen: either it wants a password -- so the modal
+    /// opens, or says "try again" when it is already up about this same file --
+    /// or it is simply an error to show.
+    fn after_failed_open(
+        &mut self,
+        e: crate::doc::LoadError,
+        pending: ui::password_prompt::Pending,
+    ) {
+        if e.wants_password() {
+            if self.password_prompt.is_asking_about(&pending) {
+                self.password_prompt.rejected();
+            } else if !self.password_prompt.is_open() {
+                self.password_prompt.ask(pending);
+            }
+            // Dropping several protected files at once asks about the first
+            // and lets the others be: one modal cannot be about two documents,
+            // and swapping the question out from under somebody mid-type is
+            // worse than not asking.
+            return;
+        }
+        self.password_prompt.close();
+        self.error = Some(e.to_string());
+    }
+
+    /// Draw the password modal and act on what it says.
+    fn password_prompt(&mut self, ctx: &egui::Context) {
+        let Some(action) = ui::password_prompt::show(ctx, &mut self.password_prompt) else {
+            return;
+        };
+        match action {
+            // Abandoning the open is the whole of it: nothing was opened, and
+            // nothing needs saying about it.
+            ui::password_prompt::Action::Cancelled => {}
+            ui::password_prompt::Action::Unlock { pending, password } => match pending {
+                ui::password_prompt::Pending::File(path) => {
+                    self.open_path_with_password(path, Some(&password), ctx);
+                }
+                ui::password_prompt::Pending::Library { id, page } => {
+                    self.open_library_doc_with_password(&id, page, Some(&password), ctx);
+                }
+                ui::password_prompt::Pending::Import(path) => {
+                    self.import_to_library(path, Some(&password), ctx);
+                }
+            },
         }
     }
 
@@ -471,8 +588,10 @@ impl EvoApp {
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         // While Preferences is recording a binding it owns the keyboard;
-        // otherwise recording ⌘S would also save the document.
-        if self.prefs.is_capturing() {
+        // otherwise recording ⌘S would also save the document. The password
+        // modal owns it for the same reason: a password is typed, and every
+        // letter of it would otherwise also be a tool shortcut.
+        if self.prefs.is_capturing() || self.password_prompt.is_open() {
             return;
         }
 
@@ -666,6 +785,7 @@ impl EvoApp {
                     let snapshot = self.dc.as_ref().map(|dc| crate::script::DocSnapshot {
                         title: dc.title(),
                         source: dc.doc.source.clone(),
+                        password: dc.doc.password().map(str::to_owned),
                         page_count: dc.doc.pages.len(),
                     });
                     // Consent is per run: `None` unless the box was ticked
@@ -810,6 +930,7 @@ impl EvoApp {
         engine.ask(crate::chat::ChatJob {
             doc_key,
             source: dc.doc.source.clone(),
+            password: dc.doc.password().map(str::to_owned),
             title: dc.title(),
             question,
             history,
@@ -1094,6 +1215,7 @@ impl EvoApp {
         if dc.text_worker.is_none() && dc.page_text.len() < dc.doc.pages.len() {
             dc.text_worker = Some(crate::library::textjob::TextWorker::spawn(
                 dc.doc.source.clone(),
+                dc.doc.password().map(str::to_owned),
                 models_dir,
                 ctx.clone(),
                 dc.engine_pref,
@@ -1153,6 +1275,18 @@ impl EvoApp {
                 {
                     self.save_pdf_as();
                     ui.close();
+                }
+                // Saving a protected document produces a copy anyone can open.
+                // That is lopdf's doing and unavoidable here, so it is said
+                // where the saving is decided rather than discovered later.
+                if self
+                    .dc
+                    .as_ref()
+                    .is_some_and(|dc| dc.doc.password().is_some())
+                {
+                    ui.label(
+                        egui::RichText::new(crate::export::pdf::DECRYPTED_EXPORT_NOTICE).weak(),
+                    );
                 }
                 let has_ocr = self.has_ocr_text();
                 ui.add_enabled_ui(has_doc, |ui| {
@@ -1439,7 +1573,6 @@ impl eframe::App for EvoApp {
         }
 
         // Files dropped onto the window.
-        let pref = self.engine_pref;
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
                 .dropped_files
@@ -1457,23 +1590,9 @@ impl eframe::App for EvoApp {
             _ if self.wizard.open => self.wizard.add_files(dropped_pdfs),
             // Dropping onto the library home imports into the library.
             (_, false) if self.library.is_some() => {
-                let lib = self.library.as_ref().unwrap();
-                for path in &dropped_pdfs {
-                    match lib.import(path) {
-                        Ok(meta) => {
-                            if let Ok(bytes) = lib.load_bytes(&meta.id) {
-                                crate::library::spawn_thumbnail_job(
-                                    std::sync::Arc::new(bytes),
-                                    lib.thumb_path(&meta.id),
-                                    ctx.clone(),
-                                    pref,
-                                );
-                            }
-                        }
-                        Err(e) => self.error = Some(e.to_string()),
-                    }
+                for path in dropped_pdfs {
+                    self.import_to_library(path, None, ctx);
                 }
-                self.lib_view.mark_dirty();
             }
             (1, _) => self.open_path(dropped_pdfs.into_iter().next().unwrap(), ctx),
             // Several files at once: show them in the wizard rather than
@@ -1553,6 +1672,9 @@ impl eframe::App for EvoApp {
             }
         }
         self.scripts_window(ctx);
+        // Above the error window: a document that wants a password is a
+        // question, and asking it must not be buried under "Cannot open file".
+        self.password_prompt(ctx);
 
         let (wizard_title, wizard_pages) = match &self.dc {
             Some(dc) => (Some(dc.title()), dc.pages.len()),
@@ -1653,6 +1775,11 @@ impl eframe::App for EvoApp {
                 Some(ui::library_view::LibraryAction::Open(id)) => self.open_library_doc(&id, ctx),
                 Some(ui::library_view::LibraryAction::OpenAtPage(id, page)) => {
                     self.open_library_doc_at(&id, Some(page), ctx)
+                }
+                Some(ui::library_view::LibraryAction::Import(files)) => {
+                    for path in files {
+                        self.import_to_library(path, None, ctx);
+                    }
                 }
                 Some(ui::library_view::LibraryAction::Error(msg)) => self.error = Some(msg),
                 None => {}

@@ -154,11 +154,18 @@ pub struct ExtractedPage {
 
 /// Plain text for every page of a whole PDF, in source order.
 ///
+/// `password` is the one the document was opened with, if any: library
+/// documents are stored decrypted and pass `None`, while a protected file
+/// opened straight from disk has to present its password again here or the
+/// chat would answer every question with "no text could be read".
+///
 /// A document that will not parse yields no pages rather than an error: the
 /// callers (scripts, chat) are asking what the document says, and "nothing"
 /// is the honest answer for something we cannot read.
-pub fn extract_all_pages(source: &std::sync::Arc<Vec<u8>>) -> Vec<String> {
-    let Ok(pdf) = hayro::hayro_syntax::Pdf::new(source.clone()) else {
+pub fn extract_all_pages(source: &std::sync::Arc<Vec<u8>>, password: Option<&str>) -> Vec<String> {
+    let Ok(pdf) =
+        hayro::hayro_syntax::Pdf::new_with_password(source.clone(), password.unwrap_or_default())
+    else {
         return Vec::new();
     };
     pdf.pages()
@@ -349,6 +356,53 @@ mod tests {
     fn fixture_pdf() -> Pdf {
         let bytes = std::fs::read("tests/fixtures/sample.pdf").unwrap();
         Pdf::new(bytes).unwrap()
+    }
+
+    /// The chat and the scripts read a protected document through this, so it
+    /// has to answer with the document's words rather than with nothing --
+    /// and only when it is given the password.
+    #[test]
+    fn a_protected_document_gives_up_its_text_only_with_its_password() {
+        for path in crate::doc::tests::PROTECTED {
+            let source = std::sync::Arc::new(crate::doc::tests::encrypted(path));
+            let pages = extract_all_pages(&source, Some("evo"));
+            assert_eq!(pages.len(), 2, "{path}");
+            assert!(pages[0].contains("quick brown fox"), "{path}: {}", pages[0]);
+
+            assert!(
+                extract_all_pages(&source, None).is_empty(),
+                "{path}: text without the password"
+            );
+        }
+    }
+
+    /// The text an export carries: a saved copy of a protected document is a
+    /// plain PDF, so nothing downstream needs the password any more.
+    #[test]
+    fn the_text_of_an_exported_copy_needs_no_password() {
+        use crate::doc::Document;
+        use crate::doc::page_ops::PageList;
+        use crate::doc::store::AnnotationStore;
+
+        for path in crate::doc::tests::PROTECTED {
+            let doc = Document::load_bytes_with_password(
+                crate::doc::tests::encrypted(path),
+                None,
+                Some("evo"),
+            )
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+            let exported = crate::export::pdf::export_pdf_bytes(
+                &doc,
+                &PageList::new(doc.pages.len()),
+                &AnnotationStore::default(),
+                Default::default(),
+            )
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+
+            let pages = extract_all_pages(&std::sync::Arc::new(exported), None);
+            assert_eq!(pages.len(), 2, "{path}");
+            assert!(pages[0].contains("quick brown fox"), "{path}: {}", pages[0]);
+        }
     }
 
     #[test]

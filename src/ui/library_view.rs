@@ -2,6 +2,7 @@
 //! imported PDFs with import, open, and delete actions.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use eframe::egui::{self, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Vec2};
 
@@ -50,6 +51,10 @@ pub enum LibraryAction {
     Open(String),
     /// Open a document and scroll to a source page (from a search result).
     OpenAtPage(String, usize),
+    /// Files the person picked. The app imports them rather than this view:
+    /// a protected one needs a password, and asking for one is the app's
+    /// modal, not the library grid's.
+    Import(Vec<PathBuf>),
     Error(String),
 }
 
@@ -103,22 +108,7 @@ pub fn show(
                 .add_filter("PDF documents", &["pdf"])
                 .pick_files()
         {
-            for file in files {
-                match library.import(&file) {
-                    Ok(meta) => {
-                        if let Ok(bytes) = library.load_bytes(&meta.id) {
-                            spawn_thumbnail_job(
-                                std::sync::Arc::new(bytes),
-                                library.thumb_path(&meta.id),
-                                ui.ctx().clone(),
-                                pref,
-                            );
-                        }
-                    }
-                    Err(e) => action = Some(LibraryAction::Error(e.to_string())),
-                }
-            }
-            state.mark_dirty();
+            action = Some(LibraryAction::Import(files));
         }
         if let Some(st) = &status {
             index_activity(ui, library, st);

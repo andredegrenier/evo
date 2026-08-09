@@ -208,6 +208,14 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
     (!cleaned.is_empty()).then_some(cleaned)
 }
 
+/// What a phone is told when it uploads a document it cannot unlock here.
+///
+/// The server has no way to ask for a password and nowhere safe to put one,
+/// and the library only stores documents everything can read -- so the answer
+/// is where to go instead, not a prompt.
+pub const ENCRYPTED_UPLOAD: &str = "This PDF is password-protected. Open it in the desktop app and \
+                                    add it to the library there.";
+
 /// `POST /api/docs` -- the body is the PDF.
 ///
 /// No multipart: the phone has one file and a fetch with a `Blob` body is the
@@ -242,14 +250,24 @@ pub async fn upload(State(state): State<Shared>, headers: HeaderMap, body: Bytes
         // and the existing record comes back.
         let id = hex_digest(&bytes);
         let existing = lib.doc(&id).map_err(|e| e.to_string())?.is_some();
-        lib.import_bytes(bytes, &title, &filename)
-            .map(|meta| (meta, existing))
-            .map_err(|e| e.to_string())
+        match lib.import_bytes(bytes, &title, &filename) {
+            Ok(meta) => Ok(Ok((meta, existing))),
+            // Unlocking a document is a decision, not a request parameter: it
+            // trades the file's protection for a library copy anything can
+            // read, and it belongs where somebody can be told that and say no.
+            // The inner `Err` carries its own status past `with_library`,
+            // which would otherwise call this a server fault.
+            Err(crate::library::LibraryError::Doc(e)) if e.wants_password() => {
+                Ok(Err(ENCRYPTED_UPLOAD))
+            }
+            Err(e) => Err(e.to_string()),
+        }
     })
     .await;
 
     let (meta, existing) = match imported {
-        Ok(pair) => pair,
+        Ok(Ok(pair)) => pair,
+        Ok(Err(message)) => return fail(StatusCode::UNPROCESSABLE_ENTITY, message),
         // A PDF evo cannot open is the uploader's problem, not the server's.
         Err(response) => return response,
     };

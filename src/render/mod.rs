@@ -238,6 +238,61 @@ mod tests {
         assert!(dropped.is_empty());
     }
 
+    /// A protected document draws like any other once its password has been
+    /// handed to the worker -- which is the whole reason `spawn` takes one.
+    #[test]
+    fn the_worker_draws_a_page_of_a_protected_document() {
+        for path in crate::doc::tests::PROTECTED {
+            let source = Arc::new(crate::doc::tests::encrypted(path));
+            // A detached context: nobody is listening for the repaints.
+            let worker = RenderWorker::spawn(
+                source,
+                egui::Context::default(),
+                EnginePref::Hayro,
+                Some("evo".to_owned()),
+            );
+            worker.request(RenderRequest {
+                page: 0,
+                scale: 1.0,
+            });
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            let response = loop {
+                if let Some(res) = worker.try_recv() {
+                    break res;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{path}: the worker never answered"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            };
+            let image = response
+                .image
+                .unwrap_or_else(|| panic!("{path}: no pixels"));
+            assert_eq!(image.size, [612, 792], "{path}");
+            assert_eq!(response.engine, Engine::Hayro, "{path}");
+        }
+    }
+
+    /// The same document without the password: the worker cannot open it, and
+    /// has to stop rather than answer with a blank page forever.
+    #[test]
+    fn the_worker_gives_up_on_a_document_it_cannot_open() {
+        let source = Arc::new(crate::doc::tests::encrypted(
+            crate::doc::tests::PROTECTED[0],
+        ));
+        let worker = RenderWorker::spawn(source, egui::Context::default(), EnginePref::Hayro, None);
+        worker.request(RenderRequest {
+            page: 0,
+            scale: 1.0,
+        });
+        // The thread returns on the failed open, so the response channel is
+        // closed and nothing ever arrives.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(worker.try_recv().is_none());
+    }
+
     #[test]
     fn scale_bucket_is_quantized_and_clamped() {
         assert_eq!(scale_bucket(1.0), 1.0);

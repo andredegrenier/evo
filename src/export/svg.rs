@@ -31,7 +31,8 @@ pub fn export_svg(
     store: &AnnotationStore,
     path: &Path,
 ) -> Result<Vec<std::path::PathBuf>, SvgError> {
-    let pdf = Pdf::new(doc.source.clone()).map_err(|_| SvgError::Parse)?;
+    let pdf = Pdf::new_with_password(doc.source.clone(), doc.password().unwrap_or_default())
+        .map_err(|_| SvgError::Parse)?;
     let cache = RenderCache::new();
     let settings = InterpreterSettings::default();
     let svg_settings = SvgRenderSettings {
@@ -300,7 +301,7 @@ mod tests {
 
     #[test]
     fn exports_svg_with_markup() {
-        let doc = Document::load_path("tests/fixtures/sample.pdf".into()).unwrap();
+        let doc = Document::load_path("tests/fixtures/sample.pdf".into(), None).unwrap();
         let pages = PageList::new(doc.pages.len());
         let mut store = AnnotationStore::default();
         let id = store.alloc_id();

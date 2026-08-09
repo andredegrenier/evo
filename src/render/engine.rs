@@ -515,6 +515,37 @@ mod tests {
         assert!(message.contains("Preferences"), "{message}");
     }
 
+    /// hayro draws a protected page when it is given the password and refuses
+    /// when it is not. Both halves matter: the second is what stops a document
+    /// somebody has not unlocked from being drawn anyway.
+    #[test]
+    fn hayro_draws_a_protected_page_only_with_its_password() {
+        for path in crate::doc::tests::PROTECTED {
+            let bytes = Arc::new(crate::doc::tests::encrypted(path));
+            let (page, engine) = render_page(
+                bytes.clone(),
+                Some("evo"),
+                0,
+                Zoom::Factor(1.0),
+                EnginePref::Hayro,
+            )
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+            assert_eq!(engine, Engine::Hayro, "{path}");
+            assert_eq!((page.width, page.height), (612, 792), "{path}");
+
+            assert_eq!(
+                open(bytes.clone(), None, EnginePref::Hayro).err(),
+                Some(OpenError::Unreadable),
+                "{path}: opened with no password"
+            );
+            assert_eq!(
+                open(bytes, Some("not-it"), EnginePref::Hayro).err(),
+                Some(OpenError::Unreadable),
+                "{path}: opened with the wrong password"
+            );
+        }
+    }
+
     #[test]
     fn engine_tags_are_filename_safe() {
         for engine in [Engine::Hayro, Engine::Pdfium] {

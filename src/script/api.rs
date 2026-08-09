@@ -74,7 +74,9 @@ impl RunCtx {
             return cached.clone();
         }
         let pages = match &self.doc {
-            Some(doc) => crate::library::extract::extract_all_pages(&doc.source),
+            Some(doc) => {
+                crate::library::extract::extract_all_pages(&doc.source, doc.password.as_deref())
+            }
             None => Vec::new(),
         };
         *self.text_cache.borrow_mut() = Some(pages.clone());
@@ -555,6 +557,7 @@ mod tests {
         DocSnapshot {
             title: "Test Document".to_owned(),
             source: Arc::new(bytes),
+            password: None,
             page_count: 1,
         }
     }

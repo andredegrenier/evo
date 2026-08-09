@@ -30,6 +30,7 @@ impl TextWorker {
     /// (receiver dropped) or every page has been sent.
     pub fn spawn(
         source: Arc<Vec<u8>>,
+        password: Option<String>,
         models_dir: Option<PathBuf>,
         ctx: eframe::egui::Context,
         pref: EnginePref,
@@ -38,7 +39,9 @@ impl TextWorker {
         std::thread::Builder::new()
             .name("evo-text".into())
             .spawn(move || {
-                let Ok(pdf) = Pdf::new(source.clone()) else {
+                let Ok(pdf) =
+                    Pdf::new_with_password(source.clone(), password.as_deref().unwrap_or_default())
+                else {
                     return;
                 };
                 let settings = InterpreterSettings::default();
@@ -60,7 +63,9 @@ impl TextWorker {
                             // Models are present, so this never downloads.
                             let loaded = ocr::Ocr::load(dir).ok();
                             if loaded.is_some() {
-                                rasterizer = render_engine::open(source.clone(), None, pref).ok();
+                                rasterizer =
+                                    render_engine::open(source.clone(), password.as_deref(), pref)
+                                        .ok();
                             }
                             loaded
                         });

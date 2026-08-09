@@ -133,7 +133,9 @@ mod tests {
     #[test]
     fn listing_gives_the_ids_the_other_tools_take() {
         let (lib, dir) = temp_library("list");
-        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let meta = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
         let value = list_library(&lib).expect("listed");
         assert_eq!(value["count"], 1);
         assert_eq!(value["documents"][0]["id"], meta.id);
@@ -145,7 +147,9 @@ mod tests {
     #[test]
     fn search_numbers_pages_the_way_a_reader_does() {
         let (lib, dir) = temp_library("search");
-        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let meta = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
         index_pages(
             &lib,
             &meta.id,
@@ -171,7 +175,9 @@ mod tests {
     #[test]
     fn text_comes_back_by_page_and_stops_at_the_end_of_the_document() {
         let (lib, dir) = temp_library("text");
-        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let meta = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
         index_pages(
             &lib,
             &meta.id,
@@ -226,7 +232,9 @@ mod tests {
         assert!(err.contains("no document with id"), "{err}");
         assert!(err.contains("list_library"), "{err}");
 
-        let meta = lib.import(Path::new("tests/fixtures/sample.pdf")).unwrap();
+        let meta = lib
+            .import(Path::new("tests/fixtures/sample.pdf"), None)
+            .unwrap();
         let err = document_text(&lib, &meta.id, None, None).expect_err("not indexed");
         assert!(err.contains("has not been read yet"), "{err}");
         std::fs::remove_dir_all(dir).ok();

@@ -35,6 +35,9 @@ pub struct ChatJob {
     /// arriving answer belongs to the document still on screen.
     pub doc_key: String,
     pub source: Arc<Vec<u8>>,
+    /// The password the document was opened with, if it needed one: the
+    /// worker re-parses `source` to read the pages it answers from.
+    pub password: Option<String>,
     pub title: String,
     pub question: String,
     /// Earlier turns, oldest first, without their quoted pages.
@@ -145,7 +148,10 @@ fn worker(
         let pages = match &cached {
             Some((key, pages)) if *key == job.doc_key => pages.clone(),
             _ => {
-                let pages = Arc::new(crate::library::extract::extract_all_pages(&job.source));
+                let pages = Arc::new(crate::library::extract::extract_all_pages(
+                    &job.source,
+                    job.password.as_deref(),
+                ));
                 cached = Some((job.doc_key.clone(), pages.clone()));
                 pages
             }

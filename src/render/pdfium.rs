@@ -293,6 +293,34 @@ mod tests {
         assert!((thumb.width as i64 - 320).abs() <= 1, "{}", thumb.width);
     }
 
+    /// PDFium takes the same password hayro does, for every encryption evo
+    /// ships a fixture for -- so switching renderers on a protected document
+    /// is not a way to lose it.
+    #[test]
+    #[ignore = "needs the PDFium library; run with --ignored pdfium_"]
+    fn pdfium_opens_the_encrypted_fixtures_with_their_password() {
+        assert!(engine::pdfium_available());
+        for path in crate::doc::tests::PROTECTED {
+            let bytes = std::sync::Arc::new(crate::doc::tests::encrypted(path));
+            let (page, used) = engine::render_page(
+                bytes.clone(),
+                Some("evo"),
+                0,
+                Zoom::Factor(1.0),
+                EnginePref::Pdfium,
+            )
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+            assert_eq!(used, Engine::Pdfium, "{path}");
+            assert_eq!((page.width, page.height), (612, 792), "{path}");
+
+            // And without it, an error rather than a blank page.
+            assert!(
+                engine::open(bytes, None, EnginePref::Pdfium).is_err(),
+                "{path}: opened with no password"
+            );
+        }
+    }
+
     /// The desktop path, end to end: the render worker opens the document,
     /// draws a page, and says which engine it used -- which is what the status
     /// bar reads and what the texture cache stores.

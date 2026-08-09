@@ -4,6 +4,7 @@ pub mod findbar;
 pub mod inspector;
 pub mod library_view;
 pub mod merge_wizard;
+pub mod password_prompt;
 pub mod preferences;
 pub mod ribbon;
 pub mod scripts;

@@ -708,6 +708,45 @@ mod tests {
         assert_eq!(get(&format!("{}/nope.js", evo.url), None).status, 404);
     }
 
+    /// The phone cannot unlock a document: there is nobody to ask for the
+    /// password and nowhere to keep one, and the library only holds documents
+    /// everything can read. So the upload is refused as a fault in the
+    /// request, with the one thing that does work.
+    #[test]
+    fn a_password_protected_upload_is_refused_with_somewhere_to_go() {
+        let evo = Harness::start("encrypted-upload");
+        let session = sign_in(&evo);
+        let docs = format!("{}/api/docs", evo.url);
+
+        for path in crate::doc::tests::PROTECTED {
+            let refused = post_bytes(
+                &docs,
+                &session,
+                &[("X-Evo-Filename", "locked.pdf")],
+                crate::doc::tests::encrypted(path),
+            );
+            assert_eq!(refused.status, 422, "{path}: {}", refused.text());
+            assert_eq!(
+                refused.json()["error"],
+                crate::serve::library_api::ENCRYPTED_UPLOAD,
+                "{path}"
+            );
+            // Nothing was written down on the way to refusing.
+            assert_eq!(get(&docs, Some(&session)).json()["count"], 0, "{path}");
+        }
+
+        // A document protected only against editing needs no password and is
+        // an ordinary upload.
+        let allowed = post_bytes(
+            &docs,
+            &session,
+            &[("X-Evo-Filename", "permissions-only.pdf")],
+            std::fs::read("tests/fixtures/encrypted-empty-user.pdf").expect("the fixture"),
+        );
+        assert_eq!(allowed.status, 201, "{}", allowed.text());
+        assert_eq!(allowed.json()["pages"], 2);
+    }
+
     /// The walk a phone actually does: put a document in, find it in the list,
     /// read its manifest, fetch a page, and take it out again.
     #[test]

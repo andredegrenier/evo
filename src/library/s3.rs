@@ -288,7 +288,7 @@ mod tests {
             .expect("a library");
 
         let meta = library
-            .import(std::path::Path::new("tests/fixtures/sample.pdf"))
+            .import(std::path::Path::new("tests/fixtures/sample.pdf"), None)
             .expect("imported");
         assert_eq!(meta.page_count, 2);
         // Nothing landed in the local blob directory, and the bucket has it.

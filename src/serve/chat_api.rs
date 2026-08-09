@@ -638,10 +638,13 @@ async fn page_text(
     {
         return Ok(pages);
     }
-    let read =
-        tokio::task::spawn_blocking(move || crate::library::extract::extract_all_pages(&bytes))
-            .await
-            .map_err(|_| "evo stopped part-way through reading that document.".to_owned())?;
+    // No password: the library only ever stores documents evo can already
+    // read, so a protected one was decrypted at import.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::library::extract::extract_all_pages(&bytes, None)
+    })
+    .await
+    .map_err(|_| "evo stopped part-way through reading that document.".to_owned())?;
     let pages = Arc::new(read);
     state
         .pages_text

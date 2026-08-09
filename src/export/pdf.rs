@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use lopdf::{Dictionary, Document as LoDocument, Object, ObjectId, Stream, dictionary};
+use lopdf::{
+    Dictionary, Document as LoDocument, LoadOptions, Object, ObjectId, Stream, dictionary,
+};
 
 use crate::doc::annotation::{Annotation, AnnotationKind, Color, TextAlign};
 use crate::doc::geometry::{PdfPoint, PdfRect};
@@ -54,13 +56,49 @@ pub fn export_pdf(
     Ok(())
 }
 
+/// What every saved copy of a protected document has to say out loud, because
+/// lopdf decrypts on load and there is nowhere in the writing path where the
+/// encryption could survive: the file evo writes is readable without the
+/// password the original needed.
+pub const DECRYPTED_EXPORT_NOTICE: &str = "Saved copies are not password-protected.";
+
+/// Re-read the document's own bytes with lopdf, presenting the password the
+/// document was opened with.
+///
+/// lopdf decrypts every object and drops `/Encrypt` on a successful encrypted
+/// load, so from here on the export path is the ordinary one -- and the file it
+/// writes is a decrypted copy. That is why [`DECRYPTED_EXPORT_NOTICE`] exists.
+///
+/// The second branch is for documents nobody typed a password for: a file
+/// encrypted with an *empty* user password opens with no prompt anywhere in
+/// evo, and lopdf's plain load already decrypts those. If some file ever slips
+/// through with `/Encrypt` still standing, loading it again with the empty
+/// password is the difference between a decrypted copy and a file half of
+/// whose objects are ciphertext.
+fn load_source(doc: &Document) -> Result<LoDocument, ExportError> {
+    if let Some(password) = doc.password() {
+        return Ok(LoDocument::load_mem_with_options(
+            &doc.source,
+            LoadOptions::with_password(password),
+        )?);
+    }
+    let plain = LoDocument::load_mem(&doc.source)?;
+    if !plain.trailer.has(b"Encrypt") {
+        return Ok(plain);
+    }
+    Ok(LoDocument::load_mem_with_options(
+        &doc.source,
+        LoadOptions::with_password(""),
+    )?)
+}
+
 pub fn export_pdf_bytes(
     doc: &Document,
     pages: &PageList,
     store: &AnnotationStore,
     options: ExportOptions,
 ) -> Result<Vec<u8>, ExportError> {
-    let mut lo = LoDocument::load_mem(&doc.source)?;
+    let mut lo = load_source(doc)?;
 
     let page_map = lo.get_pages();
     let source_ids: Vec<ObjectId> = (1..=doc.pages.len() as u32)
@@ -1020,7 +1058,7 @@ mod tests {
     use crate::doc::geometry::PdfRect;
 
     fn fixture() -> Document {
-        Document::load_path("tests/fixtures/sample.pdf".into()).unwrap()
+        Document::load_path("tests/fixtures/sample.pdf".into(), None).unwrap()
     }
 
     fn sample_annotations(store: &mut AnnotationStore) {
@@ -1069,6 +1107,113 @@ mod tests {
                 style,
             });
         }
+    }
+
+    /// Every encrypted fixture, exported, has to come back as an ordinary PDF:
+    /// hayro opens it with no password and lopdf finds its pages. This is the
+    /// test that says out loud what the export path does to a protected
+    /// document -- it decrypts it -- and it is why the export UI says so too.
+    #[test]
+    fn exporting_a_protected_document_writes_a_decrypted_copy() {
+        for path in crate::doc::tests::PROTECTED {
+            let doc = Document::load_bytes_with_password(
+                crate::doc::tests::encrypted(path),
+                None,
+                Some("evo"),
+            )
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+            let pages = PageList::new(doc.pages.len());
+            let mut store = AnnotationStore::default();
+            sample_annotations(&mut store);
+
+            let bytes = export_pdf_bytes(&doc, &pages, &store, ExportOptions::default())
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
+
+            // No password anywhere: both readers open it cold.
+            let reparsed = hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(bytes.clone()))
+                .unwrap_or_else(|e| panic!("{path}: hayro: {e:?}"));
+            assert_eq!(reparsed.pages().len(), 2, "{path}");
+
+            let lo = LoDocument::load_mem(&bytes).unwrap_or_else(|e| panic!("{path}: lopdf: {e}"));
+            assert_eq!(lo.get_pages().len(), 2, "{path}");
+            assert!(
+                !lo.trailer.has(b"Encrypt"),
+                "{path}: the exported copy still declares encryption"
+            );
+
+            // And the markup actually made it across.
+            let page1 = lo.get_pages()[&1];
+            let annots = lo
+                .get_dictionary(page1)
+                .unwrap()
+                .get(b"Annots")
+                .unwrap()
+                .as_array()
+                .unwrap();
+            assert_eq!(annots.len(), 6, "{path}");
+        }
+    }
+
+    /// A document protected with an empty user password is never prompted for
+    /// and so carries no password of its own -- the export path still has to
+    /// hand back something readable rather than half-ciphertext.
+    #[test]
+    fn exporting_an_empty_user_password_document_needs_no_password() {
+        let doc = Document::load_bytes(
+            crate::doc::tests::encrypted("tests/fixtures/encrypted-empty-user.pdf"),
+            None,
+        )
+        .expect("opens without a password");
+        assert_eq!(doc.password(), None);
+
+        let pages = PageList::new(doc.pages.len());
+        let bytes = export_pdf_bytes(
+            &doc,
+            &pages,
+            &AnnotationStore::default(),
+            ExportOptions::default(),
+        )
+        .expect("export");
+
+        let lo = LoDocument::load_mem(&bytes).expect("lopdf reopens the export");
+        assert_eq!(lo.get_pages().len(), 2);
+        assert!(!lo.trailer.has(b"Encrypt"));
+        assert_eq!(
+            hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(bytes))
+                .expect("hayro reopens the export")
+                .pages()
+                .len(),
+            2
+        );
+    }
+
+    /// The wrong password must fail as a PDF error rather than quietly export
+    /// a document with no pages in it -- which is what a plain load of an
+    /// encrypted file produces.
+    #[test]
+    fn exporting_with_the_wrong_password_fails_rather_than_writing_nothing() {
+        let mut doc = Document::load_bytes_with_password(
+            crate::doc::tests::encrypted(crate::doc::tests::PROTECTED[0]),
+            None,
+            Some("evo"),
+        )
+        .expect("opens");
+        doc.password = Some("not-it".into());
+        let pages = PageList::new(doc.pages.len());
+        let err = export_pdf_bytes(
+            &doc,
+            &pages,
+            &AnnotationStore::default(),
+            ExportOptions::default(),
+        )
+        .expect_err("a wrong password cannot export");
+        // Whatever it says, it must not repeat the password back.
+        assert!(!err.to_string().contains("not-it"), "{err}");
+    }
+
+    #[test]
+    fn the_export_notice_says_the_copy_is_unprotected() {
+        assert!(DECRYPTED_EXPORT_NOTICE.contains("not password-protected"));
     }
 
     #[test]

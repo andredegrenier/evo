@@ -134,7 +134,14 @@ impl RailSelection {
 
 impl DocState {
     pub fn new(doc: Document, ctx: &egui::Context, pref: EnginePref) -> Self {
-        let worker = RenderWorker::spawn(doc.source.clone(), ctx.clone(), pref, None);
+        // A protected document has to present its password again to whoever
+        // re-parses its bytes, and the render worker is the first of those.
+        let worker = RenderWorker::spawn(
+            doc.source.clone(),
+            ctx.clone(),
+            pref,
+            doc.password().map(str::to_owned),
+        );
         let page_count = doc.pages.len();
         Self {
             doc,
@@ -227,7 +234,12 @@ impl DocState {
         }
         self.engine_pref = pref;
         self.engine = None;
-        self.worker = RenderWorker::spawn(self.doc.source.clone(), ctx.clone(), pref, None);
+        self.worker = RenderWorker::spawn(
+            self.doc.source.clone(),
+            ctx.clone(),
+            pref,
+            self.doc.password().map(str::to_owned),
+        );
         self.cache = TextureCache::with_budget(cache::CANVAS_BUDGET);
         self.thumb_cache = TextureCache::with_budget(cache::THUMB_BUDGET);
         ctx.request_repaint();

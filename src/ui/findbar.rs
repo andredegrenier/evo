@@ -30,6 +30,7 @@ pub fn show(
     if dc.text_worker.is_none() && dc.page_text.len() < dc.doc.pages.len() {
         dc.text_worker = Some(TextWorker::spawn(
             dc.doc.source.clone(),
+            dc.doc.password().map(str::to_owned),
             models_dir,
             ctx.clone(),
             dc.engine_pref,
