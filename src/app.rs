@@ -24,7 +24,8 @@ pub struct EvoApp {
     /// Write the ⌘F OCR text into exports as an invisible text layer.
     embed_ocr_on_save: bool,
     temp_print_files: Vec<PathBuf>,
-    /// OS blur-behind is active; panels use translucent fills.
+    /// The translucent finish: panels use see-through fills over a transparent
+    /// window (and, on Windows, OS blur behind it).
     glass: bool,
     theme: ThemeChoice,
     /// What `theme::apply` was last called with, so we restyle when the
@@ -112,7 +113,6 @@ fn read_all(files: &[PathBuf]) -> Result<Vec<Vec<u8>>, String> {
 impl EvoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
-        let vibrancy = apply_window_effects(cc);
         let (theme, glass_pref, keymap, mut ribbon, script_prefs, assistant_prefs, mcp_prefs) =
             match cc.storage {
                 Some(storage) => (
@@ -139,7 +139,14 @@ impl EvoApp {
             };
         // A stored layout predates any item added since it was written.
         ribbon.sanitize();
-        let glass = glass_pref && vibrancy;
+        // The translucent look is the theme's doing -- the window is created
+        // transparent either way -- so the OS effect is an extra, asked for only
+        // when the user wants glass and never allowed to decide whether they get
+        // it.
+        let glass = glass_pref;
+        if glass && os_blur_available() {
+            apply_window_effects(cc);
+        }
         crate::ui::theme::apply(&cc.egui_ctx, theme, glass);
         let library = match crate::library::Library::open_default() {
             Ok(mut lib) => {
@@ -1671,32 +1678,41 @@ fn ocr_layers(dc: &DocState) -> Option<HashMap<usize, Vec<OcrLine>>> {
     (!layers.is_empty()).then_some(layers)
 }
 
-/// Try to enable OS blur-behind. Returns whether it took effect.
-fn apply_window_effects(cc: &eframe::CreationContext<'_>) -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        use window_vibrancy::{NSVisualEffectMaterial, apply_vibrancy};
-        apply_vibrancy(
-            cc,
-            NSVisualEffectMaterial::UnderWindowBackground,
-            None,
-            None,
-        )
-        .is_ok()
-    }
-    #[cfg(target_os = "windows")]
-    {
-        use window_vibrancy::{apply_acrylic, apply_mica};
-        apply_mica(cc, None).is_ok() || apply_acrylic(cc, Some((24, 24, 28, 130))).is_ok()
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        let _ = cc;
-        false
-    }
+/// Ask the OS for blur-behind the window, on the platforms that can give it
+/// without drawing over us. Called only when the user asked for glass.
+///
+/// **macOS is deliberately excluded.** `window_vibrancy::apply_vibrancy` adds
+/// an `NSVisualEffectView` as a *subview* of the window's content view -- which
+/// is the very view eframe renders into. With the wgpu backend that view paints
+/// through a `CAMetalLayer` that AppKit knows nothing about, so AppKit appends
+/// the effect view's backing layer *after* it: CoreAnimation then composites the
+/// blur over every pixel we drew and the whole window becomes one flat
+/// rectangle. (Confirmed on the running app: the render view's sublayers come
+/// out as `[RawWindowMetalLayer, NSViewBackingLayer]`.) Windows' Mica and
+/// Acrylic are window attributes rather than views, so nothing is layered over
+/// the swapchain there. On macOS, translucency comes from the transparent
+/// window plus the translucent panel fills in `theme::tokens` -- no blur, but a
+/// visible application.
+#[cfg(target_os = "windows")]
+fn apply_window_effects(cc: &eframe::CreationContext<'_>) {
+    use window_vibrancy::{apply_acrylic, apply_mica};
+    let _ = apply_mica(cc, None).is_ok() || apply_acrylic(cc, Some((24, 24, 28, 130))).is_ok();
 }
 
-fn install_fonts(ctx: &egui::Context) {
+#[cfg(not(target_os = "windows"))]
+fn apply_window_effects(_cc: &eframe::CreationContext<'_>) {}
+
+/// Whether this platform can blur behind the window without drawing over what
+/// we render into it. Only Windows can; see `apply_window_effects`.
+const fn os_blur_available() -> bool {
+    cfg!(target_os = "windows")
+}
+
+/// The app's font stack: Liberation Sans for text, Phosphor for the icons the
+/// ribbon and menus draw. `pub(crate)` so the theme's paint test can install the
+/// same fonts the window does -- an empty atlas is one of the ways a window can
+/// come up blank.
+pub(crate) fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "liberation_sans".into(),
@@ -1713,4 +1729,19 @@ fn install_fonts(ctx: &egui::Context) {
     // index 1, so it only ever fills in the icons Liberation lacks.
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     ctx.set_fonts(fonts);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::os_blur_available;
+
+    /// The blank-window regression: on macOS the OS blur effect is an
+    /// `NSVisualEffectView` added as a subview of the view eframe renders into,
+    /// and AppKit composites its layer above our `CAMetalLayer` -- the window
+    /// turns into one flat rectangle with the whole UI behind it. Nothing may
+    /// switch that back on.
+    #[test]
+    fn macos_never_asks_the_os_to_blur_behind_the_window() {
+        assert!(!(cfg!(target_os = "macos") && os_blur_available()));
+    }
 }

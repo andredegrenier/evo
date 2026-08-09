@@ -286,8 +286,29 @@ pub fn converse(
         // Cancelled is the reader having gone: there is nobody to tell.
         Err(ModelError::Cancelled) => {}
         Err(e) => {
-            let _ = tell(Say::Error(e.to_string()));
+            let _ = tell(Say::Error(explain(&e)));
         }
+    }
+}
+
+/// What a phone is told when a generation fails.
+///
+/// The model layer writes its failures for the desktop app, where the answer to
+/// "there is no model" is a Preferences pane and where a refused connection is
+/// something the reader can go and fix. Neither is true here: the model lives on
+/// a server the reader is not sitting at, and `evo serve` has no settings screen
+/// at all. So the two failures that mean "nothing is going to answer you" are
+/// rewritten to name what someone with a shell on that box can actually do, and
+/// the original is kept in brackets -- it is the only thing that distinguishes a
+/// missing model from an endpoint pointed at the wrong port.
+fn explain(error: &ModelError) -> String {
+    match error {
+        ModelError::Unreachable { .. } | ModelError::Unavailable(_) => format!(
+            "No language model is available to answer this. On the server, download one with \
+             `evo fetch-model`, or point the \u{201c}model\u{201d} section of serve/config.json at \
+             a model server that is running. ({error})"
+        ),
+        other => other.to_string(),
     }
 }
 
@@ -853,9 +874,45 @@ mod tests {
 
         let names: Vec<&str> = said.iter().map(Say::name).collect();
         assert_eq!(names, ["stage", "error"]);
-        assert_eq!(
-            said[1].data()["error"],
-            "Qwen3 4B has not been downloaded yet."
+        let message = said[1].data()["error"].as_str().unwrap().to_owned();
+        assert!(
+            message.contains("evo fetch-model"),
+            "the reader is told what to do on the server: {message}"
+        );
+        assert!(
+            message.contains("Qwen3 4B has not been downloaded yet."),
+            "and the original failure is still in there: {message}"
+        );
+    }
+
+    /// A phone reader cannot do anything with "io: Connection refused", and
+    /// there is no Preferences pane on a server to send them to.
+    #[test]
+    fn a_model_server_that_is_not_running_is_explained_rather_than_quoted() {
+        let error = ModelError::Unreachable {
+            url: "http://localhost:11434/api/chat".to_owned(),
+            source: Box::new(ureq::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                "Connection refused",
+            ))),
+        };
+        let message = explain(&error);
+
+        assert!(
+            message.starts_with("No language model is available"),
+            "it opens with what happened: {message}"
+        );
+        assert!(
+            message.contains("evo fetch-model") && message.contains("serve/config.json"),
+            "and with the two ways out of it: {message}"
+        );
+        assert!(
+            !message.contains("Preferences"),
+            "a server has no Preferences pane to send anyone to: {message}"
+        );
+        assert!(
+            message.contains("http://localhost:11434/api/chat"),
+            "the raw failure stays for whoever is reading the logs: {message}"
         );
     }
 

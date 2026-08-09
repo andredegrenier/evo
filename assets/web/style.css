@@ -20,6 +20,9 @@
   --shadow: rgba(76, 79, 105, 0.12);
   --radius: 12px;
   --bar-height: 3.25rem;
+  /* 44px: the smallest thing a finger hits reliably. Every control that can be
+     tapped is at least this tall. */
+  --tap: 2.75rem;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -125,7 +128,62 @@ button {
   border-radius: var(--radius);
   padding: 0.5rem 0.9rem;
   /* Nothing on a phone should need a careful finger. */
-  min-height: 2.5rem;
+  min-height: var(--tap);
+  cursor: pointer;
+}
+
+/* A one-shot action in a bar: a pill with an icon, so it reads as something to
+   press rather than as somewhere to be. Tabs in this app are underlined text
+   (`.tab`) and never look like this. */
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--overlay);
+  border-radius: 999px;
+  padding: 0.45rem 0.85rem;
+  min-height: var(--tap);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.action:active {
+  background: var(--overlay);
+  color: var(--base);
+}
+
+.icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Signing out is not one of the things the library does, so it is set apart
+   from the actions and written as a link. */
+.bar-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.7rem 0.15rem;
+  background: var(--surface);
+}
+
+.link {
+  font: inherit;
+  background: none;
+  border: none;
+  color: var(--subtext);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 0.5rem 0.35rem;
+  min-height: var(--tap);
   cursor: pointer;
 }
 
@@ -178,7 +236,9 @@ textarea {
 input:focus-visible,
 textarea:focus-visible,
 button:focus-visible,
-.button:focus-visible {
+.button:focus-visible,
+.action:focus-visible,
+.link:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -422,7 +482,7 @@ button:focus-visible,
 
 .markup-bar {
   gap: 0.5rem;
-  min-height: 2.75rem;
+  min-height: var(--bar-height);
   border-bottom: 1px solid var(--surface);
 }
 
@@ -466,12 +526,16 @@ button:focus-visible,
   z-index: 5;
   display: flex;
   flex-direction: column;
-  max-height: 70%;
   background: var(--mantle);
   border-top: 1px solid var(--surface);
   border-radius: var(--radius) var(--radius) 0 0;
   box-shadow: 0 -2px 12px var(--shadow);
+  /* `position: fixed` escapes the padding on `body`, so the sheet has to keep
+     clear of the home indicator and of a landscape notch itself. */
   padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  max-height: calc(70% - env(safe-area-inset-top));
 }
 
 .chat[hidden] {
@@ -557,8 +621,8 @@ button:focus-visible,
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  padding: 0.35rem 0.5rem;
-  min-height: 2.25rem;
+  padding: 0.35rem 0.6rem;
+  min-height: var(--tap);
   cursor: pointer;
 }
 

@@ -53,6 +53,12 @@ tokio-stream = "0.1"
 tokio-util = "0.7"
 totp-rs = { version = "6", default-features = false, features = ["std", "qr"] }
 ureq = "3.3.0"
+
+# Mica/Acrylic are Windows window attributes, so they blur behind the window
+# without adding anything to the view hierarchy. The macOS equivalent inserts a
+# view over eframe's render layer and hid the entire UI, so evo no longer asks
+# for it and no longer links the crate anywhere else.
+[target.'cfg(windows)'.dependencies]
 window-vibrancy = "0.8.0"
 
 [profile.release]

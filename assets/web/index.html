@@ -65,11 +65,29 @@
     <section id="view-library" class="view" hidden>
       <header class="bar">
         <h1>evo</h1>
+        <!-- Add and Agent each do one thing when tapped -- open the file
+             picker, open the chat sheet -- so they are pill buttons with an
+             icon rather than three words in a row, which read as a segmented
+             control with "Add" selected. Sign out is a different kind of thing
+             again, and sits past a divider. -->
         <div class="bar-actions">
-          <label class="button" for="file">Add</label>
+          <label class="action" for="file">
+            <svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M10 4.5v11M4.5 10h11" />
+            </svg>
+            Add
+          </label>
           <input id="file" type="file" accept="application/pdf" multiple hidden />
-          <button id="open-agent" class="button quiet" type="button">Agent</button>
-          <button id="sign-out" class="button quiet" type="button">Sign out</button>
+          <button id="open-agent" class="action" type="button">
+            <svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
+              <path
+                d="M16.5 11.5a2 2 0 0 1-2 2H8l-3.5 3v-3a2 2 0 0 1-1-1.7v-5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2z"
+              />
+            </svg>
+            Agent
+          </button>
+          <span class="bar-divider" aria-hidden="true"></span>
+          <button id="sign-out" class="link" type="button">Sign out</button>
         </div>
       </header>
       <div class="bar search">
