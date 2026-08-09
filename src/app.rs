@@ -1786,6 +1786,6 @@ mod tests {
     /// switch that back on.
     #[test]
     fn macos_never_asks_the_os_to_blur_behind_the_window() {
-        assert!(!(cfg!(target_os = "macos") && os_blur_available()));
+        const { assert!(!(cfg!(target_os = "macos") && os_blur_available())) }
     }
 }
