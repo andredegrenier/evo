@@ -32,6 +32,7 @@ INSTALL_RUNTIME_DEPS=1
 INSTALL_BUILD_DEPS=0
 RUN_SMOKE=1
 RUN_INIT=1
+RUN_PDFIUM=1
 ASSUME_YES=0
 
 # Runtime libraries the binary links even though `evo serve` opens no window:
@@ -74,6 +75,7 @@ usage: sudo ./install.sh [options]
   --build-deps      also apt-install the toolchain for a native build (Path A)
   --no-deps         install no packages at all
   --no-smoke        skip the model timing measurement
+  --no-pdfium       do not offer to download the PDFium rendering library
   --no-init         do not offer to run `evo serve init`
   --yes             answer yes to every prompt (non-interactive)
   -h, --help        this
@@ -93,6 +95,7 @@ while [ $# -gt 0 ]; do
         --build-deps) INSTALL_BUILD_DEPS=1; shift ;;
         --no-deps)    INSTALL_RUNTIME_DEPS=0; INSTALL_BUILD_DEPS=0; shift ;;
         --no-smoke)   RUN_SMOKE=0; shift ;;
+        --no-pdfium)  RUN_PDFIUM=0; shift ;;
         --no-init)    RUN_INIT=0; shift ;;
         --yes|-y)     ASSUME_YES=1; shift ;;
         -h|--help)    usage; exit 0 ;;
@@ -407,6 +410,49 @@ do_unit() {
     fi
 }
 
+# ----------------------------------------------------------------- pdfium --
+#
+# PDFium is evo's primary rasterizer, and release downloads carry it. A binary
+# built on this box does not, so page images for the phone are drawn by the
+# pure-Rust hayro renderer until this runs. It is genuinely optional -- hence
+# a prompt rather than a step -- and it is the only part of this installer
+# that touches the network besides apt.
+
+do_pdfium() {
+    say "PDFium rendering library"
+    if [ "$RUN_PDFIUM" -eq 0 ]; then
+        info "skipped (--no-pdfium)."
+        return 0
+    fi
+
+    # Next to the binary is where a release tarball puts it, and evo looks
+    # there first. Nothing to download if the artifact already had one.
+    if [ -f "$(dirname "$BIN_DEST")/libpdfium.so" ]; then
+        info "libpdfium.so is already beside $BIN_DEST; evo will use it."
+        return 0
+    fi
+    local installed
+    installed="$(find "$MODEL_HOME/evo/pdfium" -name 'libpdfium.so' -print -quit 2>/dev/null || true)"
+    if [ -n "$installed" ]; then
+        info "already installed: $installed"
+        return 0
+    fi
+
+    info "Not installed, so pages are drawn by hayro (pure Rust, a little less faithful)."
+    info "The download is about 4 MB, pinned by version and SHA-256 in deploy/pdfium.lock:"
+    info "  sudo -u $SERVICE_USER env HOME=$DATA_DIR $BIN_DEST fetch-pdfium"
+    if ! confirm "Download PDFium now?"; then
+        info "not downloaded. Run the command above whenever you like, then restart evo."
+        return 0
+    fi
+    if sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" XDG_DATA_HOME="$MODEL_HOME" \
+        "$BIN_DEST" fetch-pdfium; then
+        info "Restart the service to pick it up: sudo systemctl restart evo"
+    else
+        warn "the download failed. evo carries on with hayro; try again later."
+    fi
+}
+
 # ------------------------------------------------------------- smoke test --
 #
 # The honest hardware question is not "does this CPU have AVX2" but "how long
@@ -624,6 +670,7 @@ main() {
     do_dirs
     do_binary
     do_unit
+    do_pdfium
     recommend_model
     do_smoke
     do_init

@@ -22,12 +22,15 @@ jobs:
           - os: macos-latest
             artifact: evo-macos-universal
             binary: evo
+            library: libpdfium.dylib
           - os: ubuntu-latest
             artifact: evo-linux-x86_64
             binary: evo
+            library: libpdfium.so
           - os: windows-latest
             artifact: evo-windows-x86_64
             binary: evo.exe
+            library: pdfium.dll
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -55,24 +58,90 @@ jobs:
       - name: Show binary architectures (macOS)
         if: runner.os == 'macOS'
         run: lipo -archs target/release/evo
+
+      # PDFium is the primary rasterizer, so it ships with evo rather than
+      # being fetched on first use. Version, URL and checksums come from
+      # deploy/pdfium.lock, which the binary itself also reads -- one file, so
+      # what is bundled and what `evo fetch-pdfium` downloads cannot drift.
+      - name: Bundle PDFium (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          set -a; . deploy/pdfium.lock; set +a
+          curl -fsSL -o pdfium.tgz "$PDFIUM_BASE_URL/pdfium-mac-univ.tgz"
+          echo "$PDFIUM_MAC_UNIV_SHA256  pdfium.tgz" | shasum -a 256 -c -
+          mkdir -p pdfium && tar -xzf pdfium.tgz -C pdfium
+          cp pdfium/lib/libpdfium.dylib target/release/libpdfium.dylib
+          # Universal, so the .app is universal all the way down.
+          lipo -archs target/release/libpdfium.dylib
+      - name: Bundle PDFium (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          set -a; . deploy/pdfium.lock; set +a
+          curl -fsSL -o pdfium.tgz "$PDFIUM_BASE_URL/pdfium-linux-x64.tgz"
+          echo "$PDFIUM_LINUX_X64_SHA256  pdfium.tgz" | sha256sum -c -
+          mkdir -p pdfium && tar -xzf pdfium.tgz -C pdfium
+          cp pdfium/lib/libpdfium.so target/release/libpdfium.so
+      - name: Bundle PDFium (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a; . deploy/pdfium.lock; set +a
+          curl -fsSL -o pdfium.tgz "$PDFIUM_BASE_URL/pdfium-win-x64.tgz"
+          echo "$PDFIUM_WIN_X64_SHA256  pdfium.tgz" | sha256sum -c -
+          mkdir -p pdfium && tar -xzf pdfium.tgz -C pdfium
+          cp pdfium/bin/pdfium.dll target/release/pdfium.dll
+      - name: Stage the notices beside the binary
+        shell: bash
+        run: cp THIRD-PARTY-NOTICES.md target/release/THIRD-PARTY-NOTICES.md
+
       - name: Package (unix)
         if: runner.os != 'Windows'
         run: |
           cd target/release
-          tar -czf ../../${{ matrix.artifact }}.tar.gz ${{ matrix.binary }}
+          tar -czf ../../${{ matrix.artifact }}.tar.gz \
+            ${{ matrix.binary }} ${{ matrix.library }} THIRD-PARTY-NOTICES.md
       - name: Package (windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path target/release/${{ matrix.binary }} -DestinationPath ${{ matrix.artifact }}.zip
+        run: |
+          Compress-Archive -Path `
+            target/release/${{ matrix.binary }}, `
+            target/release/${{ matrix.library }}, `
+            target/release/THIRD-PARTY-NOTICES.md `
+            -DestinationPath ${{ matrix.artifact }}.zip
       - name: Assemble .app bundle (macOS)
         if: runner.os == 'macOS'
         run: |
           APP=evo.app
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
           cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
           cp target/release/evo "$APP/Contents/MacOS/evo"
           cp assets/icon/evo.icns "$APP/Contents/Resources/evo.icns"
+          # evo looks in ../Frameworks relative to its own binary, which is
+          # where a .app is supposed to keep a dylib.
+          cp target/release/libpdfium.dylib "$APP/Contents/Frameworks/libpdfium.dylib"
+          cp THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/THIRD-PARTY-NOTICES.md"
+          # --deep signs the Frameworks dylib along with the executable; the
+          # bundle stays ad-hoc signed, as it has been since v0.1.
           codesign --force --deep -s - "$APP"
+          codesign --verify --deep --strict "$APP"
           zip -r ${{ matrix.artifact }}.app.zip "$APP"
+      - name: Verify the artifacts carry PDFium
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            unzip -l ${{ matrix.artifact }}.zip | grep -q '${{ matrix.library }}'
+            unzip -l ${{ matrix.artifact }}.zip | grep -q 'THIRD-PARTY-NOTICES.md'
+          else
+            tar -tzf ${{ matrix.artifact }}.tar.gz | grep -q '^${{ matrix.library }}$'
+            tar -tzf ${{ matrix.artifact }}.tar.gz | grep -q 'THIRD-PARTY-NOTICES.md'
+          fi
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            unzip -l ${{ matrix.artifact }}.app.zip | grep -q 'Contents/Frameworks/libpdfium.dylib'
+          fi
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:

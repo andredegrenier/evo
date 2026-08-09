@@ -379,7 +379,7 @@ mod tests {
         let ctx = egui::Context::default();
         let bytes = std::fs::read("tests/fixtures/sample.pdf").expect("fixture");
         let doc = crate::doc::Document::load_bytes(bytes, None).expect("load");
-        let mut dc = DocState::new(doc, &ctx);
+        let mut dc = DocState::new(doc, &ctx, crate::render::engine::EnginePref::Hayro);
         dc.chat.open = true;
         dc.chat.messages = vec![
             ChatMessage::new(Role::User, "what is on page 2?"),
@@ -416,7 +416,7 @@ mod tests {
         let ctx = egui::Context::default();
         let bytes = std::fs::read("tests/fixtures/sample.pdf").expect("fixture");
         let doc = crate::doc::Document::load_bytes(bytes, None).expect("load");
-        let mut dc = DocState::new(doc, &ctx);
+        let mut dc = DocState::new(doc, &ctx, crate::render::engine::EnginePref::Hayro);
         dc.chat.open = true;
         assert!(!dc.chat.allow_tools, "off by default");
 

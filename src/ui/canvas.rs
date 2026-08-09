@@ -33,6 +33,9 @@ pub fn poll_worker(dc: &mut DocState, ctx: &egui::Context) {
     dc.cache.begin_frame();
     dc.thumb_cache.begin_frame();
     while let Some(res) = dc.worker.try_recv() {
+        // The first answer of any kind says which rasterizer opened the
+        // document, which is what the status bar reports.
+        dc.engine = Some(res.engine);
         let cache = if (res.scale - THUMB_SCALE).abs() < 1e-3 {
             &mut dc.thumb_cache
         } else {

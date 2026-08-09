@@ -14,6 +14,7 @@ use super::extract::extract_page_text;
 use super::search::SearchIndex;
 use super::store::MetaDb;
 use super::{BlobStore, DocMeta, PageTextStatus};
+use crate::render::engine::{self as render_engine, EnginePref};
 
 pub enum IndexJob {
     Index {
@@ -72,6 +73,7 @@ impl Indexer {
     /// OCR models live (downloaded on first need). Every document whose pages
     /// are finished is announced on `on_indexed`, which is what gives the
     /// enrichment worker something to summarize.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         index_dir: PathBuf,
         models_dir: PathBuf,
@@ -80,6 +82,7 @@ impl Indexer {
         db: Arc<MetaDb>,
         on_indexed: Sender<String>,
         ctx: eframe::egui::Context,
+        pref: EnginePref,
     ) -> Self {
         let (tx, rx) = channel::<IndexJob>();
         let status = Arc::new(Mutex::new(IndexStatus::default()));
@@ -116,6 +119,7 @@ impl Indexer {
                     db,
                     models_dir,
                     settings: InterpreterSettings::default(),
+                    pref,
                     ocr: None,
                     status: shared,
                     on_indexed,
@@ -159,6 +163,9 @@ struct Worker {
     db: Arc<MetaDb>,
     models_dir: PathBuf,
     settings: InterpreterSettings,
+    /// Which rasterizer draws the pages OCR reads. Text extraction stays
+    /// hayro's in every mode; only the pixels are the engine's business.
+    pref: EnginePref,
     /// OCR engine, created lazily on the first scanned page: `None` = not
     /// tried, `Some(Err)` = unavailable (offline or failed init).
     ocr: Option<Result<super::ocr::Ocr, String>>,
@@ -264,7 +271,8 @@ impl Worker {
             Ok(bytes) => bytes,
             Err(e) => return self.fail_document(id, &e.to_string()),
         };
-        let Ok(pdf) = Pdf::new(bytes) else {
+        let bytes = Arc::new(bytes);
+        let Ok(pdf) = Pdf::new(bytes.clone()) else {
             return self.fail_document(id, &format!("could not parse {title} for indexing"));
         };
 
@@ -298,12 +306,20 @@ impl Worker {
                 }
                 self.ocr = Some(loaded);
             }
-            match &self.ocr {
-                Some(Ok(engine)) => {
+            // The pages OCR reads are drawn by the chosen engine, which is
+            // not the hayro `Pdf` the text was extracted from: one document
+            // per job, opened here rather than once per page -- and only when
+            // there is an OCR engine to read them.
+            let mut rasterizer = match &self.ocr {
+                Some(Ok(_)) => render_engine::open(bytes, None, self.pref).ok(),
+                _ => None,
+            };
+            match (&self.ocr, &mut rasterizer) {
+                (Some(Ok(engine)), Some(doc)) => {
                     let mut last_error: Option<String> = None;
                     for (done, &i) in ocr_pages.iter().enumerate() {
                         self.set_current(format!("OCR: {title} p.{}", i + 1));
-                        match super::ocr::ocr_page(engine, &pages[i], &self.settings) {
+                        match super::ocr::ocr_page(engine, doc.as_mut(), i) {
                             Ok(text) => {
                                 texts[i] = text;
                                 statuses[i] = PageTextStatus::Ocr;
@@ -322,9 +338,10 @@ impl Worker {
                         self.persist(id, &statuses, last_error.as_deref());
                     }
                 }
-                other => {
-                    let reason = match other {
-                        Some(Err(e)) => e.clone(),
+                (other, rasterizer) => {
+                    let reason = match (other, rasterizer) {
+                        (Some(Err(e)), _) => e.clone(),
+                        (_, None) => "the renderer could not open this document".to_owned(),
                         _ => "OCR engine unavailable".to_owned(),
                     };
                     for &i in &ocr_pages {

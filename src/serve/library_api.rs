@@ -392,8 +392,9 @@ pub async fn thumbnail(State(state): State<Shared>, Path(id): Path<String>) -> R
         Err(response) => return response,
     };
     let target = path.clone();
+    let pref = state.config.engine;
     let drawn = tokio::task::spawn_blocking(move || {
-        let png = pages::render_png(bytes, 0, pages::Zoom::FitWidth(pages::THUMB_WIDTH))?;
+        let png = pages::render_png(bytes, 0, pages::Zoom::FitWidth(pages::THUMB_WIDTH), pref)?;
         pages::write_atomically(&target, &png)?;
         Ok::<Vec<u8>, String>(png)
     })

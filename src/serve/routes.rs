@@ -210,7 +210,10 @@ mod tests {
             if index {
                 // The detached context the whole server uses: there is no
                 // window to repaint.
-                library.start_indexer(&eframe::egui::Context::default());
+                library.start_indexer(
+                    &eframe::egui::Context::default(),
+                    crate::render::engine::EnginePref::Hayro,
+                );
             }
             // No test may reach a real language model. Port 1 is not one
             // anything listens on, so a test that asks a question gets the
@@ -762,9 +765,12 @@ mod tests {
         let decoded = image::load_from_memory(&page.body).expect("a real PNG");
         assert_eq!(decoded.width(), 1224);
         assert_eq!(decoded.height(), 1584);
+        // Named for the engine that drew it, so a server whose configuration
+        // changes engines never serves the other one's pixels.
+        let engine = crate::render::engine::resolve(crate::render::engine::EnginePref::default());
         assert!(
             evo.dir
-                .join(format!("library/pagecache/{id}/1-2.png"))
+                .join(format!("library/pagecache/{id}/1-2-{}.png", engine.tag()))
                 .exists(),
             "the render is kept"
         );

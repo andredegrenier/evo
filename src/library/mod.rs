@@ -215,7 +215,11 @@ impl Library {
     /// Start the background text-extraction/indexing worker, and the
     /// enrichment worker it feeds. Documents from previous sessions that were
     /// never indexed get picked up here.
-    pub fn start_indexer(&mut self, ctx: &eframe::egui::Context) {
+    pub fn start_indexer(
+        &mut self,
+        ctx: &eframe::egui::Context,
+        pref: crate::render::engine::EnginePref,
+    ) {
         if self.indexer.is_some() {
             return;
         }
@@ -238,6 +242,7 @@ impl Library {
             self.db.clone(),
             on_indexed.clone(),
             ctx.clone(),
+            pref,
         ));
         self.enricher = Some(enrich::Enricher::spawn(
             index_dir,
@@ -455,44 +460,28 @@ pub fn hex_digest(bytes: &[u8]) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// How wide a library thumbnail is drawn, in pixels.
+pub const THUMB_WIDTH: f32 = 320.0;
+
 /// Render page 1 of `bytes` to `thumb_path` as a PNG in a background thread.
-pub fn spawn_thumbnail_job(bytes: Arc<Vec<u8>>, thumb_path: PathBuf, ctx: eframe::egui::Context) {
+pub fn spawn_thumbnail_job(
+    bytes: Arc<Vec<u8>>,
+    thumb_path: PathBuf,
+    ctx: eframe::egui::Context,
+    pref: crate::render::engine::EnginePref,
+) {
     if thumb_path.exists() {
         return;
     }
     std::thread::Builder::new()
         .name("evo-thumb".into())
         .spawn(move || {
-            use hayro::hayro_interpret::InterpreterSettings;
-            use hayro::vello_cpu::color::AlphaColor;
-            use hayro::{RenderCache, RenderSettings};
-
-            let Ok(pdf) = hayro::hayro_syntax::Pdf::new(bytes) else {
+            let zoom = crate::render::engine::Zoom::FitWidth(THUMB_WIDTH);
+            let Ok((drawn, _)) = crate::render::engine::render_page(bytes, None, 0, zoom, pref)
+            else {
                 return;
             };
-            let pages = pdf.pages();
-            let Some(page) = pages.first() else { return };
-            let (w, _) = page.render_dimensions();
-            let scale = (320.0 / w.max(1.0)).clamp(0.1, 4.0);
-            let pixmap = hayro::render(
-                page,
-                &RenderCache::new(),
-                &InterpreterSettings::default(),
-                &RenderSettings {
-                    x_scale: scale,
-                    y_scale: scale,
-                    width: None,
-                    height: None,
-                    bg_color: AlphaColor::WHITE,
-                },
-            );
-            let (pw, ph) = (pixmap.width() as u32, pixmap.height() as u32);
-            let rgba: Vec<u8> = pixmap
-                .take_unpremultiplied()
-                .into_iter()
-                .flat_map(|p| [p.r, p.g, p.b, p.a])
-                .collect();
-            if let Some(img) = image::RgbaImage::from_raw(pw, ph, rgba) {
+            if let Some(img) = image::RgbaImage::from_raw(drawn.width, drawn.height, drawn.rgba) {
                 let tmp = thumb_path.with_extension("part");
                 if img.save_with_format(&tmp, image::ImageFormat::Png).is_ok() {
                     let _ = std::fs::rename(tmp, thumb_path);

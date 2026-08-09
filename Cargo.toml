@@ -16,6 +16,8 @@ catppuccin = "2.8"
 directories = "6.0.0"
 eframe = { version = "0.35", features = ["persistence"] }
 egui-phosphor = "0.13"
+# `evo fetch-pdfium` unpacks a .tgz. miniz_oxide by default, so still no C.
+flate2 = "1"
 getrandom = "0.4"
 hayro = "0.7"
 hayro-svg = "0.7"
@@ -29,6 +31,11 @@ object_store = { version = "0.14", default-features = false, features = [
     "aws",
 ], optional = true }
 ocrs = "0.12.2"
+# The PDFium rasterizer. Default features on purpose: `thread_safe` puts a
+# mutex around PDFium's single-threaded C API, which is what lets the render
+# worker, the thumbnail threads and `evo serve` hold documents at once.
+# Dynamically bound (libloading), so nothing here needs a C toolchain.
+pdfium-render = { version = "0.9.3", optional = true }
 redb = "4.1.0"
 rfd = "0.17"
 rmcp = { version = "3.1", features = [
@@ -47,6 +54,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
 tantivy = "0.26.1"
+tar = "0.4"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal", "fs"] }
 tokio-stream = "0.1"
@@ -76,9 +84,13 @@ members = [".", "xtask"]
 winresource = "0.1.31"
 
 [features]
-default = ["builtin-llm"]
+default = ["builtin-llm", "pdfium"]
 # Embedded small language model (llama.cpp). Pulls in a C++ toolchain build.
 builtin-llm = ["dep:llama-cpp-2"]
+# The PDFium rasterizer, bound dynamically at runtime: no C toolchain, no
+# compile-time dependency, and a build whose shared library is missing simply
+# renders with hayro as it always did.
+pdfium = ["dep:pdfium-render"]
 # Blobs in an S3 bucket instead of on local disk. Off by default: it pulls in
 # reqwest and rustls, which nobody serving a library off their own disk should
 # have to compile. `cargo build --features s3`.

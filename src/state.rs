@@ -16,6 +16,7 @@ use crate::library::extract::PageTextLayout;
 use crate::library::textjob::TextWorker;
 use crate::render::RenderWorker;
 use crate::render::cache::{self, TextureCache};
+use crate::render::engine::{Engine, EnginePref};
 use crate::tools::{ActiveTool, ToolController};
 use crate::ui::chat::ChatSessionState;
 use crate::ui::viewport::Viewport;
@@ -26,6 +27,13 @@ pub struct DocState {
     pub store: AnnotationStore,
     pub history: History,
     pub worker: RenderWorker,
+    /// Which rasterizer this document's worker was started with, so that
+    /// changing the preference can tell whether there is anything to redo.
+    pub engine_pref: EnginePref,
+    /// Which one actually drew, learned from the first page that came back.
+    /// `Auto` cannot be resolved from here: only the worker knows whether
+    /// PDFium loaded.
+    pub engine: Option<Engine>,
     pub cache: TextureCache,
     pub thumb_cache: TextureCache,
     pub viewport: Viewport,
@@ -125,8 +133,8 @@ impl RailSelection {
 }
 
 impl DocState {
-    pub fn new(doc: Document, ctx: &egui::Context) -> Self {
-        let worker = RenderWorker::spawn(doc.source.clone(), ctx.clone());
+    pub fn new(doc: Document, ctx: &egui::Context, pref: EnginePref) -> Self {
+        let worker = RenderWorker::spawn(doc.source.clone(), ctx.clone(), pref, None);
         let page_count = doc.pages.len();
         Self {
             doc,
@@ -134,6 +142,8 @@ impl DocState {
             store: AnnotationStore::default(),
             history: History::default(),
             worker,
+            engine_pref: pref,
+            engine: None,
             cache: TextureCache::with_budget(cache::CANVAS_BUDGET),
             thumb_cache: TextureCache::with_budget(cache::THUMB_BUDGET),
             viewport: Viewport::default(),
@@ -160,7 +170,8 @@ impl DocState {
     /// viewport, and tool settings. Render workers and caches start fresh.
     pub fn adopt(doc: Document, ctx: &egui::Context, old: DocState) -> Self {
         let same_pages = doc.pages.len() == old.doc.pages.len();
-        let mut new = Self::new(doc, ctx);
+        let pref = old.engine_pref;
+        let mut new = Self::new(doc, ctx, pref);
         // Source page indices shift when pages are inserted, so the ⌘F text
         // cache only survives when the source document is unchanged.
         if same_pages {
@@ -203,5 +214,22 @@ impl DocState {
 
     pub fn selected_annotation(&self) -> Option<&crate::doc::annotation::Annotation> {
         self.selection.and_then(|id| self.store.get(id))
+    }
+
+    /// Switch rasterizer without closing the document.
+    ///
+    /// Everything already drawn came from the old engine, so the worker is
+    /// replaced and both texture caches are thrown away: half a page from each
+    /// renderer would be the one bug this whole seam exists to avoid.
+    pub fn set_engine_pref(&mut self, pref: EnginePref, ctx: &egui::Context) {
+        if self.engine_pref == pref {
+            return;
+        }
+        self.engine_pref = pref;
+        self.engine = None;
+        self.worker = RenderWorker::spawn(self.doc.source.clone(), ctx.clone(), pref, None);
+        self.cache = TextureCache::with_budget(cache::CANVAS_BUDGET);
+        self.thumb_cache = TextureCache::with_budget(cache::THUMB_BUDGET);
+        ctx.request_repaint();
     }
 }

@@ -1,0 +1,16 @@
+# The PDFium build evo renders with -- the single source of truth.
+#
+# Read three ways, which is the whole point of the file: `src/render/pdfium_fetch.rs`
+# parses it at runtime (`include_str!`), and the release and CI workflows
+# `source` it as shell (`set -a; . deploy/pdfium.lock`). Bumping PDFium is
+# editing this file and nothing else.
+#
+# Prebuilt binaries from https://github.com/bblanchon/pdfium-binaries
+# (Apache-2.0 packaging of PDFium, which is BSD-3-Clause). Checksums are of the
+# release assets themselves, taken with `shasum -a 256`.
+PDFIUM_VERSION=7988
+PDFIUM_TAG=chromium/7988
+PDFIUM_BASE_URL=https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7988
+PDFIUM_MAC_UNIV_SHA256=beb15a0e7f601d16f143523f3e93cd840655aee99111bbcf9e5c15c178e9ddec
+PDFIUM_LINUX_X64_SHA256=7358c15e26a746cd67854887ea11b3b807c436056788eee9294fb972b8f8e0be
+PDFIUM_WIN_X64_SHA256=654daf488d9357d2787cec439d0dbdb93d7e180e2cb28e5f1d41c66d2645daec

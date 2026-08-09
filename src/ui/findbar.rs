@@ -32,6 +32,7 @@ pub fn show(
             dc.doc.source.clone(),
             models_dir,
             ctx.clone(),
+            dc.engine_pref,
         ));
     }
     drain_worker(dc);

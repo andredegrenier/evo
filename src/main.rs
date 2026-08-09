@@ -53,6 +53,12 @@ fn main() -> eframe::Result {
         llm::download::main();
     }
 
+    // And `evo fetch-pdfium`: the rasterizer's shared library, for a build
+    // that did not come with one -- `cargo install evo`, or a server.
+    if first_arg.as_deref() == Some("fetch-pdfium") {
+        render::pdfium_fetch::main();
+    }
+
     let initial_file = first_arg.map(std::path::PathBuf::from);
 
     let options = eframe::NativeOptions {

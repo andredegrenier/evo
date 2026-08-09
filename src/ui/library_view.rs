@@ -57,6 +57,7 @@ pub fn show(
     ui: &mut egui::Ui,
     library: &Library,
     state: &mut LibraryViewState,
+    pref: crate::render::engine::EnginePref,
 ) -> Option<LibraryAction> {
     let mut action = None;
 
@@ -110,6 +111,7 @@ pub fn show(
                                 std::sync::Arc::new(bytes),
                                 library.thumb_path(&meta.id),
                                 ui.ctx().clone(),
+                                pref,
                             );
                         }
                     }
@@ -179,7 +181,7 @@ pub fn show(
                 ui.spacing_mut().item_spacing = Vec2::new(16.0, 20.0);
                 ui.add_space(12.0);
                 for meta in &visible {
-                    if let Some(a) = doc_card(ui, library, state, meta, status.as_ref()) {
+                    if let Some(a) = doc_card(ui, library, state, meta, status.as_ref(), pref) {
                         action = Some(a);
                     }
                 }
@@ -362,6 +364,7 @@ fn doc_card(
     state: &mut LibraryViewState,
     meta: &DocMeta,
     status: Option<&IndexStatus>,
+    pref: crate::render::engine::EnginePref,
 ) -> Option<LibraryAction> {
     let mut action = None;
     ui.allocate_ui(Vec2::new(CARD_W, THUMB_H + 64.0), |ui| {
@@ -372,7 +375,7 @@ fn doc_card(
             let painter = ui.painter();
             painter.rect_filled(rect, CornerRadius::same(6), Color32::WHITE);
 
-            match thumb_texture(ui, library, state, &meta.id) {
+            match thumb_texture(ui, library, state, &meta.id, pref) {
                 Some(tex) => {
                     let size = tex.size_vec2();
                     let scale = (rect.width() / size.x).min(rect.height() / size.y).min(1.0);
@@ -454,6 +457,7 @@ fn thumb_texture(
     library: &Library,
     state: &mut LibraryViewState,
     id: &str,
+    pref: crate::render::engine::EnginePref,
 ) -> Option<egui::TextureHandle> {
     if let Some(tex) = state.thumbs.get(id) {
         return Some(tex.clone());
@@ -478,7 +482,7 @@ fn thumb_texture(
             && let Ok(bytes) = library.load_bytes(id)
         {
             state.requested.insert(id.to_owned(), ());
-            spawn_thumbnail_job(std::sync::Arc::new(bytes), path, ui.ctx().clone());
+            spawn_thumbnail_job(std::sync::Arc::new(bytes), path, ui.ctx().clone(), pref);
         }
         None
     }

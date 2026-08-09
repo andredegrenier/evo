@@ -18,6 +18,8 @@ the only non-Rust components, both vendored.)
 ## Features
 
 **Viewing**
+- Two rasterizers behind one seam: **PDFium** (Chrome's, the default when it
+  is installed) or the pure-Rust **hayro**, chosen in Preferences
 - Continuous vertical page layout with smooth pan and zoom (pinch, ⌘+/⌘−,
   fit-width, actual size)
 - Background rendering with progressive quality — stays responsive on large
@@ -167,13 +169,46 @@ all three are attached to [GitHub releases](https://github.com/andredegrenier/ev
 CI builds and tests every platform. Keyboard shortcuts use ⌘ on macOS and
 Ctrl elsewhere.
 
+## Rendering engine
+
+evo parses, edits and writes PDFs in pure Rust and always will. **Drawing** the
+page is the one job where being the only implementation of a twenty-year-old
+specification is a liability, so it is the one job with two engines:
+
+| | |
+|---|---|
+| **PDFium** | The rasterizer inside Chrome and Edge, and the one most PDF producers actually test against. Used by default. BSD-3-Clause; bound dynamically at runtime, so evo still builds with no C toolchain. |
+| **hayro** | evo's original pure-Rust renderer. Still what draws SVG exports and reads positioned text in every mode, and what draws pages when PDFium is not available. |
+
+Preferences → **Rendering** switches between them (*Automatic* means PDFium
+when its library is present, hayro when it is not), shows where the library was
+found, and offers to download one. The status bar names whichever drew the
+document you are looking at.
+
+Release downloads ship the PDFium library inside the artifact — next to the
+binary in the tarball or zip, and in `evo.app/Contents/Frameworks/` on macOS —
+so there is nothing to do. A build from source can fetch it:
+
+```sh
+evo fetch-pdfium                              # into evo's data directory
+cargo run -- fetch-pdfium --into target/debug # beside a development binary
+```
+
+The download is pinned by version **and** SHA-256 in
+[`deploy/pdfium.lock`](deploy/pdfium.lock), which the release workflow and the
+binary both read. `EVO_PDFIUM_PATH` (a file or the directory holding one)
+overrides the search for anyone building PDFium themselves. `evo serve` chooses
+its engine with `"engine": "Auto" | "Hayro" | "Pdfium"` in `serve/config.json`;
+cached page images are named after the engine that drew them, so changing it
+never serves stale pixels.
+
 ## Known limitations
 
-- **Preview fidelity**: hayro is a young pure-Rust PDF renderer. Some
-  documents (exotic blend modes, unusual fonts) may not display pixel-perfect
-  — a status-bar warning appears when that happens. This affects the on-screen
-  preview only: exports reuse the original PDF bytes, so output fidelity is
-  never reduced.
+- **Preview fidelity**: with the pure-Rust hayro renderer, some documents
+  (exotic blend modes, unusual fonts) may not display pixel-perfect — a
+  status-bar warning appears when that happens. Installing PDFium (above) is
+  the answer; either way this affects the on-screen preview only, since
+  exports reuse the original PDF bytes.
 - Encrypted / password-protected PDFs are not supported.
 - Text boxes export using the built-in Helvetica (standard-14) font; on screen
   they render with the bundled, metrically-compatible Liberation Sans.
@@ -199,6 +234,14 @@ Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 Bundled [Liberation Sans](https://github.com/liberationfonts/liberation-fonts)
 font is under the SIL Open Font License
 ([assets/fonts/LICENSE-LiberationSans](assets/fonts/LICENSE-LiberationSans)).
+
+Release artifacts also carry the PDFium shared library (BSD-3-Clause, The
+PDFium Authors), built by
+[pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) (Apache-2.0)
+and bound with [pdfium-render](https://github.com/ajrcarey/pdfium-render)
+(MIT OR Apache-2.0). Full notices are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which ships in every
+artifact.
 
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the Apache-2.0

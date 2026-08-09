@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use sha2::{Digest, Sha256};
 
-use super::{CatalogEntry, ModelSource};
+use super::CatalogEntry;
 
 /// Marker carried by the io error that cancellation raises.
 const CANCELLED: &str = "cancelled";
@@ -164,7 +164,7 @@ pub(crate) fn run(
         // different quantization as often as not.
         let _ = std::fs::remove_file(&part);
 
-        match fetch(source, &part, status, cancel, ctx) {
+        match fetch(source.url, &part, status, cancel, ctx) {
             Ok(digest) => match verify_and_commit(&part, &dest, &digest, source.sha256) {
                 Ok(()) => return Ok(()),
                 Err(e) => last_error = e,
@@ -180,9 +180,13 @@ pub(crate) fn run(
     Err(last_error)
 }
 
-/// Stream one source into `part`, returning the SHA-256 of what arrived.
-fn fetch(
-    source: &ModelSource,
+/// Stream one URL into `part`, returning the SHA-256 of what arrived.
+///
+/// `pub(crate)` and taking a bare URL rather than a `ModelSource` because
+/// `evo fetch-pdfium` wants exactly this: one long download, hashed as it
+/// goes, cancellable, reporting progress the same way.
+pub(crate) fn fetch(
+    url: &str,
     part: &Path,
     status: &Arc<Mutex<DownloadStatus>>,
     cancel: &Arc<AtomicBool>,
@@ -197,12 +201,12 @@ fn fetch(
         .into();
 
     let response = agent
-        .get(source.url)
+        .get(url)
         .call()
-        .map_err(|e| format!("could not reach {}: {e}", source.url))?;
+        .map_err(|e| format!("could not reach {url}: {e}"))?;
     let http_status = response.status().as_u16();
     if !(200..300).contains(&http_status) {
-        return Err(format!("{} returned {http_status}", source.url));
+        return Err(format!("{url} returned {http_status}"));
     }
 
     let body = response.into_body();

@@ -10,6 +10,8 @@ use crate::llm::download::Downloads;
 use crate::mcp::McpPrefs;
 use crate::mcp::client::{ClientEntry, McpClients, Probe};
 use crate::mcp::runtime::McpStatus;
+use crate::render::engine::{self, EnginePref};
+use crate::render::pdfium_fetch::{self, PdfiumFetch};
 use crate::script::ScriptPrefs;
 use crate::script::model::Api;
 use crate::ui::ribbon::RibbonConfig;
@@ -19,6 +21,7 @@ pub enum Tab {
     #[default]
     Shortcuts,
     Ribbon,
+    Rendering,
     Model,
     Scripting,
     Mcp,
@@ -61,6 +64,7 @@ pub fn show(
     assistant: &mut AssistantPrefs,
     downloads: &mut Downloads,
     mcp: McpPane<'_>,
+    render: RenderPane<'_>,
 ) -> bool {
     if !st.open {
         st.capturing = None;
@@ -71,6 +75,7 @@ pub fn show(
     let mut changed = false;
     let mut open = st.open;
     let mut mcp = mcp;
+    let mut render = render;
     egui::Window::new("Preferences")
         .open(&mut open)
         .resizable(true)
@@ -81,6 +86,7 @@ pub fn show(
                 for (tab, label) in [
                     (Tab::Shortcuts, "Shortcuts"),
                     (Tab::Ribbon, "Ribbon"),
+                    (Tab::Rendering, "Rendering"),
                     (Tab::Model, "Model"),
                     (Tab::Scripting, "Scripting"),
                     (Tab::Mcp, "MCP"),
@@ -95,6 +101,7 @@ pub fn show(
             match st.tab {
                 Tab::Shortcuts => changed |= shortcuts_tab(ctx, ui, st, keymap),
                 Tab::Ribbon => changed |= ribbon_tab(ui, ribbon),
+                Tab::Rendering => changed |= rendering_tab(ui, &mut render),
                 Tab::Model => changed |= model_tab(ui, scripts, assistant, downloads),
                 Tab::Scripting => changed |= scripting_tab(ui, scripts),
                 Tab::Mcp => changed |= mcp_tab(ui, &mut mcp),
@@ -666,6 +673,132 @@ fn scripting_tab(ui: &mut egui::Ui, prefs: &mut ScriptPrefs) -> bool {
     *prefs != before
 }
 
+/// Everything the Rendering tab needs: the preference to write, and the
+/// download it can start.
+pub struct RenderPane<'a> {
+    pub pref: &'a mut EnginePref,
+    pub fetch: &'a mut PdfiumFetch,
+}
+
+/// Which rasterizer draws pages, and how to get the one that is missing.
+///
+/// evo parses PDFs in pure Rust whatever is chosen here; this is only about
+/// pixels, which is the one job where being the only implementation of a
+/// twenty-year-old specification is a liability.
+fn rendering_tab(ui: &mut egui::Ui, pane: &mut RenderPane<'_>) -> bool {
+    let before = *pane.pref;
+
+    ui.heading("Renderer");
+    ui.label(
+        egui::RichText::new(
+            "Which engine draws the pages you look at. Page geometry, text, \
+             markup and everything evo saves are unaffected: they are pure \
+             Rust in every mode.",
+        )
+        .weak(),
+    );
+    ui.add_space(8.0);
+
+    for (choice, blurb) in [
+        (
+            EnginePref::Auto,
+            "PDFium when it is installed, hayro when it is not. The default.",
+        ),
+        (
+            EnginePref::Hayro,
+            "The pure-Rust renderer evo has always used. No shared library.",
+        ),
+        (
+            EnginePref::Pdfium,
+            "Chrome\u{2019}s renderer. The one most PDF producers test against.",
+        ),
+    ] {
+        ui.radio_value(pane.pref, choice, choice.label());
+        ui.indent(choice.label(), |ui| {
+            ui.label(egui::RichText::new(blurb).weak().size(11.0));
+        });
+    }
+
+    ui.add_space(10.0);
+    ui.separator();
+    ui.label(egui::RichText::new("PDFium library").strong());
+
+    match engine::pdfium_library_path() {
+        Some(path) => {
+            ui.label(format!("Found: {}", path.display()));
+            if !engine::pdfium_available() {
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    "That file is there but would not load; evo is drawing with hayro.",
+                );
+            }
+        }
+        None if engine::pdfium_available() => {
+            ui.label("Found: the copy this system already had.");
+        }
+        None => {
+            ui.colored_label(ui.visuals().warn_fg_color, "Not installed.");
+        }
+    }
+    ui.label(
+        egui::RichText::new(format!(
+            "PDFium {} \u{2014} BSD-3-Clause, about 15 MB. Release builds of evo \
+             ship it; a build from source downloads it here or with \
+             `evo fetch-pdfium`.",
+            pdfium_fetch::tag()
+        ))
+        .weak()
+        .size(11.0),
+    );
+
+    ui.add_space(6.0);
+    let status = pane.fetch.status();
+    match &status {
+        Some(s) if !s.done => {
+            ui.horizontal(|ui| {
+                let bar = match s.fraction() {
+                    Some(f) => egui::ProgressBar::new(f).show_percentage(),
+                    None => egui::ProgressBar::new(0.0).animate(true),
+                };
+                ui.add_sized([220.0, 16.0], bar);
+                ui.label(egui::RichText::new("Downloading PDFium\u{2026}").weak());
+            });
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        Some(s) => {
+            match &s.error {
+                Some(e) => ui.colored_label(ui.visuals().error_fg_color, e),
+                None => ui.label("PDFium is installed. It draws the next document you open."),
+            };
+            if ui.button("OK").clicked() {
+                pane.fetch.dismiss();
+            }
+        }
+        None => {
+            let installed = engine::pdfium_library_path().is_some();
+            let label = if installed {
+                "Re-download PDFium"
+            } else {
+                "Get PDFium"
+            };
+            if ui.button(label).clicked() {
+                pane.fetch.start(ui.ctx());
+            }
+        }
+    }
+    if !cfg!(feature = "pdfium") {
+        ui.add_space(6.0);
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            "This build of evo was compiled without PDFium support, so pages are \
+             always drawn by hayro.",
+        );
+    }
+
+    *pane.pref != before
+}
+
 /// The MCP server: whether other programs on this machine may drive evo, and
 /// the token they have to present to do it.
 /// Everything the MCP tab needs: what is configured, what the server is
@@ -925,6 +1058,27 @@ mod tests {
             model_tab(ui, &mut prefs, &mut assistant, &mut downloads);
         });
         assert_eq!(assistant, before, "drawing does not flip the switch");
+    }
+
+    /// The Rendering tab lays out differently depending on whether PDFium is
+    /// installed and whether a download is running; drawing it in each state
+    /// is the only way to find out that it lays out at all. And drawing it
+    /// must never be mistaken for the user choosing something.
+    #[test]
+    fn the_rendering_tab_draws_in_every_state_and_reports_nothing_by_itself() {
+        for choice in [EnginePref::Auto, EnginePref::Hayro, EnginePref::Pdfium] {
+            let mut pref = choice;
+            let mut fetch = PdfiumFetch::default();
+            let ctx = egui::Context::default();
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut pane = RenderPane {
+                    pref: &mut pref,
+                    fetch: &mut fetch,
+                };
+                assert!(!rendering_tab(ui, &mut pane), "nothing was touched");
+            });
+            assert_eq!(pref, choice, "drawing does not change the preference");
+        }
     }
 
     /// The MCP tab has to draw in every state the server can be in, including

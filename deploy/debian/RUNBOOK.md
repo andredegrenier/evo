@@ -151,12 +151,31 @@ What it does:
 | Layout | `/var/lib/evo`, owned `evo:evo`, mode `0750` |
 | Binary | `/usr/local/bin/evo`, after checking it actually starts here |
 | Unit | `/etc/systemd/system/evo.service`, `daemon-reload` |
+| PDFium | offers to download the pinned rendering library into `/var/lib/evo` (optional) |
 | Smoke | times a real generation, if a model is present (see below) |
 | Credentials | offers to run `evo serve init` |
 
 It does **not** enable or start the service. The service cannot start before
 `evo serve init` has written credentials, so starting it for you would only
 produce a failed unit.
+
+### The rendering library
+
+A binary built on the box does not come with PDFium, so `evo serve` draws page
+images with the pure-Rust hayro renderer until one is installed. The installer
+offers to fetch it; you can also do it by hand at any time:
+
+```sh
+sudo -u evo env HOME=/var/lib/evo /usr/local/bin/evo fetch-pdfium
+sudo systemctl restart evo
+```
+
+That downloads the exact PDFium release pinned in `deploy/pdfium.lock` and
+checks its SHA-256 before unpacking it into
+`/var/lib/evo/.local/share/evo/pdfium/<version>/`. It is optional: everything
+works without it, only with hayro's fidelity rather than Chrome's. Binaries
+downloaded from GitHub releases already carry the library beside them and need
+none of this.
 
 ### The hardware smoke test
 
@@ -491,9 +510,18 @@ The whole file, with everything else at its defaults:
   "assistant": { "enrich_enabled": false },
   "mcp_clients": [],
   "blobs": "local",
-  "max_upload_mb": 200
+  "max_upload_mb": 200,
+  "engine": "Auto"
 }
 ```
+
+`engine` picks the rasterizer that draws page images for the phone: `"Auto"`
+(PDFium if its library is here, hayro otherwise), `"Hayro"`, or `"Pdfium"`.
+Cached page PNGs are named after the engine that drew them, so changing this
+re-renders rather than serving the other engine's pixels — the old files stay
+on disk until you delete `/var/lib/evo/library/pagecache`. Like `mcp_clients`
+it is configuration-file-only: it decides what every cached image on the server
+looks like, which no HTTP request should be able to change.
 
 A file that exists but does not parse is a startup error, on purpose: silently
 ignoring a typo would point the server at the wrong model without saying so.

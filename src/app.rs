@@ -57,6 +57,11 @@ pub struct EvoApp {
     /// The MCP servers evo may itself use, shared with the chat and script
     /// workers. Connections start on first use and there usually are none.
     mcp_clients: std::sync::Arc<crate::mcp::client::McpClients>,
+    /// Which rasterizer draws pages. Persisted; `Auto` means PDFium when it
+    /// is installed and hayro when it is not.
+    engine_pref: crate::render::engine::EnginePref,
+    /// The PDFium download, if the user has pressed the button this session.
+    pdfium_fetch: crate::render::pdfium_fetch::PdfiumFetch,
 }
 
 pub const ZOOM_STEP: f32 = 1.25;
@@ -113,30 +118,40 @@ fn read_all(files: &[PathBuf]) -> Result<Vec<Vec<u8>>, String> {
 impl EvoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
-        let (theme, glass_pref, keymap, mut ribbon, script_prefs, assistant_prefs, mcp_prefs) =
-            match cc.storage {
-                Some(storage) => (
-                    eframe::get_value(storage, "theme").unwrap_or_default(),
-                    // Solid by default: translucency is a finish, not the design.
-                    eframe::get_value(storage, "glass").unwrap_or(false),
-                    Keymap::from_stored(
-                        eframe::get_value::<StoredKeymap>(storage, "keymap").unwrap_or_default(),
-                    ),
-                    eframe::get_value(storage, "ribbon").unwrap_or_default(),
-                    eframe::get_value(storage, "script_prefs").unwrap_or_default(),
-                    eframe::get_value(storage, "assistant_prefs").unwrap_or_default(),
-                    eframe::get_value(storage, "mcp_prefs").unwrap_or_default(),
+        let (
+            theme,
+            glass_pref,
+            keymap,
+            mut ribbon,
+            script_prefs,
+            assistant_prefs,
+            mcp_prefs,
+            engine_pref,
+        ) = match cc.storage {
+            Some(storage) => (
+                eframe::get_value(storage, "theme").unwrap_or_default(),
+                // Solid by default: translucency is a finish, not the design.
+                eframe::get_value(storage, "glass").unwrap_or(false),
+                Keymap::from_stored(
+                    eframe::get_value::<StoredKeymap>(storage, "keymap").unwrap_or_default(),
                 ),
-                None => (
-                    ThemeChoice::default(),
-                    false,
-                    Keymap::default(),
-                    ui::ribbon::RibbonConfig::default(),
-                    crate::script::ScriptPrefs::default(),
-                    crate::library::enrich::AssistantPrefs::default(),
-                    crate::mcp::McpPrefs::default(),
-                ),
-            };
+                eframe::get_value(storage, "ribbon").unwrap_or_default(),
+                eframe::get_value(storage, "script_prefs").unwrap_or_default(),
+                eframe::get_value(storage, "assistant_prefs").unwrap_or_default(),
+                eframe::get_value(storage, "mcp_prefs").unwrap_or_default(),
+                eframe::get_value(storage, "engine").unwrap_or_default(),
+            ),
+            None => (
+                ThemeChoice::default(),
+                false,
+                Keymap::default(),
+                ui::ribbon::RibbonConfig::default(),
+                crate::script::ScriptPrefs::default(),
+                crate::library::enrich::AssistantPrefs::default(),
+                crate::mcp::McpPrefs::default(),
+                crate::render::engine::EnginePref::default(),
+            ),
+        };
         // A stored layout predates any item added since it was written.
         ribbon.sanitize();
         // The translucent look is the theme's doing -- the window is created
@@ -150,7 +165,7 @@ impl EvoApp {
         crate::ui::theme::apply(&cc.egui_ctx, theme, glass);
         let library = match crate::library::Library::open_default() {
             Ok(mut lib) => {
-                lib.start_indexer(&cc.egui_ctx);
+                lib.start_indexer(&cc.egui_ctx, engine_pref);
                 // Enrichment starts switched off inside the worker; this is
                 // where a saved "yes" turns it on and starts the first pass.
                 lib.set_assistant(&assistant_prefs, &script_prefs.model);
@@ -187,6 +202,8 @@ impl EvoApp {
             mcp: None,
             mcp_rx: None,
             mcp_clients: std::sync::Arc::new(crate::mcp::client::McpClients::default()),
+            engine_pref,
+            pdfium_fetch: crate::render::pdfium_fetch::PdfiumFetch::default(),
         };
         app.mcp_clients.configure(&app.mcp_prefs.clients);
         // A server that was on when evo last quit comes back on, and one that
@@ -249,7 +266,7 @@ impl EvoApp {
                         .ok()
                         .and_then(|docs| docs.into_iter().find(|d| d.id == id).map(|d| d.title))
                 });
-                let mut dc = DocState::new(doc, ctx);
+                let mut dc = DocState::new(doc, ctx, self.engine_pref);
                 dc.library_id = Some(id.to_owned());
                 dc.title_override = title;
                 // The library id is the chat worker's cache key too, so there
@@ -289,7 +306,7 @@ impl EvoApp {
         match Document::load_path(path) {
             Ok(doc) => {
                 self.close_document();
-                self.dc = Some(DocState::new(doc, ctx));
+                self.dc = Some(DocState::new(doc, ctx, self.engine_pref));
                 self.error = None;
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -444,7 +461,7 @@ impl EvoApp {
                 // document save its markup sidecar first. Assigning over
                 // `self.dc` would drop it silently.
                 self.close_document();
-                let mut dc = DocState::new(doc, ctx);
+                let mut dc = DocState::new(doc, ctx, self.engine_pref);
                 dc.force_modified = true;
                 self.dc = Some(dc);
             }
@@ -670,7 +687,7 @@ impl EvoApp {
                 match Document::load_bytes(doc.bytes, None) {
                     Ok(loaded) => {
                         self.close_document();
-                        let mut dc = DocState::new(loaded, ctx);
+                        let mut dc = DocState::new(loaded, ctx, self.engine_pref);
                         dc.title_override = Some(doc.title);
                         self.dc = Some(dc);
                     }
@@ -692,6 +709,7 @@ impl EvoApp {
     /// bytes and never touches the library itself, so this is where a
     /// generated document actually becomes one.
     fn collect_script_output(&mut self, ctx: &egui::Context) {
+        let pref = self.engine_pref;
         let Some(engine) = &self.script_engine else {
             return;
         };
@@ -720,6 +738,7 @@ impl EvoApp {
                             std::sync::Arc::new(bytes),
                             lib.thumb_path(&meta.id),
                             ctx.clone(),
+                            pref,
                         );
                     }
                     self.lib_view.mark_dirty();
@@ -1077,6 +1096,7 @@ impl EvoApp {
                 dc.doc.source.clone(),
                 models_dir,
                 ctx.clone(),
+                dc.engine_pref,
             ));
         }
         ui::findbar::drain_worker(dc);
@@ -1353,6 +1373,15 @@ impl EvoApp {
                         "Some page content may not display exactly; exports are unaffected.",
                     );
                 }
+                if let Some(engine) = dc.engine {
+                    ui.separator();
+                    ui.label(egui::RichText::new(engine.label()).weak().size(11.0))
+                        .on_hover_text(format!(
+                            "Pages are drawn by {}. Change this under \
+                             Preferences \u{2192} Rendering.",
+                            engine.label()
+                        ));
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(dc.tool.label());
                 });
@@ -1384,6 +1413,7 @@ impl eframe::App for EvoApp {
         eframe::set_value(storage, "script_prefs", &self.script_prefs);
         eframe::set_value(storage, "assistant_prefs", &self.assistant_prefs);
         eframe::set_value(storage, "mcp_prefs", &self.mcp_prefs);
+        eframe::set_value(storage, "engine", &self.engine_pref);
     }
 
     fn on_exit(&mut self) {
@@ -1409,6 +1439,7 @@ impl eframe::App for EvoApp {
         }
 
         // Files dropped onto the window.
+        let pref = self.engine_pref;
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
                 .dropped_files
@@ -1435,6 +1466,7 @@ impl eframe::App for EvoApp {
                                     std::sync::Arc::new(bytes),
                                     lib.thumb_path(&meta.id),
                                     ctx.clone(),
+                                    pref,
                                 );
                             }
                         }
@@ -1496,6 +1528,10 @@ impl eframe::App for EvoApp {
                 server: self.mcp.as_ref().map(|server| server.status()),
                 clients: &self.mcp_clients,
             },
+            ui::preferences::RenderPane {
+                pref: &mut self.engine_pref,
+                fetch: &mut self.pdfium_fetch,
+            },
         ) {
             // Turning enrichment on (or changing the model) is the worker's
             // cue to start; it is the only place either can change.
@@ -1504,6 +1540,13 @@ impl eframe::App for EvoApp {
             }
             self.reconcile_mcp(ctx);
             self.mcp_clients.configure(&self.mcp_prefs.clients);
+            // A document already on screen was drawn by the old engine, so
+            // changing the preference has to redraw it rather than wait for
+            // the next one to be opened.
+            let pref = self.engine_pref;
+            if let Some(dc) = &mut self.dc {
+                dc.set_engine_pref(pref, ctx);
+            }
             if let Some(storage) = frame.storage_mut() {
                 self.save(storage);
                 storage.flush();
@@ -1590,9 +1633,10 @@ impl eframe::App for EvoApp {
             ui::findbar::show(ctx, dc, models_dir, canvas_rect);
         } else {
             let mut lib_action = None;
+            let pref = self.engine_pref;
             egui::CentralPanel::default_margins().show(ui, |ui| {
                 if let Some(lib) = &self.library {
-                    lib_action = ui::library_view::show(ui, lib, &mut self.lib_view);
+                    lib_action = ui::library_view::show(ui, lib, &mut self.lib_view, pref);
                 } else {
                     ui.centered_and_justified(|ui| {
                         ui.heading(format!(
@@ -1626,7 +1670,7 @@ impl eframe::App for EvoApp {
         }
         if let Some(bytes) = open_extracted {
             match crate::doc::Document::load_bytes(bytes, None) {
-                Ok(doc) => self.dc = Some(DocState::new(doc, ctx)),
+                Ok(doc) => self.dc = Some(DocState::new(doc, ctx, self.engine_pref)),
                 Err(e) => self.error = Some(e.to_string()),
             }
         }

@@ -12,6 +12,7 @@ use ocrs::{ImageSource, OcrEngine, OcrEngineParams, TextItem, TextLine};
 
 use super::extract::{CharBox, LineLayout};
 use crate::doc::geometry::{PdfPoint, PdfRect};
+use crate::render::engine::{EngineDoc, RenderedPage};
 
 const DETECTION: &str = "text-detection.rten";
 const RECOGNITION: &str = "text-recognition.rten";
@@ -133,46 +134,35 @@ impl Ocr {
     }
 }
 
-/// Rasterize one page at the OCR scale; returns the pixmap and that scale.
+/// Rasterize one page at the OCR scale; returns the bitmap, that scale, and
+/// the page height in points that the boxes have to be flipped around.
+///
+/// Takes the opened document rather than the bytes: the callers are already
+/// walking every page of it, and reopening one per page would parse the whole
+/// PDF again each time.
 fn render_for_ocr(
-    page: &hayro::hayro_syntax::page::Page<'_>,
-    settings: &hayro::hayro_interpret::InterpreterSettings,
-) -> (hayro::vello_cpu::Pixmap, f32) {
-    use hayro::vello_cpu::color::AlphaColor;
-    use hayro::{RenderCache, RenderSettings};
-
-    let (w, h) = page.render_dimensions();
+    doc: &mut dyn EngineDoc,
+    page: usize,
+) -> Result<(RenderedPage, f32, f32), OcrError> {
+    let (w, h) = doc
+        .page_size(page)
+        .ok_or_else(|| OcrError::Run(format!("there is no page {}", page + 1)))?;
     let scale = (MAX_OCR_PIXELS / w.max(h).max(1.0)).clamp(0.5, 4.0);
-    let pixmap = hayro::render(
-        page,
-        &RenderCache::new(),
-        settings,
-        &RenderSettings {
-            x_scale: scale,
-            y_scale: scale,
-            width: None,
-            height: None,
-            bg_color: AlphaColor::WHITE,
-        },
-    );
-    (pixmap, scale)
+    let drawn = doc
+        .render(page, scale)
+        .ok_or_else(|| OcrError::Run(format!("page {} could not be drawn", page + 1)))?;
+    Ok((drawn, scale, h))
 }
 
 /// OCR one page, keeping a box per recognized character in canonical display
 /// space (PDF points, y-up).
 pub fn ocr_page_layout(
     ocr: &Ocr,
-    page: &hayro::hayro_syntax::page::Page<'_>,
-    settings: &hayro::hayro_interpret::InterpreterSettings,
+    doc: &mut dyn EngineDoc,
+    page: usize,
 ) -> Result<Vec<LineLayout>, OcrError> {
-    let (pixmap, scale) = render_for_ocr(page, settings);
-    // Fully opaque white background => premultiplied == straight RGBA.
-    let lines = ocr.recognize_lines(
-        pixmap.data_as_u8_slice(),
-        pixmap.width() as u32,
-        pixmap.height() as u32,
-    )?;
-    let (_, page_h) = page.render_dimensions();
+    let (drawn, scale, page_h) = render_for_ocr(doc, page)?;
+    let lines = ocr.recognize_lines(&drawn.rgba, drawn.width, drawn.height)?;
     Ok(lines
         .iter()
         .map(|line| line_layout(line, scale, page_h))
@@ -199,12 +189,8 @@ fn line_layout(line: &TextLine, scale: f32, page_h: f32) -> LineLayout {
 }
 
 /// Rasterize one page for OCR and recognize its text.
-pub fn ocr_page(
-    ocr: &Ocr,
-    page: &hayro::hayro_syntax::page::Page<'_>,
-    settings: &hayro::hayro_interpret::InterpreterSettings,
-) -> Result<String, OcrError> {
-    let lines = ocr_page_layout(ocr, page, settings)?;
+pub fn ocr_page(ocr: &Ocr, doc: &mut dyn EngineDoc, page: usize) -> Result<String, OcrError> {
+    let lines = ocr_page_layout(ocr, doc, page)?;
     Ok(super::extract::join_lines(&lines))
 }
 
@@ -216,27 +202,14 @@ mod tests {
     /// Build an image-only (scanned-style) PDF from a hayro render of the
     /// text fixture, so OCR is the only way to read it.
     fn scanned_pdf() -> Vec<u8> {
-        use hayro::vello_cpu::color::AlphaColor;
-        use hayro::{RenderCache, RenderSettings};
+        use crate::render::engine::{self, EnginePref, Zoom};
 
-        let bytes = std::fs::read("tests/fixtures/sample.pdf").unwrap();
-        let pdf = hayro::hayro_syntax::Pdf::new(bytes).unwrap();
-        let pages = pdf.pages();
-        let pixmap = hayro::render(
-            &pages[0],
-            &RenderCache::new(),
-            &hayro::hayro_interpret::InterpreterSettings::default(),
-            &RenderSettings {
-                x_scale: 2.0,
-                y_scale: 2.0,
-                width: None,
-                height: None,
-                bg_color: AlphaColor::WHITE,
-            },
-        );
-        let (w, h) = (pixmap.width() as i64, pixmap.height() as i64);
-        let rgb: Vec<u8> = pixmap
-            .data_as_u8_slice()
+        let bytes = std::sync::Arc::new(std::fs::read("tests/fixtures/sample.pdf").unwrap());
+        let (drawn, _) =
+            engine::render_page(bytes, None, 0, Zoom::Factor(2.0), EnginePref::Hayro).unwrap();
+        let (w, h) = (drawn.width as i64, drawn.height as i64);
+        let rgb: Vec<u8> = drawn
+            .rgba
             .chunks(4)
             .flat_map(|p| [p[0], p[1], p[2]])
             .collect();
@@ -288,8 +261,10 @@ mod tests {
     #[test]
     #[ignore = "downloads OCR models; run with --ignored"]
     fn ocr_recovers_scanned_text() {
-        let bytes = scanned_pdf();
-        let pdf = hayro::hayro_syntax::Pdf::new(bytes).unwrap();
+        use crate::render::engine::{self, EnginePref};
+
+        let bytes = std::sync::Arc::new(scanned_pdf());
+        let pdf = hayro::hayro_syntax::Pdf::new(bytes.clone()).unwrap();
         let settings = hayro::hayro_interpret::InterpreterSettings::default();
         let pages = pdf.pages();
 
@@ -299,10 +274,14 @@ mod tests {
             "should have no text layer"
         );
 
+        // Text comes from hayro and pixels from the engine, exactly as the
+        // indexer and the find worker arrange it.
+        let mut doc = engine::open(bytes, None, EnginePref::Hayro).unwrap();
+
         let models_dir = std::env::temp_dir().join("evo-ocr-models");
         let ocr = Ocr::load(&models_dir).expect("model download + init");
         assert!(models_present(&models_dir));
-        let text = ocr_page(&ocr, &pages[0], &settings).unwrap();
+        let text = ocr_page(&ocr, doc.as_mut(), 0).unwrap();
         let lower = text.to_lowercase();
         assert!(
             lower.contains("quick") || lower.contains("fixture"),
@@ -311,7 +290,7 @@ mod tests {
 
         // The positioned pipeline sees the same text, with in-bounds boxes.
         let (w, h) = pages[0].render_dimensions();
-        let layout = ocr_page_layout(&ocr, &pages[0], &settings).unwrap();
+        let layout = ocr_page_layout(&ocr, doc.as_mut(), 0).unwrap();
         assert_eq!(crate::library::extract::join_lines(&layout), text);
         for line in &layout {
             assert_eq!(line.chars.len(), line.text.chars().count());

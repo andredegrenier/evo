@@ -1,18 +1,21 @@
-//! Background page rasterization. hayro's render cache is not thread-safe
-//! (`Rc` internally), so one worker thread owns the parsed `Pdf` and its
-//! caches; the UI thread sends requests and receives finished RGBA images.
+//! Background page rasterization. No rasterizer's document is thread-safe --
+//! hayro's render cache is an `Rc`, PDFium's handles belong to whoever opened
+//! them -- so one worker thread owns the opened document, and the UI thread
+//! sends requests and receives finished RGBA images.
 
 pub mod cache;
+pub mod engine;
+#[cfg(feature = "pdfium")]
+pub mod pdfium;
+pub mod pdfium_fetch;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use eframe::egui;
-use hayro::hayro_interpret::InterpreterSettings;
-use hayro::hayro_syntax::Pdf;
-use hayro::vello_cpu::color::AlphaColor;
-use hayro::{RenderCache, RenderSettings};
+
+use engine::{Engine, EnginePref};
 
 /// Scale the page rail renders at. Lives here rather than in the UI because
 /// the worker has to tell rail requests apart from canvas ones.
@@ -51,6 +54,8 @@ pub struct RenderResponse {
     /// `None` when the request was superseded before it ran. The worker always
     /// answers, so the cache can clear the pending flag either way.
     pub image: Option<egui::ColorImage>,
+    /// Which rasterizer drew it.
+    pub engine: Engine,
 }
 
 /// Add `req` to a pending batch, dropping any request it supersedes: the same
@@ -83,7 +88,12 @@ pub struct RenderWorker {
 impl RenderWorker {
     /// Spawn the worker. `source` must already have been validated by
     /// [`crate::doc::Document::load_bytes`].
-    pub fn spawn(source: Arc<Vec<u8>>, ctx: egui::Context) -> Self {
+    pub fn spawn(
+        source: Arc<Vec<u8>>,
+        ctx: egui::Context,
+        pref: EnginePref,
+        password: Option<String>,
+    ) -> Self {
         let (req_tx, req_rx) = channel::<RenderRequest>();
         let (res_tx, res_rx) = channel::<RenderResponse>();
         let had_warnings = Arc::new(AtomicBool::new(false));
@@ -92,15 +102,15 @@ impl RenderWorker {
         std::thread::Builder::new()
             .name("evo-render".into())
             .spawn(move || {
-                let Ok(pdf) = Pdf::new(source) else {
-                    return;
+                let mut doc = match engine::open(source, password.as_deref(), pref) {
+                    Ok(doc) => doc,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return;
+                    }
                 };
-                let cache = RenderCache::new();
-                let warn = warnings.clone();
-                let settings = InterpreterSettings {
-                    warning_sink: Arc::new(move |_| warn.store(true, Ordering::Relaxed)),
-                    ..Default::default()
-                };
+                let engine = doc.engine();
+                ctx.request_repaint();
 
                 // Block for the first request, then drain the queue and keep
                 // only the newest request per page so a fast zoom doesn't
@@ -125,6 +135,7 @@ impl RenderWorker {
                                 page: req.page,
                                 scale: req.scale,
                                 image: None,
+                                engine,
                             })
                             .is_err()
                         {
@@ -133,32 +144,21 @@ impl RenderWorker {
                     }
 
                     for req in batch {
-                        let pages = pdf.pages();
-                        let Some(page) = pages.get(req.page) else {
+                        let Some(drawn) = doc.render(req.page, req.scale) else {
                             continue;
                         };
-                        let pixmap = hayro::render(
-                            page,
-                            &cache,
-                            &settings,
-                            &RenderSettings {
-                                x_scale: req.scale,
-                                y_scale: req.scale,
-                                width: None,
-                                height: None,
-                                bg_color: AlphaColor::WHITE,
-                            },
-                        );
-                        let size = [pixmap.width() as usize, pixmap.height() as usize];
-                        let image = egui::ColorImage::from_rgba_premultiplied(
-                            size,
-                            pixmap.data_as_u8_slice(),
-                        );
+                        let size = [drawn.width as usize, drawn.height as usize];
+                        let image = egui::ColorImage::from_rgba_unmultiplied(size, &drawn.rgba);
+                        // hayro only notices trouble while drawing, so the
+                        // flag the status bar watches is republished after
+                        // every page rather than set once at open.
+                        warnings.store(doc.had_warnings(), Ordering::Relaxed);
                         if res_tx
                             .send(RenderResponse {
                                 page: req.page,
                                 scale: req.scale,
                                 image: Some(image),
+                                engine,
                             })
                             .is_err()
                         {

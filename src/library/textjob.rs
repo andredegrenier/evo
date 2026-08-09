@@ -14,6 +14,7 @@ use hayro::hayro_syntax::Pdf;
 
 use super::extract::{self, PageTextLayout, TextSource};
 use super::ocr;
+use crate::render::engine::{self as render_engine, EngineDoc, EnginePref};
 
 /// Same thresholds the indexer uses to decide a page needs OCR.
 const MIN_EMBEDDED_CHARS: usize = 32;
@@ -31,17 +32,23 @@ impl TextWorker {
         source: Arc<Vec<u8>>,
         models_dir: Option<PathBuf>,
         ctx: eframe::egui::Context,
+        pref: EnginePref,
     ) -> Self {
         let (tx, rx) = channel::<(usize, PageTextLayout)>();
         std::thread::Builder::new()
             .name("evo-text".into())
             .spawn(move || {
-                let Ok(pdf) = Pdf::new(source) else {
+                let Ok(pdf) = Pdf::new(source.clone()) else {
                     return;
                 };
                 let settings = InterpreterSettings::default();
                 let models_dir = models_dir.filter(|dir| ocr::models_present(dir));
-                let mut engine: Option<ocr::Ocr> = None;
+                // `None` = not tried yet. Text extraction is hayro's job in
+                // every mode; the pixels OCR reads are the chosen engine's, so
+                // when a scanned page turns up both documents are open at once
+                // on this one thread.
+                let mut engine: Option<Option<ocr::Ocr>> = None;
+                let mut rasterizer: Option<Box<dyn EngineDoc>> = None;
 
                 let pages = pdf.pages();
                 for (i, page) in pages.iter().enumerate() {
@@ -49,12 +56,16 @@ impl TextWorker {
                     let thin = extract::join_lines(&layout.lines).trim().len() < MIN_EMBEDDED_CHARS
                         || unmapped > MAX_UNMAPPED_RATIO;
                     if thin && let Some(dir) = &models_dir {
-                        if engine.is_none() {
+                        let engine = engine.get_or_insert_with(|| {
                             // Models are present, so this never downloads.
-                            engine = ocr::Ocr::load(dir).ok();
-                        }
-                        if let Some(engine) = &engine
-                            && let Ok(lines) = ocr::ocr_page_layout(engine, page, &settings)
+                            let loaded = ocr::Ocr::load(dir).ok();
+                            if loaded.is_some() {
+                                rasterizer = render_engine::open(source.clone(), None, pref).ok();
+                            }
+                            loaded
+                        });
+                        if let (Some(engine), Some(doc)) = (engine.as_ref(), &mut rasterizer)
+                            && let Ok(lines) = ocr::ocr_page_layout(engine, doc.as_mut(), i)
                             && !lines.is_empty()
                         {
                             layout = PageTextLayout {

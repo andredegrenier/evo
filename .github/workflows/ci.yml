@@ -31,5 +31,25 @@ jobs:
       # still compiles -- not that it does so three times.
       - run: cargo clippy --all-targets --features s3 -- -D warnings
         if: runner.os == 'Linux'
+      # The pure-Rust build: no PDFium, no built-in model. `evo` has to keep
+      # compiling without either, because that is what `cargo install` with
+      # --no-default-features gives people.
+      - run: cargo clippy --all-targets --no-default-features -- -D warnings
+        if: runner.os == 'Linux'
       - run: cargo build
       - run: cargo test
+      # The PDFium pixel contract, on one platform. The library is pinned by
+      # deploy/pdfium.lock and checked against its SHA-256, so a failure here
+      # is a real failure and never a flaky download.
+      - name: Fetch the pinned PDFium (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          set -a; . deploy/pdfium.lock; set +a
+          curl -fsSL -o pdfium.tgz "$PDFIUM_BASE_URL/pdfium-linux-x64.tgz"
+          echo "$PDFIUM_LINUX_X64_SHA256  pdfium.tgz" | sha256sum -c -
+          mkdir -p pdfium && tar -xzf pdfium.tgz -C pdfium
+          echo "EVO_PDFIUM_PATH=$PWD/pdfium/lib" >> "$GITHUB_ENV"
+      - name: PDFium pixel contract (Linux)
+        if: runner.os == 'Linux'
+        run: cargo test -- --ignored pdfium_

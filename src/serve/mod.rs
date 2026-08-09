@@ -113,6 +113,11 @@ pub struct ServeConfig {
     /// is a question about the library, not about evo.
     #[serde(default = "default_max_upload_mb")]
     pub max_upload_mb: usize,
+    /// Which rasterizer draws page images. Config-file only: it decides what
+    /// every cached PNG on this server looks like, which is not a thing an
+    /// HTTP request should be able to change.
+    #[serde(default)]
+    pub engine: crate::render::engine::EnginePref,
 }
 
 impl Default for ServeConfig {
@@ -123,6 +128,7 @@ impl Default for ServeConfig {
             mcp_clients: Vec::new(),
             blobs: BlobBackend::default(),
             max_upload_mb: DEFAULT_MAX_UPLOAD_MB,
+            engine: crate::render::engine::EnginePref::default(),
         }
     }
 }
@@ -452,7 +458,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let mut library = open_library(&paths, &config)?;
     // The indexer wants somewhere to ask for a repaint. There is no window, so
     // it gets a detached context: the same answer `mcp::client` gives.
-    library.start_indexer(&egui::Context::default());
+    library.start_indexer(&egui::Context::default(), config.engine);
 
     // The servers the agent may reach. Configured here and never from a
     // request: an entry names a program to run, which is not something an HTTP
@@ -597,6 +603,40 @@ mod tests {
         assert_eq!(args.bind, "0.0.0.0");
         assert!(!args.insecure_http, "TLS is assumed until it is waived");
         assert_eq!(ServeOptions::default().cookie_name(), "__Host-evo");
+    }
+
+    /// The renderer is chosen in the configuration file and nowhere else, so
+    /// the spelling in RUNBOOK.md has to be the spelling serde accepts -- and
+    /// a file written before this setting existed has to keep working.
+    #[test]
+    fn the_engine_is_a_config_file_setting_that_defaults_to_automatic() {
+        use crate::render::engine::EnginePref;
+
+        let old_file: ServeConfig =
+            serde_json::from_str(r#"{"blobs":"local","max_upload_mb":200}"#).expect("v0.5 config");
+        assert_eq!(old_file.engine, EnginePref::Auto);
+
+        for (text, want) in [
+            (r#"{"engine":"Auto"}"#, EnginePref::Auto),
+            (r#"{"engine":"Hayro"}"#, EnginePref::Hayro),
+            (r#"{"engine":"Pdfium"}"#, EnginePref::Pdfium),
+        ] {
+            let parsed: ServeConfig = serde_json::from_str(text).expect(text);
+            assert_eq!(parsed.engine, want, "{text}");
+        }
+
+        // And what evo writes is what evo reads.
+        let written = serde_json::to_string(&ServeConfig {
+            engine: EnginePref::Pdfium,
+            ..Default::default()
+        })
+        .expect("serializes");
+        assert!(written.contains(r#""engine":"Pdfium""#), "{written}");
+
+        assert!(
+            serde_json::from_str::<ServeConfig>(r#"{"engine":"pdfium"}"#).is_err(),
+            "a misspelling is a startup error, not a silent fallback"
+        );
     }
 
     #[test]
