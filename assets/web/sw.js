@@ -10,7 +10,7 @@
 // in it. Everything here is an improvement on being slow; nothing here is
 // required for the app to work.
 
-const CACHE = "evo-shell-v4";
+const CACHE = "evo-shell-v5";
 
 const SHELL = [
   "/",
