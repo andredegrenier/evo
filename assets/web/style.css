@@ -212,6 +212,25 @@ button[aria-pressed="true"] {
   font-weight: 600;
 }
 
+/* A button that is only an icon has no words to make it wide enough, so the
+   tap target is asked for by name. */
+.button.icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  padding: 0.5rem;
+}
+
+/* A button with nothing to do stays where it is and stops looking pressable:
+   undo and redo would jump the bar around every time a mark was made if they
+   came and went. */
+button[disabled],
+.button[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .spacer {
   flex: 1;
 }

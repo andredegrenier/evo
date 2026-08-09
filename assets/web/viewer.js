@@ -16,6 +16,14 @@
 // coordinates evo has used since the desktop app's first highlight, counted up
 // from the bottom of the page -- and that is what is saved. Nothing about the
 // zoom, the scale bucket or the screen ends up in the document.
+//
+// Undo is a list of the marks this screen made, not a list of documents it
+// remembers. Every entry names one annotation and says whether it was put on
+// or taken off, and undoing it does the opposite through the same read-modify-
+// write every other change goes through -- so an undo allocates its id from
+// what the server has at that moment, retries a conflict once, and can be
+// beaten to it by the agent or by the desktop app without either of them
+// ending up with the other's work removed.
 
 import { api, get, reason, pageUrl, overlayUrl, scaleFor } from "./api.js";
 
@@ -40,6 +48,11 @@ const TAP = 5;
 const MIN_NOTE = { width: 96, height: 32 };
 /// Note text, in points. About the size of the body text on a letter page.
 const NOTE_FONT = 11;
+
+/// How far back undo goes. Deep enough that nobody reaches the end of it in a
+/// reading session, shallow enough that a phone is not holding a document's
+/// worth of annotations twice over.
+const HISTORY = 50;
 
 /// The colours markup is made in. Straight RGBA, 0-255, exactly as
 /// `doc::annotation::Color` is serialized -- these travel into the sidecar and
@@ -80,9 +93,15 @@ export async function openDocument(id, page) {
     // What is drawn on the document, as the server has it. Kept so a tap can
     // be answered without a round trip; every *write* re-reads it first.
     markup: { version: 1, annotations: [] },
+    // What this screen has done to that markup, and what it has taken back.
+    // It belongs to the open document, so turning pages keeps it and opening
+    // something else starts again -- undo has never meant "in the last thing
+    // I was reading".
+    history: { done: [], undone: [] },
   };
   titleEl.textContent = manifest.title || "";
   message("");
+  paintHistory();
   build();
   goTo(page);
   await readMarkup();
@@ -95,6 +114,7 @@ export function closeDocument() {
   if (open && open.observer) open.observer.disconnect();
   open = null;
   setTool(null);
+  paintHistory();
   container.replaceChildren();
   titleEl.textContent = "";
   indicator.textContent = "";
@@ -116,6 +136,7 @@ export function showPage(number) {
 export async function refreshMarkup(id, page) {
   if (!open || open.id !== id) return;
   await readMarkup();
+  validateHistory();
   const loaded = open.sections
     .map((element, index) => (element.dataset.loaded === "yes" ? index + 1 : null))
     .filter((number) => number !== null && (!page || number === page));
@@ -578,9 +599,12 @@ function nextId(annotations) {
 }
 
 async function addHighlight(number, rect) {
-  const failure = await save((annotations) => [
-    ...annotations,
-    {
+  // The annotation is built inside the change, so a retry rebuilds it against
+  // the ids the server has by then; what is left in `made` is the one that was
+  // actually written, which is what undo has to be told about.
+  let made = null;
+  const failure = await save((annotations) => {
+    made = {
       id: nextId(annotations),
       page: number - 1,
       kind: "Highlight",
@@ -591,8 +615,10 @@ async function addHighlight(number, rect) {
         fill: HIGHLIGHTER,
         opacity: 0.35,
       },
-    },
-  ]);
+    };
+    return [...annotations, made];
+  });
+  if (!failure) remember({ kind: "add", annotation: made });
   await settle(number, failure);
 }
 
@@ -613,9 +639,9 @@ async function addNote(number, rect) {
     max: { x: left + width, y: top },
   };
 
-  const failure = await save((annotations) => [
-    ...annotations,
-    {
+  let made = null;
+  const failure = await save((annotations) => {
+    made = {
       id: nextId(annotations),
       page: number - 1,
       kind: { TextBox: { text, font_size: NOTE_FONT, align: "Left" } },
@@ -628,8 +654,10 @@ async function addNote(number, rect) {
         fill: NOTE_PAPER,
         opacity: 0.95,
       },
-    },
-  ]);
+    };
+    return [...annotations, made];
+  });
+  if (!failure) remember({ kind: "add", annotation: made });
   await settle(number, failure);
 }
 
@@ -687,9 +715,146 @@ deleteButton.addEventListener("click", async () => {
   if (!selected) return;
   const { page, id } = selected;
   unpick();
-  const failure = await save((annotations) => annotations.filter((a) => a.id !== id));
+  // Taken from what the server sent rather than from the copy that was hit
+  // tested: whatever is put back by an undo should be the annotation as it was
+  // saved, down to its colours.
+  let removed = null;
+  const failure = await save((annotations) => {
+    removed = annotations.find((a) => a.id === id) || null;
+    return removed === null ? null : annotations.filter((a) => a.id !== id);
+  });
+  if (!failure && removed) remember({ kind: "delete", annotation: removed });
   await settle(page, failure);
 });
+
+// ---------------------------------------------------------------------------
+// Taking it back
+// ---------------------------------------------------------------------------
+
+const undoButton = document.getElementById("undo");
+const redoButton = document.getElementById("redo");
+
+undoButton.addEventListener("click", () => step("done", "undone"));
+redoButton.addEventListener("click", () => step("undone", "done"));
+
+// A phone has no keyboard, but a phone with a keyboard attached -- or the same
+// app in a browser on a desk -- has the shortcut everybody's hands already
+// know. It costs a listener.
+document.addEventListener("keydown", (event) => {
+  if (!open || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
+  const typing = event.target && /^(INPUT|TEXTAREA)$/.test(event.target.tagName || "");
+  if (typing) return;
+  event.preventDefault();
+  return event.shiftKey ? step("undone", "done") : step("done", "undone");
+});
+
+/// Remember something that was just done, and forget the road not taken: once
+/// a new mark is made, what was undone before it is not a future any more.
+function remember(entry) {
+  if (!open || !entry.annotation) return;
+  open.history.done.push(entry);
+  if (open.history.done.length > HISTORY) open.history.done.shift();
+  open.history.undone.length = 0;
+  paintHistory();
+}
+
+/// Grey out what there is nothing to do with.
+function paintHistory() {
+  undoButton.disabled = !open || open.history.done.length === 0;
+  redoButton.disabled = !open || open.history.undone.length === 0;
+}
+
+/// What has to be true of an entry's annotation for the entry to still mean
+/// something.
+///
+/// An entry on the undo stack describes a change that happened, so its mark is
+/// on the page if it was added and off it if it was deleted; on the redo stack
+/// the change has been taken back, so it is the other way round.
+function wantsPresent(entry, stack) {
+  return (stack === "done") === (entry.kind === "add");
+}
+
+/// Somebody else changed this document -- the agent marking a page, the desktop
+/// app, another phone -- so check the history still describes it.
+///
+/// An entry whose annotation is no longer in the state it assumed has been
+/// overtaken, and re-applying it would either fail or, worse, quietly remove
+/// work this screen never did. Dropping it is the whole repair: there is no
+/// message, because nothing the reader did went wrong.
+function validateHistory() {
+  if (!open) return;
+  const ids = new Set((open.markup.annotations || []).map((a) => a.id));
+  for (const stack of ["done", "undone"]) {
+    open.history[stack] = open.history[stack].filter(
+      (entry) => ids.has(entry.annotation.id) === wantsPresent(entry, stack),
+    );
+  }
+  paintHistory();
+}
+
+/// Move one entry from one stack to the other, doing to the document whatever
+/// that direction means.
+///
+/// Undoing an add takes the mark off and undoing a delete puts it back; redo
+/// is the same table read the other way. Either way the write goes through
+/// `save`, so it is a fresh read, an If-Match and one retry -- an undo is not
+/// a privileged edit.
+async function step(from, to) {
+  if (!open || open.history[from].length === 0) return;
+  const entry = open.history[from].pop();
+  paintHistory();
+  const putting = !wantsPresent(entry, from);
+  const outcome = putting ? await restore(entry) : await erase(entry.annotation.id);
+
+  if (outcome.failure) {
+    // Nothing was written, so nothing has moved: the entry goes back where it
+    // came from and the reader can try again.
+    open.history[from].push(entry);
+    paintHistory();
+    message(outcome.failure);
+    return;
+  }
+
+  unpick();
+  if (outcome.gone) {
+    // The mark this entry is about was removed by somebody else while it sat
+    // on the stack. There is nothing to undo and nothing went wrong, so it is
+    // dropped with one quiet line rather than an error.
+    message("That mark is not on the page any more.");
+  } else {
+    open.history[to].push({ kind: entry.kind, annotation: outcome.annotation || entry.annotation });
+    message("");
+  }
+  paintHistory();
+  await drawOverlay((entry.annotation.page || 0) + 1);
+}
+
+/// Put an annotation back on the page.
+///
+/// The id it had is kept when nothing has taken it, so undoing and redoing the
+/// same mark does not walk the numbers up; when something else has claimed it
+/// the mark comes back under the next id nobody is using, and the entry that
+/// follows it is told about the new number.
+async function restore(entry) {
+  let placed = null;
+  const failure = await save((annotations) => {
+    const taken = annotations.some((a) => a.id === entry.annotation.id);
+    placed = { ...entry.annotation, id: taken ? nextId(annotations) : entry.annotation.id };
+    return [...annotations, placed];
+  });
+  return failure ? { failure } : { annotation: placed };
+}
+
+/// Take an annotation off the page, or report that it was already gone.
+async function erase(id) {
+  let gone = false;
+  const failure = await save((annotations) => {
+    gone = !annotations.some((a) => a.id === id);
+    return gone ? null : annotations.filter((a) => a.id !== id);
+  });
+  if (failure) return { failure };
+  return gone ? { gone: true } : {};
+}
 
 // ---------------------------------------------------------------------------
 // Saving
@@ -703,6 +868,11 @@ deleteButton.addEventListener("click", async () => {
 /// One retry: a second conflict is two writers, not a stale read, and the
 /// reader should hear about it rather than watch evo loop.
 ///
+/// `change` may answer `null` to mean there is nothing to write -- what it was
+/// going to remove is not there any more -- which is a success with no request
+/// behind it. That is how an undo finds out it was overtaken: the discovery is
+/// made against the markup the server has, including the one re-read on a 409.
+///
 /// Returns a sentence on failure and nothing at all on success.
 async function save(change) {
   const url = `/api/docs/${open.id}/markup`;
@@ -713,6 +883,12 @@ async function save(change) {
     }
     const markup = current.data;
     const annotations = change(markup.annotations || []);
+    if (annotations === null) {
+      // Nothing to write, but the read was worth having: it is the freshest
+      // account of the document there is.
+      open.markup = markup;
+      return null;
+    }
     const answer = await api(url, {
       method: "PUT",
       headers: {

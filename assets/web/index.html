@@ -124,6 +124,34 @@
           Note
         </button>
         <span class="spacer"></span>
+        <!-- Undo and redo are icons alone: two more words would push Highlight
+             and Note off the narrow end of a phone. They are always here and
+             go grey when there is nothing to undo, which is how a reader can
+             tell at a glance that a mark was saved. -->
+        <button
+          id="undo"
+          class="button icon-only"
+          type="button"
+          aria-label="Undo the last mark"
+          disabled
+        >
+          <svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M7.5 4.5 4 8l3.5 3.5" />
+            <path d="M4 8h7a3.75 3.75 0 0 1 0 7.5H8.5" />
+          </svg>
+        </button>
+        <button
+          id="redo"
+          class="button icon-only"
+          type="button"
+          aria-label="Redo the mark that was undone"
+          disabled
+        >
+          <svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M12.5 4.5 16 8l-3.5 3.5" />
+            <path d="M16 8H9a3.75 3.75 0 0 0 0 7.5h2.5" />
+          </svg>
+        </button>
         <button id="delete-annotation" class="button danger" type="button" hidden>
           Delete
         </button>
