@@ -1,0 +1,69 @@
+[package]
+name = "evo-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+# A workspace of its own, and not a member of evo's. See the note in the root
+# Cargo.toml: nightly and a sanitizer belong to this crate and to nothing else.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+# The same versions the root lock file pins: a fuzzer that found a bug in some
+# other lopdf would be reporting a bug evo does not have.
+hayro = "0.7"
+lopdf = "0.44"
+
+# The application, as a library. `default-features = false` drops the built-in
+# language model (a C++ build the fuzzer never calls) and PDFium (a rasterizer;
+# these targets are about parsing, and PDFium has its own fuzzing at Google).
+# What is left is the whole of evo's own reading and writing code, which is the
+# point: a fuzz target that ran a copy of the parser would be reporting bugs in
+# the copy.
+evo = { path = "..", default-features = false }
+
+# libFuzzer wants line tables to symbolize a crash, and the fuzz build is a
+# release build.
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_load_bytes"
+path = "fuzz_targets/fuzz_load_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_lopdf_roundtrip"
+path = "fuzz_targets/fuzz_lopdf_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_export"
+path = "fuzz_targets/fuzz_export.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_extract"
+path = "fuzz_targets/fuzz_extract.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_markup_json"
+path = "fuzz_targets/fuzz_markup_json.rs"
+test = false
+doc = false
+bench = false

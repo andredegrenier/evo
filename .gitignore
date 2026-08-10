@@ -3,3 +3,10 @@
 *.swp
 .idea/
 .vscode/
+
+# never commit credentials or local environment
+.env
+.env.*
+*.pem
+*.key
+*.p12

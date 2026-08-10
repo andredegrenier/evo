@@ -163,9 +163,7 @@ pub struct ExtractedPage {
 /// callers (scripts, chat) are asking what the document says, and "nothing"
 /// is the honest answer for something we cannot read.
 pub fn extract_all_pages(source: &std::sync::Arc<Vec<u8>>, password: Option<&str>) -> Vec<String> {
-    let Ok(pdf) =
-        hayro::hayro_syntax::Pdf::new_with_password(source.clone(), password.unwrap_or_default())
-    else {
+    let Ok(pdf) = crate::doc::open_pdf(source.clone(), password.unwrap_or_default()) else {
         return Vec::new();
     };
     pdf.pages()

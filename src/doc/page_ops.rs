@@ -42,6 +42,12 @@ impl PageList {
         self.order.len()
     }
 
+    /// Whether every page has been deleted. A document in this state cannot be
+    /// exported: there would be nothing in the file.
+    pub fn is_empty(&self) -> bool {
+        self.order.is_empty()
+    }
+
     /// Source-document page index behind a logical page.
     pub fn source_of(&self, logical: usize) -> usize {
         self.source_of[logical]

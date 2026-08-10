@@ -8,7 +8,6 @@ use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 
 use hayro::hayro_interpret::InterpreterSettings;
-use hayro::hayro_syntax::Pdf;
 
 use super::extract::extract_page_text;
 use super::search::SearchIndex;
@@ -272,7 +271,7 @@ impl Worker {
             Err(e) => return self.fail_document(id, &e.to_string()),
         };
         let bytes = Arc::new(bytes);
-        let Ok(pdf) = Pdf::new(bytes.clone()) else {
+        let Ok(pdf) = crate::doc::open_pdf(bytes.clone(), "") else {
             return self.fail_document(id, &format!("could not parse {title} for indexing"));
         };
 

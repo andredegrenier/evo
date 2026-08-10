@@ -1,25 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod app;
-mod chat;
-mod doc;
-mod export;
-mod keymap;
-mod library;
-mod llm;
-mod mcp;
-/// The timing harness. Tests only: it builds a thousand-page document to
-/// measure against, and nothing the app does needs one.
-#[cfg(test)]
-mod perf;
-mod render;
-mod script;
-mod serve;
-mod state;
-mod tools;
-mod ui;
+//! The application: a window, and the handful of subcommands that are the same
+//! binary wearing a different hat. Everything it is made of is in the library
+//! beside it (`src/lib.rs`).
 
-use app::EvoApp;
+use evo::app::EvoApp;
+use evo::{llm, mcp, render, serve};
 
 fn load_icon() -> eframe::egui::IconData {
     let png = include_bytes!("../assets/icon/evo-256.png");

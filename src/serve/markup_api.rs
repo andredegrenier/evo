@@ -160,6 +160,24 @@ fn version_trouble(claimed: Option<u32>, annotations: &[Annotation]) -> Option<S
     None
 }
 
+/// Whether a body carries a number no coordinate can hold.
+///
+/// JSON has one number type and it is wider than the `f32` a coordinate is
+/// stored in, so `{"x": 1e40}` is a well-formed body that arrives as infinity.
+/// Written back out it becomes `null`, and a sidecar with a `null` where a
+/// number belongs is one nothing can read -- so a single bad number in a single
+/// annotation would take the document's whole markup layer with it, and every
+/// later read of it would be a 500. Refusing the write is the fix; this is the
+/// sentence that says so.
+fn unusable_number(annotations: &[Annotation]) -> Option<String> {
+    let bad = annotations.iter().find(|a| !a.is_finite())?;
+    Some(format!(
+        "annotation {} has a coordinate that is not a number. Numbers here have to fit in a \
+         32-bit float, which is roughly plus or minus 3.4e38.",
+        bad.id
+    ))
+}
+
 /// `PUT /api/docs/{id}/markup` -- replace the annotation layer, if it is still
 /// the one the client edited.
 pub async fn put_markup(
@@ -186,6 +204,9 @@ pub async fn put_markup(
     };
 
     if let Some(complaint) = version_trouble(body.version, &body.annotations) {
+        return fail(StatusCode::BAD_REQUEST, &complaint);
+    }
+    if let Some(complaint) = unusable_number(&body.annotations) {
         return fail(StatusCode::BAD_REQUEST, &complaint);
     }
 
@@ -412,6 +433,51 @@ mod tests {
         // A body from before groups existed is read the same way it always was.
         let old: Annotation = serde_json::from_str(&json).expect("still readable");
         assert_eq!(old, plain);
+    }
+
+    /// A number JSON can carry and an `f32` cannot.
+    ///
+    /// `1e40` is an ordinary JSON number. It lands in a coordinate as
+    /// infinity, and `serde_json` writes infinity back out as `null` -- so
+    /// markup holding one is markup that nothing can read again. Before this
+    /// was refused, a body like this was accepted with a 200 and every later
+    /// read of that document's markup, manifest and overlay was a 500, with no
+    /// way back through the API: the tag needed to overwrite the layer is only
+    /// served by the read that now fails.
+    #[test]
+    fn a_coordinate_too_big_for_a_float_is_refused_rather_than_stored() {
+        let body: MarkupBody = serde_json::from_str(
+            r#"{"version":2,"annotations":[{"id":7,"page":0,"kind":"Highlight",
+               "rect":{"min":{"x":1e40,"y":0.0},"max":{"x":1.0,"y":1.0}},
+               "style":{"stroke":{"r":0,"g":0,"b":0,"a":0},"stroke_width":0.0,
+                        "fill":{"r":255,"g":235,"b":59,"a":255},"opacity":0.35}}]}"#,
+        )
+        .expect("it is well-formed JSON, which is the whole problem");
+        assert!(body.annotations[0].rect.min.x.is_infinite());
+        assert!(!body.annotations[0].is_finite());
+
+        let complaint = unusable_number(&body.annotations).expect("refused");
+        assert!(complaint.contains("annotation 7"), "{complaint}");
+        assert!(complaint.contains("32-bit float"), "{complaint}");
+
+        // What a person draws is always finite, and is not refused.
+        assert_eq!(unusable_number(&[highlight(0)]), None);
+        assert_eq!(unusable_number(&[polygon()]), None);
+        assert_eq!(unusable_number(&[]), None);
+
+        // And what could not be read back cannot be written: the tag of markup
+        // holding one is a tag of a body with `null` in it.
+        // And this is why: stored, it becomes a file nothing can read again.
+        let broken = SavedMarkup::new(body.annotations, PageList::new(1));
+        let written = serde_json::to_string(&broken).expect("serde_json writes it happily");
+        assert!(
+            written.contains("null"),
+            "the number survived, so this test is testing nothing: {written}"
+        );
+        assert!(
+            serde_json::from_str::<SavedMarkup>(&written).is_err(),
+            "evo could read back what it wrote, so there was never a bug"
+        );
     }
 
     /// The overlay is what the viewer draws, so it has to be the page's own

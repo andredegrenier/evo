@@ -436,6 +436,13 @@ mod tests {
     }
 
     fn put_json(url: &str, cookie: &str, extra: &[(&str, &str)], body: Value) -> Answer {
+        put_body(url, cookie, extra, body.to_string())
+    }
+
+    /// A PUT whose body is whatever the caller says, including things that are
+    /// not JSON at all. The property tests need to send those; every other test
+    /// here has a `Value` in hand.
+    fn put_body(url: &str, cookie: &str, extra: &[(&str, &str)], body: String) -> Answer {
         let agent = agent();
         let mut request = agent
             .put(url)
@@ -446,7 +453,7 @@ mod tests {
         for (name, value) in extra {
             request = request.header(*name, *value);
         }
-        finish(request.send(body.to_string()))
+        finish(request.send(body))
     }
 
     fn delete(url: &str, cookie: &str) -> Answer {
@@ -1780,5 +1787,171 @@ mod tests {
         assert_eq!(status.json()["documents"], 1);
         assert!(status.json()["index"].is_object(), "{}", status.text());
         assert_eq!(status.json()["blobs"], "local");
+    }
+
+    /// The regression the property found, end to end and by name: a body with
+    /// a coordinate too big for an `f32` is refused, and the document is
+    /// exactly as readable afterwards as it was before.
+    ///
+    /// Before the fix this PUT answered 200 and every read of the document's
+    /// markup, manifest and overlay answered 500 from then on -- with no way
+    /// back, because the version tag needed to overwrite the layer is only
+    /// served by the read that had started failing.
+    #[test]
+    fn a_coordinate_too_big_for_a_float_does_not_brick_a_document() {
+        let evo = Harness::start("overflow-coordinate");
+        let session = sign_in(&evo);
+        let docs = format!("{}/api/docs", evo.url);
+        let id = post_bytes(&docs, &session, &[], fixture()).json()["id"]
+            .as_str()
+            .expect("an id")
+            .to_owned();
+        let markup = format!("{docs}/{id}/markup");
+        let tag = get(&markup, Some(&session))
+            .headers
+            .get("etag")
+            .expect("a version tag")
+            .to_owned();
+
+        let refused = put_body(
+            &markup,
+            &session,
+            &[("If-Match", &tag)],
+            r#"{"version":2,"annotations":[{"id":7,"page":0,"kind":"Highlight",
+               "rect":{"min":{"x":1e40,"y":0.0},"max":{"x":1.0,"y":1.0}},
+               "style":{"stroke":{"r":0,"g":0,"b":0,"a":0},"stroke_width":0.0,
+                        "fill":{"r":255,"g":235,"b":59,"a":255},"opacity":0.35}}]}"#
+                .to_owned(),
+        );
+        assert_eq!(refused.status, 400, "{}", refused.text());
+        assert!(
+            refused.text().contains("32-bit float"),
+            "{}",
+            refused.text()
+        );
+
+        // Nothing was written on the way to refusing, so the document reads
+        // exactly as it did -- same tag, and the markup, manifest and overlay
+        // all still answer.
+        let after = get(&markup, Some(&session));
+        assert_eq!(after.status, 200, "{}", after.text());
+        assert_eq!(after.headers.get("etag"), Some(&tag));
+        assert_eq!(
+            get(&format!("{docs}/{id}/manifest"), Some(&session)).status,
+            200
+        );
+        assert_eq!(
+            get(&format!("{docs}/{id}/markup.svg?page=1"), Some(&session)).status,
+            200
+        );
+    }
+
+    /// Whatever a client sends at the markup endpoint, the answer is about the
+    /// request: 2xx because it was written, or 4xx with a sentence saying why
+    /// it was not. Never 5xx.
+    ///
+    /// The distinction is the whole point. A 4xx is evo telling somebody their
+    /// body was wrong; a 5xx is evo admitting it broke, and on a phone that is
+    /// a spinner that never stops and markup that is nowhere. This port faces a
+    /// home network with an agent on it, so "somebody sent nonsense" is a
+    /// routine event and has to have a routine answer.
+    ///
+    /// It runs against the shipped router over a real socket, because the parts
+    /// that would return 500 -- the extractor's rejection, the JSON reader, the
+    /// library write -- are layers a direct call to `put_markup` would skip.
+    /// This is the property that found the coordinate overflow: a number too
+    /// big for an `f32` was accepted, stored as `null`, and made every later
+    /// read of that document a 500.
+    #[test]
+    fn nothing_a_client_can_put_at_the_markup_endpoint_is_a_server_failure() {
+        use proptest::prelude::*;
+        use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+
+        let evo = Harness::start("markup-properties");
+        let session = sign_in(&evo);
+        let docs = format!("{}/api/docs", evo.url);
+        let id = post_bytes(&docs, &session, &[], fixture()).json()["id"]
+            .as_str()
+            .expect("an id")
+            .to_owned();
+        let markup = format!("{docs}/{id}/markup");
+
+        // Three kinds of client: one that speaks the format, one that speaks
+        // JSON and nothing more, and one that is not speaking JSON at all.
+        let bodies = prop_oneof![
+            4 => (
+                crate::robustness::annotations(2),
+                prop::option::of(0u32..4),
+                any::<bool>(),
+                prop::option::of(crate::robustness::out_of_range_number()),
+            )
+                .prop_map(|(annotations, version, with_pages, overflow)| {
+                    let mut body = json!({ "annotations": annotations });
+                    if let Some(version) = version {
+                        body["version"] = version.into();
+                    }
+                    if with_pages {
+                        body["pages"] =
+                            serde_json::to_value(crate::doc::page_ops::PageList::new(2))
+                                .expect("a page list");
+                    }
+                    // A number no `f32` can hold, in the place a coordinate
+                    // goes. JSON has one number type and it is wider than the
+                    // one the model stores.
+                    if let Some(overflow) = overflow
+                        && let Some(first) = body["annotations"].get_mut(0)
+                    {
+                        first["rect"]["min"]["x"] = overflow;
+                    }
+                    body.to_string()
+                }),
+            3 => crate::robustness::json_value().prop_map(|v| v.to_string()),
+            1 => "[^\\p{C}]{0,64}".prop_map(|s| s.to_owned()),
+        ];
+        // Half the writes quote the current version and half quote nonsense, so
+        // both the accepting and the refusing branch are walked.
+        let cases = (bodies, any::<bool>());
+
+        let config = Config {
+            cases: 80,
+            max_shrink_iters: 200,
+            ..Config::default()
+        };
+        TestRunner::new_with_rng(config, TestRng::deterministic_rng(RngAlgorithm::ChaCha))
+            .run(&cases, |(body, conditional)| {
+                let current = get(&markup, Some(&session));
+                prop_assert_eq!(current.status, 200, "{}", current.text());
+                let tag = current
+                    .headers
+                    .get("etag")
+                    .cloned()
+                    .expect("a version tag on every read");
+
+                let quoted = if conditional {
+                    tag.clone()
+                } else {
+                    "\"not the current one\"".to_owned()
+                };
+                let answer = put_body(&markup, &session, &[("If-Match", &quoted)], body.clone());
+                prop_assert!(
+                    answer.status < 500,
+                    "{} for {body}: {}",
+                    answer.status,
+                    answer.text()
+                );
+
+                // A write that was accepted is a write that can be read back,
+                // under the tag the answer named. Anything else and the phone's
+                // next conditional write is refused for a reason it cannot see.
+                if answer.status == 200 {
+                    let promised = answer.json()["etag"].as_str().map(str::to_owned);
+                    let after = get(&markup, Some(&session));
+                    prop_assert_eq!(after.status, 200, "{}", after.text());
+                    prop_assert_eq!(after.headers.get("etag").cloned(), promised);
+                    prop_assert!(after.json().is_object(), "{}", after.text());
+                }
+                Ok(())
+            })
+            .expect("PUT /api/docs/{id}/markup");
     }
 }

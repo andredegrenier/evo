@@ -57,6 +57,41 @@ impl LoadError {
     }
 }
 
+/// Hand bytes to hayro's parser without letting it take the process with it.
+///
+/// **Every** place in evo that parses a PDF goes through here, because every
+/// one of them is handed a file somebody else made.
+///
+/// hayro-syntax 0.7.2 panics on some damaged encryption dictionaries:
+/// `crypto/mod.rs:502` slices an MD5 digest to `/Length / 8` bytes, and
+/// `/Length` comes out of the file. One flipped bit in the committed AES-256
+/// fixture -- `/R 6` becoming `/R 4` -- sends a 256-bit length down the
+/// revision-4 path and asks for 32 bytes of a 16-byte hash. The file that does
+/// it is `tests/fixtures/broken/encrypt-length-overruns-md5.pdf`, and the
+/// property that found it is in `src/robustness.rs`.
+///
+/// A panic there is not a wrong picture, it is evo gone -- with every other
+/// document the person had open, and whatever they had not saved. The fix
+/// belongs upstream (the length has to be clamped to the digest); until it is
+/// there, a panic in the parser is caught here and answered as "not a valid PDF
+/// file", which is what the file is. The guard stays afterwards regardless: it
+/// is the same one sentence for the next one of these, and there will be a next
+/// one.
+///
+/// Catching is sound at exactly this seam and would not be at most others:
+/// nothing of evo's is mutated between the call and the catch, the only value
+/// in flight is the half-built `Pdf` (dropped by the unwind), and hayro's own
+/// state cannot outlive it. The panic message still reaches stderr, which is
+/// how a new upstream bug gets noticed. A build with `panic = "abort"` is not
+/// protected, and evo does not ship one.
+pub fn open_pdf(
+    source: Arc<Vec<u8>>,
+    password: &str,
+) -> Result<Pdf, hayro::hayro_syntax::LoadPdfError> {
+    std::panic::catch_unwind(|| Pdf::new_with_password(source, password))
+        .unwrap_or(Err(hayro::hayro_syntax::LoadPdfError::Invalid))
+}
+
 /// An opened PDF document.
 pub struct Document {
     pub source: Arc<Vec<u8>>,
@@ -95,20 +130,17 @@ impl Document {
         use hayro::hayro_syntax::{DecryptionError, LoadPdfError};
 
         let source = Arc::new(bytes);
-        let pdf =
-            Pdf::new_with_password(source.clone(), password.unwrap_or_default()).map_err(|e| {
-                match e {
-                    LoadPdfError::Decryption(DecryptionError::PasswordProtected) => {
-                        if password.is_some() {
-                            LoadError::WrongPassword
-                        } else {
-                            LoadError::NeedsPassword
-                        }
-                    }
-                    LoadPdfError::Decryption(_) => LoadError::UnsupportedEncryption,
-                    LoadPdfError::Invalid => LoadError::Invalid,
+        let pdf = open_pdf(source.clone(), password.unwrap_or_default()).map_err(|e| match e {
+            LoadPdfError::Decryption(DecryptionError::PasswordProtected) => {
+                if password.is_some() {
+                    LoadError::WrongPassword
+                } else {
+                    LoadError::NeedsPassword
                 }
-            })?;
+            }
+            LoadPdfError::Decryption(_) => LoadError::UnsupportedEncryption,
+            LoadPdfError::Invalid => LoadError::Invalid,
+        })?;
 
         let pages: Vec<PageInfo> = pdf
             .pages()

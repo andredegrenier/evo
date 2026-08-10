@@ -394,7 +394,7 @@ struct Found {
 
 /// Find `needle` on 1-based `page`, in the page's own coordinates.
 fn locate(bytes: Arc<Vec<u8>>, page: usize, needle: &str) -> Result<Found, String> {
-    let pdf = hayro::hayro_syntax::Pdf::new(bytes)
+    let pdf = crate::doc::open_pdf(bytes, "")
         .map_err(|_| "evo cannot read that document any more".to_owned())?;
     let pages = pdf.pages();
     let Some(source) = pages.get(page - 1) else {

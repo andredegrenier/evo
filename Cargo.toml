@@ -81,6 +81,12 @@ lto = "thin"
 opt-level = 2
 
 [workspace]
+# `fuzz/` is deliberately absent. It is a workspace of its own (it carries its
+# own empty `[workspace]` table) because cargo-fuzz needs a nightly compiler and
+# builds with a sanitizer, and a member would put both in front of `cargo
+# build`, `cargo test` and every clippy line in CI for code nobody runs on a
+# push. The cost is that `cargo fmt --all` and `cargo clippy --all-targets` do
+# not reach it either; fuzz/README.md says how to run them there.
 members = [".", "xtask"]
 
 [build-dependencies]
@@ -100,4 +106,5 @@ pdfium = ["dep:pdfium-render"]
 s3 = ["dep:object_store"]
 
 [dev-dependencies]
+proptest = "1.11.0"
 tokio = { version = "1", features = ["test-util", "macros", "rt"] }

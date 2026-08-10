@@ -164,6 +164,13 @@ pub enum LibraryError {
     /// and could not *write* it back out -- a different thing to tell somebody.
     #[error("this PDF could not be unlocked for the library: {0}")]
     Decrypt(#[from] lopdf::Error),
+    /// Markup carrying a coordinate that is not a number. See
+    /// [`Annotation::is_finite`](crate::doc::annotation::Annotation::is_finite):
+    /// storing one produces a sidecar that nothing -- including this build --
+    /// can read back, which loses every other annotation on the document
+    /// along with it.
+    #[error("this markup has a coordinate that is not a number, so it cannot be saved")]
+    UnwritableMarkup,
 }
 
 pub struct Library {
@@ -518,7 +525,17 @@ impl Library {
         Ok(markup)
     }
 
+    /// Write the annotation layer.
+    ///
+    /// Markup that could not be read back is refused rather than stored. The
+    /// callers that matter -- the markup API, the agent's tools, the desktop
+    /// app -- each have their own idea of how to tell somebody, but none of
+    /// them may leave a sidecar behind that this build cannot open, so the
+    /// rule lives at the one place all three write through.
     pub fn save_markup(&self, id: &str, markup: &SavedMarkup) -> Result<(), LibraryError> {
+        if !markup.annotations.iter().all(Annotation::is_finite) {
+            return Err(LibraryError::UnwritableMarkup);
+        }
         self.db.put_markup(id, markup)
     }
 

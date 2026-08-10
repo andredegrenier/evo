@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use hayro::hayro_interpret::InterpreterSettings;
-use hayro::hayro_syntax::Pdf;
 
 use super::extract::{self, PageTextLayout, TextSource};
 use super::ocr;
@@ -40,7 +39,7 @@ impl TextWorker {
             .name("evo-text".into())
             .spawn(move || {
                 let Ok(pdf) =
-                    Pdf::new_with_password(source.clone(), password.as_deref().unwrap_or_default())
+                    crate::doc::open_pdf(source.clone(), password.as_deref().unwrap_or_default())
                 else {
                     return;
                 };

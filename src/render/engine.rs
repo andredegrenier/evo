@@ -354,7 +354,7 @@ pub struct HayroEngineDoc {
 
 impl HayroEngineDoc {
     pub fn open(bytes: Arc<Vec<u8>>, password: Option<&str>) -> Result<Self, OpenError> {
-        let pdf = Pdf::new_with_password(bytes, password.unwrap_or_default())
+        let pdf = crate::doc::open_pdf(bytes, password.unwrap_or_default())
             .map_err(|_| OpenError::Unreadable)?;
         let warnings = Arc::new(AtomicBool::new(false));
         let sink = warnings.clone();

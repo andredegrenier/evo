@@ -70,7 +70,7 @@ impl StampTextures {
     }
 
     #[cfg(test)]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.map.len()
     }
 }

@@ -5,7 +5,6 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use hayro::hayro_interpret::InterpreterSettings;
-use hayro::hayro_syntax::Pdf;
 use hayro_svg::{RenderCache, SvgRenderSettings, convert};
 
 use crate::doc::Document;
@@ -31,7 +30,7 @@ pub fn export_svg(
     store: &AnnotationStore,
     path: &Path,
 ) -> Result<Vec<std::path::PathBuf>, SvgError> {
-    let pdf = Pdf::new_with_password(doc.source.clone(), doc.password().unwrap_or_default())
+    let pdf = crate::doc::open_pdf(doc.source.clone(), doc.password().unwrap_or_default())
         .map_err(|_| SvgError::Parse)?;
     let cache = RenderCache::new();
     let settings = InterpreterSettings::default();

@@ -1,7 +1,9 @@
 //! Drawing a page with each engine.
 //!
-//! evo is a binary crate with no library target, so the harness cannot call
-//! `src/render/engine.rs`; it mirrors it instead. The mirror is deliberately
+//! evo has a library target (M38 added one, for the fuzz crate), so the
+//! harness *could* call `src/render/engine.rs` -- and does not, because
+//! depending on evo would compile eframe, tantivy and llama.cpp to hash a
+//! bitmap. It mirrors it instead. The mirror is deliberately
 //! literal -- same hayro `RenderSettings` (opaque white background, one scale
 //! on both axes), same `take_unpremultiplied()` straight-alpha RGBA, same
 //! `PdfRenderConfig::scale_page_by_factor`, same `as_rgba_bytes()` -- because
@@ -11,9 +13,7 @@
 //! hayro and the same pdfium-render.
 //!
 //! If `engine.rs` ever grows render settings that matter, they belong here
-//! too, and the baseline needs re-blessing. (The alternative -- giving evo a
-//! library target so xtask could `use evo::render::engine` -- would compile
-//! eframe, tantivy and llama.cpp to hash a bitmap.)
+//! too, and the baseline needs re-blessing.
 
 use std::path::PathBuf;
 use std::sync::Arc;

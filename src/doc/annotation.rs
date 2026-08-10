@@ -308,6 +308,43 @@ impl Annotation {
         self.rect
     }
 
+    /// Whether every number this annotation carries is a real one.
+    ///
+    /// It always is when a person drew it, and it need not be when a phone or
+    /// an agent sent it: JSON has one number type and it is a `f64`, so
+    /// `{"x": 1e40}` is a perfectly well-formed body that lands in a `f32` as
+    /// infinity. Which would be a harmless nonsense of a shape, except that
+    /// `serde_json` writes infinity back out as `null` -- so markup holding one
+    /// is markup that cannot be read again, by this server or by the desktop
+    /// app, and the document it belongs to is bricked for everything that
+    /// touches its markup.
+    ///
+    /// So this is checked at the doors untrusted markup comes through, and the
+    /// answer there is a refusal rather than a stored file nobody can open.
+    pub fn is_finite(&self) -> bool {
+        let point = |p: &PdfPoint| p.x.is_finite() && p.y.is_finite();
+        if !point(&self.rect.min) || !point(&self.rect.max) {
+            return false;
+        }
+        if !self.style.stroke_width.is_finite() || !self.style.opacity.is_finite() {
+            return false;
+        }
+        match &self.kind {
+            AnnotationKind::Highlight | AnnotationKind::Rect | AnnotationKind::Ellipse => true,
+            AnnotationKind::TextBox { font_size, .. } | AnnotationKind::Stamp { font_size, .. } => {
+                font_size.is_finite()
+            }
+            AnnotationKind::Line { p1, p2, .. } => point(p1) && point(p2),
+            AnnotationKind::Freehand { points } | AnnotationKind::PolyLine { points, .. } => {
+                points.iter().all(point)
+            }
+            AnnotationKind::Polygon { points, cloudy } => {
+                points.iter().all(point) && cloudy.is_none_or(f32::is_finite)
+            }
+            AnnotationKind::ImageStamp { .. } => true,
+        }
+    }
+
     /// Move the annotation by (dx, dy) points, carrying interior geometry along.
     pub fn translate(&mut self, dx: f32, dy: f32) {
         self.rect = self.rect.translated(dx, dy);

@@ -1,0 +1,101 @@
+name: Fuzz
+
+# Hours of hostile input against the code that reads files evo did not write.
+#
+# Deliberately NOT part of per-push CI, and deliberately not a required check.
+# Fuzzing is a search: a run that finds nothing proves nothing, and a run that
+# finds something has found a bug that was already there. Blocking a merge on
+# the weather would teach everybody to ignore it. What blocks a merge is
+# `src/robustness.rs`, which runs the same rules in seconds on every push.
+#
+# Weekly, or on demand. A crash uploads the exact bytes; minimize them with
+# `cargo fuzz tmin`, commit the result to `tests/fixtures/broken/`, add it to
+# `BROKEN` in `src/robustness.rs`, and fix the bug. See fuzz/README.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Minutes per target"
+        type: string
+        default: "15"
+  schedule:
+    # 04:00 UTC on Sundays.
+    - cron: "0 4 * * 0"
+
+env:
+  CARGO_TERM_COLOR: always
+
+# A new run supersedes one still going: two fuzzers racing over the same week
+# is not twice the coverage, it is twice the bill.
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    # Five targets at fifteen minutes is seventy-five, and the first build of
+    # evo under a sanitizer is a long one. The cap is generous on purpose and
+    # is a stop, not a budget.
+    timeout-minutes: 150
+    strategy:
+      # Every target runs even when one of them crashes: the point of a weekly
+      # run is the whole report, not the first failure.
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_load_bytes
+          - fuzz_lopdf_roundtrip
+          - fuzz_export
+          - fuzz_extract
+          - fuzz_markup_json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      # evo's library target pulls in eframe, which wants the GTK headers even
+      # when nothing opens a window.
+      - name: Install Linux GUI deps
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      # A corpus that survives between runs is most of what makes a fuzzer
+      # better than random bytes: week two starts where week one stopped.
+      # Keyed by target and run number so each week writes a new entry, with
+      # the newest previous one restored.
+      - name: Restore the corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Seed from evo's own fixtures
+        run: ./fuzz/seed-corpus.sh
+
+      - name: Fuzz ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          minutes="${{ inputs.minutes || '15' }}"
+          cargo fuzz run "${{ matrix.target }}" -- \
+            -max_total_time=$((minutes * 60)) \
+            -max_len=262144 \
+            -rss_limit_mb=4096 \
+            -print_final_stats=1
+
+      # `if: failure()` and not `always()`: a corpus is cached above, and the
+      # only thing worth carrying out of a green run is nothing.
+      - name: Upload the crash
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore
+          retention-days: 90
