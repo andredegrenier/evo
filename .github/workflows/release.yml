@@ -134,13 +134,26 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           set -euo pipefail
-          tar -tzf ${{ matrix.artifact }}.tar.gz | grep -qx '${{ matrix.library }}'
-          tar -tzf ${{ matrix.artifact }}.tar.gz | grep -qx 'THIRD-PARTY-NOTICES.md'
+          # The listing is taken once and matched in the shell rather than
+          # piped into `grep -q`: grep leaves as soon as it matches, GNU tar is
+          # still decompressing forty megabytes into the pipe, and the write
+          # error that follows fails the step over an archive that is fine.
+          names=$(tar -tzf ${{ matrix.artifact }}.tar.gz)
+          for want in '${{ matrix.library }}' THIRD-PARTY-NOTICES.md; do
+            case $'\n'"$names"$'\n' in
+              *$'\n'"$want"$'\n'*) ;;
+              *) echo "$want is missing from the tarball"; echo "$names"; exit 1 ;;
+            esac
+          done
       - name: Verify the .app carries PDFium (macOS)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          unzip -l ${{ matrix.artifact }}.app.zip | grep -q 'Contents/Frameworks/libpdfium.dylib'
+          names=$(unzip -l ${{ matrix.artifact }}.app.zip)
+          case "$names" in
+            *Contents/Frameworks/libpdfium.dylib*) ;;
+            *) echo "the .app has no bundled PDFium"; echo "$names"; exit 1 ;;
+          esac
       - name: Verify the artifact carries PDFium (Windows)
         if: runner.os == 'Windows'
         run: |
