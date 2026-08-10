@@ -709,6 +709,12 @@ const BROKEN: &[&str] = &[
     "encrypt-length-overruns-md5.pdf",
 ];
 
+/// The one broken file that is not slow to *read* but is slow to *write*, kept
+/// out of [`BROKEN`] because the writer test would then take four seconds
+/// instead of a tenth of one. See
+/// [`saving_a_mangled_xref_finishes_but_takes_seconds`].
+const SLOW_TO_SAVE: &str = "xref-slow-lopdf-save.pdf";
+
 fn broken(name: &str) -> Vec<u8> {
     std::fs::read(format!("tests/fixtures/broken/{name}"))
         .unwrap_or_else(|e| panic!("the {name} fixture: {e}"))
@@ -719,7 +725,7 @@ fn broken(name: &str) -> Vec<u8> {
 /// infinite width.
 #[test]
 fn every_broken_fixture_is_an_error_and_not_a_crash() {
-    for name in BROKEN {
+    for name in BROKEN.iter().chain(std::iter::once(&SLOW_TO_SAVE)) {
         match Document::load_bytes(broken(name), None) {
             Err(_) => {}
             Ok(doc) => {
@@ -739,6 +745,46 @@ fn every_broken_fixture_is_an_error_and_not_a_crash() {
             }
         }
     }
+}
+
+/// The other thing a fuzzer finds: not a crash, a wait.
+///
+/// libFuzzer reported this 456-byte file as a slow unit. hayro reads it in
+/// under a millisecond and lopdf reads it in under one too -- but lopdf takes
+/// between three and seven seconds to *write* the 293 bytes that come out the
+/// other side. One xref entry is a byte short (`000100000000000 65 `), which
+/// desynchronizes the rest of the table, and `/Prev` points back at the section
+/// it is in.
+///
+/// For a person that is Save As on a small damaged file taking the best part of
+/// ten seconds. It is upstream, in lopdf's writer, and it does terminate, so
+/// this is a witness rather than a fix: the file is committed, the behaviour is
+/// written down, and if it ever becomes unbounded rather than merely slow there
+/// is something to point at.
+///
+/// `#[ignore]`d because four seconds is more than the whole rest of this module
+/// costs. `cargo test -- --ignored xref` runs it.
+#[test]
+#[ignore = "spends seconds inside lopdf's writer on purpose"]
+fn saving_a_mangled_xref_finishes_but_takes_seconds() {
+    let bytes = broken(SLOW_TO_SAVE);
+    let mut lo = lopdf::Document::load_mem(&bytes).expect("lopdf reads it happily");
+
+    let started = std::time::Instant::now();
+    let mut out = Vec::new();
+    lo.save_to(&mut out).expect("and writes it, eventually");
+    let took = started.elapsed();
+
+    assert!(!out.is_empty());
+    // Not a threshold anybody should tune -- a machine under load can be
+    // slower. What is being pinned is that it finishes at all.
+    assert!(
+        took < std::time::Duration::from_secs(120),
+        "lopdf took {took:?} to write {} bytes; it used to take about four seconds, \
+         so this has become something worse than slow",
+        out.len()
+    );
+    println!("lopdf wrote {} bytes in {took:?}", out.len());
 }
 
 /// The crasher, by name, through the door it came in at.

@@ -75,7 +75,16 @@ Then commit the minimized file to `tests/fixtures/broken/` under a name that
 says what is wrong with it, add it to `BROKEN` in `src/robustness.rs`, and fix
 the bug. A crasher that only lives in `fuzz/artifacts/` is one that comes back.
 
-`tests/fixtures/broken/encrypt-length-overruns-md5.pdf` is what that looks like:
+Slow units count too. libFuzzer writes `slow-unit-*` into the same directory for
+an input that takes conspicuously long, and a small file that takes seconds is a
+person watching Save As do nothing.
+`tests/fixtures/broken/xref-slow-lopdf-save.pdf` is one: 456 bytes that lopdf
+reads in under a millisecond and writes in three to seven seconds. Kept as a
+witness, with an `#[ignore]`d test in `src/robustness.rs` that pins "finishes at
+all".
+
+`tests/fixtures/broken/encrypt-length-overruns-md5.pdf` is what a crash looks
+like:
 one flipped bit in the AES-256 fixture, `/R 6` reading `/R 4`, which sends a
 256-bit `/Length` down the revision-4 key derivation and asks hayro-syntax 0.7.2
 for the first 32 bytes of a 16-byte MD5 digest. Found by a property rather than
