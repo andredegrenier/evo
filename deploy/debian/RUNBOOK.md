@@ -722,4 +722,8 @@ scanned page goes through OCR first, which is slow. `/api/status` reports
 `index.pending` and the OCR counters.
 
 **A document will not upload.** The limit is `max_upload_mb` (200 by default).
-Encrypted PDFs are not supported at all.
+A password-protected PDF is refused with a 422 and a sentence saying so: the
+server has no way to ask for the password, and indexing, OCR and page rendering
+all need one. Open it in the desktop app and add it to the library there — that
+decrypts it once, with consent, and the copy that lands in the library needs no
+password afterwards.

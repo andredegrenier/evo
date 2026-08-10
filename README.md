@@ -8,23 +8,34 @@ combined with the thing Preview never gives you: **exact control over your
 markups** — numeric X/Y/W/H editing, snapping with alignment guides, and
 one-click centering on the page.
 
-**Pure-Rust PDF pipeline.** No PDFium, no MuPDF, no native PDF library at all:
-rendering is [hayro](https://github.com/LaurenzV/hayro), editing/writing is
-[lopdf](https://github.com/J-F-Liu/lopdf), the UI is
-[egui](https://github.com/emilk/egui). (Scripting embeds Lua 5.4 and the
-optional built-in model runs on [llama.cpp](https://github.com/ggml-org/llama.cpp) —
-the only non-Rust components, both vendored.)
+**Pure-Rust PDF pipeline, with one seam.** Parsing, editing and writing are
+Rust and only Rust — [lopdf](https://github.com/J-F-Liu/lopdf) writes,
+[hayro](https://github.com/LaurenzV/hayro) parses and extracts text, the UI is
+[egui](https://github.com/emilk/egui). *Drawing* the page is the single job
+with two engines: **PDFium** (Chrome's rasterizer, BSD-3-Clause, bound
+dynamically at runtime and shipped in the release artifacts) draws by default,
+and hayro draws when it is absent — see [Rendering engine](#rendering-engine).
+(Scripting embeds Lua 5.4 and the optional built-in model runs on
+[llama.cpp](https://github.com/ggml-org/llama.cpp); with PDFium those are the
+only non-Rust components, and evo still builds and runs with a pure-Rust
+`--no-default-features` toolchain.)
 
 ## Features
 
 **Viewing**
-- Two rasterizers behind one seam: **PDFium** (Chrome's, the default when it
-  is installed) or the pure-Rust **hayro**, chosen in Preferences
+- Two rasterizers behind one seam: **PDFium** (Chrome's — the default, and it
+  ships inside every release download) or the pure-Rust **hayro**, chosen in
+  Preferences
 - Continuous vertical page layout with smooth pan and zoom (pinch, ⌘+/⌘−,
   fit-width, actual size)
 - Background rendering with progressive quality — stays responsive on large
   documents
 - Page thumbnails sidebar
+- **Password-protected PDFs**: a masked prompt on open, and the password is
+  then used for everything the document does — rendering, find, chat, export.
+  It is held for the session only and never written down. Adding one to the
+  library asks first, then decrypts it once (see
+  [Known limitations](#known-limitations))
 
 **Interface**
 - A **ribbon** of grouped controls — history, tools, style, zoom — laid out
@@ -38,7 +49,8 @@ the only non-Rust components, both vendored.)
 **Markup** — <kbd>V</kbd> select, <kbd>H</kbd> highlight, <kbd>T</kbd> text,
 <kbd>R</kbd> rectangle, <kbd>O</kbd> ellipse, <kbd>L</kbd> line,
 <kbd>A</kbd> arrow, <kbd>P</kbd> pen, <kbd>C</kbd> cloud, <kbd>Y</kbd> polygon,
-<kbd>⇧Y</kbd> polyline, <kbd>G</kbd> pan (or hold space)
+<kbd>⇧Y</kbd> polyline, <kbd>S</kbd> stamp, <kbd>⇧S</kbd> image stamp,
+<kbd>N</kbd> sequence, <kbd>G</kbd> pan (or hold space)
 - Every markup has 8 resize handles (shift = lock aspect), drag to move,
   arrow keys to nudge (shift = 10 pt)
 - **Polygons, polylines and revision clouds**: click each corner, then double
@@ -46,6 +58,20 @@ the only non-Rust components, both vendored.)
   Cloud tool drags one out around a rectangle. Corners are dragged
   individually, and the Inspector turns the scallops on, off, and up. They
   export as real `/Polygon` and `/PolyLine` annotations, clouds included
+- **Stamps**: the six standard ones (Approved, Not Approved, Draft, Final,
+  Confidential, For Comment) or any words you like, from a gallery popover.
+  `%date`, `%user` and `%filename` are filled in as the stamp is placed — the
+  text is fixed from then on, so a drawing means what it meant on the day
+- **Image stamps** (<kbd>⇧S</kbd>): pick a PNG (up to 2 MB — a logo, a scanned
+  signature) and drop it on the page; transparency survives the export as a
+  soft mask
+- **Sequences** (<kbd>N</kbd>): click to drop numbered callouts, 1, 2, 3…, with
+  an optional prefix. Picking the tool up again reads the page and carries on
+  from the highest number already on it
+- **Several at once**: shift-click or drag a marquee with the Select tool to
+  take a set, then move, nudge, restyle or delete them together — one undo step
+  for the lot. <kbd>⌘G</kbd> makes a selection into a group that is picked up
+  as a unit afterwards; <kbd>⇧⌘G</kbd> breaks it up again
 - **Snapping & guides**: dragged edges and centers snap to the page center,
   page edges, and other markups, with live alignment guides (hold ⌘ to
   disable)
@@ -221,7 +247,9 @@ cargo run -p xtask -- fidelity --bless            # re-record baseline + report
 ```
 
 Corpora are downloaded and cached, never committed. The numbers live in
-`xtask/fidelity-baseline.json`, one section per platform.
+`xtask/fidelity-baseline.json`, one section per platform. As of v0.6.0: 362
+documents, 371 pages, **median divergence 0.009** of 255, and 8 pages far
+enough apart to be worth a look — each one listed in the report.
 
 **How fast are they?** The timing harness builds a thousand-page document with
 real text and vector art and puts it through the paths a person waits on —
@@ -233,16 +261,51 @@ cargo run -p xtask -- perf worker     # just the render worker
 ```
 
 Release mode only, one test at a time, and the document is generated rather
-than committed. Set `EVO_PDFIUM_PATH` to measure both engines.
+than committed. Set `EVO_PDFIUM_PATH` to measure both engines. On a 1,000-page
+document, on an M-series Mac, in release:
+
+| | target | measured |
+|---|---|---|
+| Open the document | < 2 s | **1.1 ms** |
+| Draw a page after a jump (worst of four) | < 500 ms | **3.0 ms** PDFium · 11 ms hayro |
+| Draw the page you are on after a 24-page scroll burst | < 500 ms | **3.0 ms** PDFium · 11 ms hayro |
+| ⌘F, first page of matches | < 1 s | **7.6 ms** |
+| `evo serve`, render page 500 | < 1.5 s | **63 ms** PDFium · 19 ms hayro |
+| Peak texture memory over an end-to-end scroll | ≤ 384 MB | **382 MB** |
+
+**Does it hold up under abuse?** Thirteen [proptest](https://proptest-rs.github.io/proptest/)
+properties run on every push — bytes that are not a PDF, the sample truncated
+at every offset, bit-flipped and spliced so every xref offset moves, arbitrary
+JSON at the markup API — each asserting evo answers with an error rather than a
+panic. They found two bugs that lost work (a markup coordinate JSON can hold
+and an `f32` cannot, bricking a document's sidecar; a hayro panic on a damaged
+encryption dictionary taking the whole app with it), both fixed and both kept
+as regressions among the twelve deliberately-broken files in
+`tests/fixtures/broken/`. A [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)
+rig (`fuzz/`, five targets, weekly on nightly, never blocking) searches the
+same doors for longer: 7.7 million executions, no crash.
 
 ## Known limitations
 
 - **Preview fidelity**: with the pure-Rust hayro renderer, some documents
   (exotic blend modes, unusual fonts) may not display pixel-perfect — a
-  status-bar warning appears when that happens. Installing PDFium (above) is
-  the answer; either way this affects the on-screen preview only, since
-  exports reuse the original PDF bytes.
-- Encrypted / password-protected PDFs are not supported.
+  status-bar warning appears when that happens. PDFium, which release downloads
+  already carry and which draws by default, is the answer; either way this
+  affects the on-screen preview only, since exports reuse the original PDF
+  bytes.
+- **Password-protected PDFs open, but copies of them do not stay protected.**
+  Export, print and Save As write a decrypted PDF — evo says so before it
+  writes one. Adding one to the library decrypts it once, with your consent, so
+  that indexing, OCR and `evo serve` need no password afterwards; the original
+  file on disk is never touched. Re-encrypting on save is a v0.7 job. Uploading
+  an encrypted PDF to `evo serve` is refused (422) — add it from the desktop.
+- **Markup sidecars are version 2 as of v0.6.** evo 0.6 reads v1 files, but
+  evo 0.5 cannot read a v2 file containing polygons, polylines, clouds, stamps,
+  image stamps or groups. Only the sidecars of library documents are affected;
+  exported PDFs are readable by anything.
+- **The phone creates highlights and text boxes only.** Every other kind —
+  clouds, polygons, stamps, sequences — is drawn, moved and deleted on the
+  phone, but made on the desktop.
 - Text boxes export using the built-in Helvetica (standard-14) font; on screen
   they render with the bundled, metrically-compatible Liberation Sans.
 - OCR models (~10 MB, by [Robert Knight](https://github.com/robertknight/ocrs-models),
