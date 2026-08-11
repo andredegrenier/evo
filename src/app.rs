@@ -1526,6 +1526,13 @@ impl EvoApp {
                 }
                 ui.separator();
                 ui.checkbox(&mut self.show_thumbnails, "Show Thumbnails");
+                if ui
+                    .checkbox(&mut self.ribbon.customizing, "Customize Ribbon")
+                    .on_hover_text("Drag groups and buttons on the ribbon to rearrange them")
+                    .changed()
+                {
+                    ui.close();
+                }
                 ui.menu_button("Theme", |ui| {
                     for choice in ThemeChoice::ALL {
                         if ui

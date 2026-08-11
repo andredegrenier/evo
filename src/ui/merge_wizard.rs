@@ -350,6 +350,7 @@ fn row(
     let failed = entry.error.is_some();
 
     let inner = ui.horizontal(|ui| {
+        grip(ui, id, index);
         ui.label(format!("{}.", index + 1));
         ui.vertical(|ui| {
             ui.label(egui::RichText::new(entry.name()).strong());
@@ -383,9 +384,38 @@ fn row(
         });
     });
 
-    let resp = ui.interact(inner.response.rect, id, Sense::click_and_drag());
-    resp.dnd_set_drag_payload(DragFile(index));
-    resp
+    // Drop target only. Sensing clicks here would take them from the remove
+    // and reorder buttons above: this covers them and is registered after
+    // them, and egui gives a tie to whichever came last. Dragging the row is
+    // the grip's job. A drop target needs only `contains_pointer`, which hover
+    // sense provides.
+    ui.interact(inner.response.rect, id.with("drop"), Sense::hover())
+}
+
+/// The handle that drags a row, at its leading edge. Registered before the
+/// row's buttons and overlapping nothing, so it competes with neither.
+fn grip(ui: &mut egui::Ui, id: egui::Id, index: usize) {
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::new(10.0, 22.0), Sense::hover());
+    let handle = ui.interact(rect, id.with("grip"), Sense::click_and_drag());
+    handle.dnd_set_drag_payload(DragFile(index));
+
+    let painter = ui.painter();
+    let colour = if handle.hovered() {
+        ui.visuals().strong_text_color()
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    let centre = rect.center();
+    for row in -1..=1 {
+        for col in [-1.0f32, 1.0] {
+            let dot = egui::Rect::from_center_size(
+                egui::Pos2::new(centre.x + col * 2.0, centre.y + row as f32 * 5.0),
+                egui::Vec2::splat(2.0),
+            );
+            painter.rect_filled(dot, CornerRadius::same(1), colour);
+        }
+    }
+    handle.on_hover_text("Drag to reorder");
 }
 
 fn plural_pages(n: usize) -> String {
@@ -434,6 +464,118 @@ mod tests {
                 })
                 .collect(),
             dest: Some(Destination::NewDocument),
+        }
+    }
+
+    /// The tests below this one call `move_entry` and friends directly, which
+    /// is exactly why the row's buttons could be dead without anything
+    /// noticing. These drive the real widgets.
+    mod live {
+        use super::*;
+        use eframe::egui::{Pos2, Rect, Vec2};
+
+        const W: f32 = 700.0;
+        const H: f32 = 400.0;
+
+        struct Harness {
+            ctx: egui::Context,
+            st: MergeWizardState,
+            base: egui::RawInput,
+        }
+
+        impl Harness {
+            fn new(rows: &[&str]) -> Self {
+                Self {
+                    ctx: egui::Context::default(),
+                    st: state(rows),
+                    base: egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(W, H))),
+                        focused: true,
+                        ..Default::default()
+                    },
+                }
+            }
+
+            fn frame(&mut self, events: Vec<egui::Event>) {
+                let st = &mut self.st;
+                let _ = self.ctx.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..self.base.clone()
+                    },
+                    |ui| file_list(ui, st, Destination::NewDocument, None, 0),
+                );
+            }
+
+            fn click(&mut self, pos: Pos2) {
+                self.frame(vec![]);
+                self.frame(vec![egui::Event::PointerMoved(pos)]);
+                self.frame(vec![button(pos, true)]);
+                self.frame(vec![button(pos, false)]);
+            }
+        }
+
+        fn button(pos: Pos2, pressed: bool) -> egui::Event {
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }
+        }
+
+        /// Sweeps the first row looking for the ✕, rather than hard-coding
+        /// where it lands.
+        #[test]
+        fn clicking_the_remove_button_removes_that_row() {
+            let mut removed = false;
+            let mut x = W - 4.0;
+            while x > W / 2.0 && !removed {
+                let mut h = Harness::new(&["a.pdf", "b.pdf", "c.pdf"]);
+                h.click(Pos2::new(x, 30.0));
+                if h.st.entries.len() == 2 {
+                    removed = true;
+                    assert_eq!(names(&h.st), ["b.pdf", "c.pdf"], "the wrong row went");
+                }
+                x -= 3.0;
+            }
+            assert!(
+                removed,
+                "no position on the first row removed it; the row's buttons \
+                 are not receiving clicks"
+            );
+        }
+
+        #[test]
+        fn the_reorder_buttons_move_a_row() {
+            let mut moved = false;
+            let mut x = W - 4.0;
+            while x > W / 2.0 && !moved {
+                let mut h = Harness::new(&["a.pdf", "b.pdf"]);
+                h.click(Pos2::new(x, 30.0));
+                moved = names(&h.st) == ["b.pdf", "a.pdf"];
+                x -= 3.0;
+            }
+            assert!(
+                moved,
+                "nothing on the first row moved it down; the reorder buttons \
+                 are not receiving clicks"
+            );
+        }
+
+        #[test]
+        fn the_grip_still_starts_a_drag() {
+            let mut h = Harness::new(&["a.pdf", "b.pdf"]);
+            h.frame(vec![]);
+            // The grip is the first thing in the row, at its leading edge.
+            let pos = Pos2::new(14.0, 30.0);
+            h.frame(vec![egui::Event::PointerMoved(pos)]);
+            h.frame(vec![button(pos, true)]);
+            h.frame(vec![egui::Event::PointerMoved(pos + Vec2::new(0.0, 40.0))]);
+            assert!(
+                egui::DragAndDrop::payload::<DragFile>(&h.ctx).is_some(),
+                "dragging the grip must still pick the row up"
+            );
         }
     }
 
