@@ -297,7 +297,7 @@ same doors for longer: 7.7 million executions, no crash.
   Export, print and Save As write a decrypted PDF — evo says so before it
   writes one. Adding one to the library decrypts it once, with your consent, so
   that indexing, OCR and `evo serve` need no password afterwards; the original
-  file on disk is never touched. Re-encrypting on save is a v0.7 job. Uploading
+  file on disk is never touched. Re-encrypting on save is still to come. Uploading
   an encrypted PDF to `evo serve` is refused (422) — add it from the desktop.
 - **Markup sidecars are version 2 as of v0.6.** evo 0.6 reads v1 files, but
   evo 0.5 cannot read a v2 file containing polygons, polylines, clouds, stamps,

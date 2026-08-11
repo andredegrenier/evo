@@ -274,6 +274,14 @@ pub fn show(
 
     let mut edit: Option<Edit> = None;
 
+    // Registered FIRST, and it must stay first. egui breaks a hit-test tie by
+    // registration order, last one wins, so a widget covering the whole ribbon
+    // takes the click from every button on it unless the buttons come after.
+    // This backdrop exists only to host the right-click menu on empty space;
+    // moving it below the groups makes the entire ribbon inert.
+    let backdrop = ui.interact(full, ui.id().with("ribbon-bg"), Sense::click());
+    backdrop.context_menu(|ui| ribbon_menu(ui, cfg));
+
     if left_rect.width() > 0.0 {
         ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), |ui| {
             ui.horizontal_centered(|ui| {
@@ -296,10 +304,6 @@ pub fn show(
     if evo_button(ui, evo_rect, t).clicked() {
         action = Some(RibbonAction::GoToLibrary);
     }
-
-    // Right-clicking anywhere on the ribbon: visibility and customize mode.
-    let bg = ui.interact(full, ui.id().with("ribbon-bg"), Sense::click());
-    bg.context_menu(|ui| ribbon_menu(ui, cfg));
 
     if cfg.customizing {
         customize_banner(ui, full, cfg, t);
@@ -405,6 +409,9 @@ fn draw_group(
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = t.space_xs;
             ui.horizontal_centered(|ui| {
+                if cfg.customizing {
+                    group_grip(ui, id, index, t);
+                }
                 for slot in 0..cfg.groups[index].items.len() {
                     let addr = ItemAddr {
                         group: index,
@@ -419,19 +426,20 @@ fn draw_group(
         return;
     }
 
-    // In customize mode the whole card becomes a drag source and a drop
-    // target: for other groups (reorder) and for items (move between groups).
-    let resp = ui.interact(frame.response.rect, id, Sense::click_and_drag());
-    resp.dnd_set_drag_payload(DragGroup(index));
+    // Drop target only. A drop target needs nothing but `contains_pointer`, so
+    // hover sense is enough -- and it is what keeps this from swallowing the
+    // items' own drags, since it covers them and is registered after them.
+    // Dragging the group itself is the grip's job.
+    let zone = ui.interact(frame.response.rect, id.with("drop"), Sense::hover());
 
-    if let Some(from) = resp.dnd_release_payload::<DragGroup>() {
+    if let Some(from) = zone.dnd_release_payload::<DragGroup>() {
         if from.0 != index {
             *edit = Some(Edit::Group {
                 from: from.0,
                 to: index,
             });
         }
-    } else if let Some(from) = resp.dnd_release_payload::<ItemAddr>()
+    } else if let Some(from) = zone.dnd_release_payload::<ItemAddr>()
         && from.group != index
     {
         *edit = Some(Edit::Item {
@@ -440,14 +448,43 @@ fn draw_group(
         });
     }
 
-    let hovering = resp.dnd_hover_payload::<DragGroup>().is_some()
-        || resp.dnd_hover_payload::<ItemAddr>().is_some();
+    let hovering = zone.dnd_hover_payload::<DragGroup>().is_some()
+        || zone.dnd_hover_payload::<ItemAddr>().is_some();
     ui.painter().rect_stroke(
         frame.response.rect,
         t.radius(t.radius_m),
         egui::Stroke::new(if hovering { 2.0 } else { 1.0 }, t.accent),
         StrokeKind::Outside,
     );
+}
+
+/// The handle that drags a whole group, drawn at the card's leading edge.
+///
+/// A separate handle rather than the whole card: the card covers the buttons,
+/// and a widget covering others takes their input when it is registered after
+/// them. The grip overlaps nothing, so it can sense drags safely.
+fn group_grip(ui: &mut egui::Ui, id: egui::Id, index: usize, t: &Tokens) {
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::new(10.0, 22.0), Sense::hover());
+    let grip = ui.interact(rect, id.with("grip"), Sense::click_and_drag());
+    grip.dnd_set_drag_payload(DragGroup(index));
+
+    let painter = ui.painter();
+    let colour = if grip.hovered() {
+        t.accent
+    } else {
+        t.ink_muted
+    };
+    let centre = rect.center();
+    for row in -1..=1 {
+        for col in [-1.0f32, 1.0] {
+            let dot = egui::Rect::from_center_size(
+                egui::Pos2::new(centre.x + col * 2.0, centre.y + row as f32 * 5.0),
+                egui::Vec2::splat(2.0),
+            );
+            painter.rect_filled(dot, t.radius(1), colour);
+        }
+    }
+    grip.on_hover_text("Drag to move this group");
 }
 
 fn icon_button(text: &str) -> egui::Button<'static> {
@@ -740,6 +777,219 @@ pub fn from_egui(c: egui::Color32) -> crate::doc::annotation::Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eframe::egui::{Pos2, Rect, Vec2};
+
+    fn press(pos: Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// egui resolves a hit-test tie by registration order, last one wins. A
+    /// widget covering a region therefore has to be registered *before* the
+    /// controls inside it, or it takes all their clicks. The ribbon's backdrop
+    /// did exactly that and left every button on it dead, so pin the rule the
+    /// fix depends on.
+    mod overlap {
+        use super::*;
+
+        /// A small button plus a full-area background, in the given order.
+        /// Returns (button clicked, background clicked).
+        fn click_through(background_first: bool) -> (bool, bool) {
+            let ctx = egui::Context::default();
+            let base = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 100.0))),
+                focused: true,
+                ..Default::default()
+            };
+            let seen = std::cell::Cell::new((false, false));
+
+            let frame = |events: Vec<egui::Event>| {
+                let _ = ctx.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..base.clone()
+                    },
+                    |ui| {
+                        let full = ui.max_rect();
+                        let bg = |ui: &mut egui::Ui| {
+                            ui.interact(full, egui::Id::new("bg"), Sense::click())
+                        };
+                        let mut background = None;
+                        if background_first {
+                            background = Some(bg(ui));
+                        }
+                        let button = ui.button("hello");
+                        if !background_first {
+                            background = Some(bg(ui));
+                        }
+                        seen.set((button.clicked(), background.expect("built").clicked()));
+                    },
+                );
+            };
+
+            frame(vec![]);
+            let pos = Pos2::new(20.0, 10.0);
+            frame(vec![egui::Event::PointerMoved(pos)]);
+            frame(vec![press(pos, true)]);
+            frame(vec![press(pos, false)]);
+            seen.get()
+        }
+
+        #[test]
+        fn a_background_registered_last_steals_the_click() {
+            let (button, background) = click_through(false);
+            assert!(!button, "this is the bug: the button gets nothing");
+            assert!(background, "the covering widget took it instead");
+        }
+
+        #[test]
+        fn a_background_registered_first_leaves_the_button_alone() {
+            let (button, background) = click_through(true);
+            assert!(button, "the button must win once it is registered on top");
+            assert!(!background, "the covering widget must not also fire");
+        }
+    }
+
+    /// Drives the real ribbon with synthesized clicks.
+    mod live {
+        use super::*;
+        use crate::doc::Document;
+        use crate::render::engine::EnginePref;
+        use crate::state::DocState;
+
+        const RIBBON_H: f32 = 44.0;
+        const WIDTH: f32 = 900.0;
+
+        struct Harness {
+            ctx: egui::Context,
+            dc: DocState,
+            cfg: RibbonConfig,
+            keymap: Keymap,
+            tokens: Tokens,
+            base: egui::RawInput,
+        }
+
+        impl Harness {
+            fn new() -> Self {
+                let bytes = crate::script::docgen::text_to_pdf("Ribbon test", "body")
+                    .expect("generate a pdf");
+                let doc = Document::load_bytes(bytes, None).expect("load it");
+                let ctx = egui::Context::default();
+                Self {
+                    // Hayro explicitly: the tests must not need a PDFium
+                    // library to be present on the machine running them.
+                    dc: DocState::new(doc, &ctx, EnginePref::Hayro),
+                    cfg: RibbonConfig::default(),
+                    keymap: Keymap::default(),
+                    tokens: crate::ui::theme::preview::tokens(false, false),
+                    base: egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            Pos2::ZERO,
+                            Vec2::new(WIDTH, RIBBON_H),
+                        )),
+                        focused: true,
+                        ..Default::default()
+                    },
+                    ctx,
+                }
+            }
+
+            fn frame(&mut self, events: Vec<egui::Event>) -> Option<RibbonAction> {
+                let mut action = None;
+                let (dc, cfg, keymap, tokens) =
+                    (&mut self.dc, &mut self.cfg, &self.keymap, &self.tokens);
+                let _ = self.ctx.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..self.base.clone()
+                    },
+                    |ui| {
+                        action = show(ui, dc, cfg, keymap, tokens);
+                    },
+                );
+                action
+            }
+
+            /// Move, press, release at `pos`; returns the release frame's action.
+            fn click(&mut self, pos: Pos2) -> Option<RibbonAction> {
+                self.frame(vec![]);
+                self.frame(vec![egui::Event::PointerMoved(pos)]);
+                self.frame(vec![press(pos, true)]);
+                self.frame(vec![press(pos, false)])
+            }
+        }
+
+        #[test]
+        fn the_evo_button_goes_to_the_library() {
+            let mut h = Harness::new();
+            // It is centred by construction, so no need to hunt for it.
+            let centre = Pos2::new(WIDTH / 2.0, RIBBON_H / 2.0);
+            assert!(
+                matches!(h.click(centre), Some(RibbonAction::GoToLibrary)),
+                "clicking the centre of the ribbon must reach the evo button"
+            );
+        }
+
+        /// Sweeps across the ribbon looking for the pen tool rather than
+        /// hard-coding its position, so restyling the ribbon can't silently
+        /// turn this into a test of nothing.
+        #[test]
+        fn clicking_a_tool_button_selects_that_tool() {
+            let mut found = false;
+            let mut x = 2.0;
+            while x < WIDTH && !found {
+                let mut h = Harness::new();
+                h.dc.tool = ActiveTool::Select;
+                h.click(Pos2::new(x, RIBBON_H / 2.0));
+                found = h.dc.tool == ActiveTool::Pen;
+                x += 4.0;
+            }
+            assert!(
+                found,
+                "no position on the ribbon selected the pen tool — the tool \
+                 buttons are not receiving clicks"
+            );
+        }
+
+        /// In customize mode the group card covers its buttons. It must be a
+        /// drop target only, or dragging a single button just drags the whole
+        /// group instead.
+        #[test]
+        fn dragging_a_button_in_customize_mode_moves_the_button_not_the_group() {
+            let mut dragged_an_item = false;
+            let mut x = 2.0;
+            while x < WIDTH && !dragged_an_item {
+                let mut h = Harness::new();
+                h.cfg.customizing = true;
+                let pos = Pos2::new(x, RIBBON_H / 2.0);
+                h.frame(vec![]);
+                h.frame(vec![egui::Event::PointerMoved(pos)]);
+                h.frame(vec![press(pos, true)]);
+                // Past the drag threshold.
+                h.frame(vec![egui::Event::PointerMoved(pos + Vec2::new(30.0, 0.0))]);
+                dragged_an_item = egui::DragAndDrop::payload::<ItemAddr>(&h.ctx).is_some();
+                x += 4.0;
+            }
+            assert!(
+                dragged_an_item,
+                "no position on the ribbon picked up a single button; the \
+                 group card is swallowing item drags again"
+            );
+        }
+
+        #[test]
+        fn clicking_empty_ribbon_space_does_not_change_the_tool() {
+            let mut h = Harness::new();
+            h.dc.tool = ActiveTool::Select;
+            // The very top edge is above the group cards.
+            h.click(Pos2::new(WIDTH / 2.0, 1.0));
+            assert_eq!(h.dc.tool, ActiveTool::Select);
+        }
+    }
 
     #[test]
     fn the_default_layout_holds_every_item_exactly_once() {
